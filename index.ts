@@ -9,10 +9,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
- * Registers the pi-friend-memory extension.
+ * Pi-facing composition root for the pi-friend-memory extension.
  *
- * The initial skeleton exposes a command so the extension can be loaded and
- * exercised before memory storage and retrieval are implemented.
+ * Lifecycle hooks and memory tools will be registered here. The temporary
+ * command keeps package loading independently testable while storage and
+ * retrieval are still being designed.
  */
 export default function registerPiFriend(pi: ExtensionAPI): void {
   pi.registerCommand("hello", {
