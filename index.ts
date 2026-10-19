@@ -7,6 +7,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerHookLogging } from "./src/debug/hook-log.ts";
 
 /**
  * Pi-facing composition root for the pi-friend-memory extension.
@@ -16,6 +17,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  * retrieval are still being designed.
  */
 export default function registerPiFriend(pi: ExtensionAPI): void {
+  // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
+  registerHookLogging(pi);
+
   pi.registerCommand("hello", {
     description: "Show a greeting",
     handler: async (name, ctx) => {

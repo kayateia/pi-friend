@@ -4,8 +4,8 @@ A friendship-oriented memory extension for the Pi coding agent. The current
 skeleton provides a single `/hello` command to verify that the package and its
 extension entry point load successfully.
 
-Memory schema, storage, retrieval, and lifecycle hooks have not been implemented
-yet.
+Memory schema, storage, retrieval, and production lifecycle behavior have not
+been implemented yet.
 
 ## Package layout
 
@@ -49,3 +49,15 @@ pi install ./
 
 Pi reads the extension entry point from the `pi.extensions` field in
 `package.json`.
+
+## Inspect lifecycle hooks
+
+Set `PI_FRIEND_DEBUG_HOOKS=1` when starting Pi to print each structural
+lifecycle event and its shared extension context with `console.log`:
+
+```sh
+PI_FRIEND_DEBUG_HOOKS=1 pi --extension ./index.ts
+```
+
+The logger includes session, agent, turn, prompt, provider, tool, input, model,
+and UI boundaries. It intentionally omits token-level streaming updates.
