@@ -4,8 +4,8 @@ A friendship-oriented memory extension for the Pi coding agent. The current
 skeleton provides a single `/hello` command to verify that the package and its
 extension entry point load successfully.
 
-Memory schema, storage, retrieval, and production lifecycle behavior have not
-been implemented yet.
+The storage foundation is implemented. Node schema validation, memory tools,
+retrieval, and prompt injection are still upcoming.
 
 ## Package layout
 
@@ -13,8 +13,35 @@ Pi loads the extension from the root-level composition entry:
 
 ```text
 index.ts   # Pi-facing hooks, commands, and tool registrations
-src/       # Implementation modules added as memory behavior is built
+src/       # Configuration, storage, and implementation modules
 ```
+
+## Memory storage
+
+The default tree is:
+
+```text
+~/.pi/agent/pi-friend/memory/
+├── MEMORY.md
+├── nodes/
+│   └── superseded/
+├── staging/
+├── daily/
+├── access-log
+├── sweeps/
+├── index/
+└── recovery/
+```
+
+Override the root in `~/.pi/agent/pi-friend/pi-friend.yml`:
+
+```yaml
+memory:
+  root: ~/workspace/memory
+```
+
+A missing config uses the default. Malformed configuration is reported and
+does not fall back to another path. The tree is initialized on `session_start`.
 
 ## Development
 
@@ -28,6 +55,12 @@ Type-check the extension:
 
 ```sh
 npm run typecheck
+```
+
+Run the storage tests:
+
+```sh
+npm test
 ```
 
 Load the extension directly from the working tree:
