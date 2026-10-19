@@ -1,3 +1,11 @@
+/**
+ * pi-friend-memory
+ *
+ * @license
+ * Copyright 2026 Kayateia
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**

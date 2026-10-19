@@ -16,6 +16,18 @@ All needed files are located in this project directory and `~/.pi`. Don't go sea
 - Write comments anywhere they could assist in understanding, especially on methods/functions and classes.
 - Do not use `any` or other typecheck defeating primitives
 
+Use the following copyright header in new files:
+
+```
+/**
+ * pi-friend-memory
+ *
+ * @license
+ * Copyright 2026 Kayateia
+ * SPDX-License-Identifier: Apache-2.0
+ */
+```
+
 ## Source control
 
 Use git, rooted in the project directory (here). Commit early and often with conventional commits.
