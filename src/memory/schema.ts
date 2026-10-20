@@ -7,9 +7,13 @@
  */
 
 import * as path from "node:path";
-import { parseDocument, stringify } from "yaml";
+import { stringify } from "yaml";
 import type { MemoryFileKind } from "./paths.ts";
 import { MemoryPathError, validateSlug } from "./paths.ts";
+import {
+  parseYamlRecord,
+  splitMarkdownFrontMatter,
+} from "./frontmatter.ts";
 
 /** Approved semantic categories for memory nodes. */
 export const MEMORY_TYPES = [
@@ -89,9 +93,6 @@ export class MemorySchemaError extends Error {
   }
 }
 
-const FRONT_MATTER_PATTERN =
-  /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
-
 const TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -145,22 +146,17 @@ export function parseMemoryNode(
 ): ParsedMemoryNode {
   const validSlug = validateSlugForSchema(slug, "slug");
   const sections = splitFrontMatter(text, validSlug);
-  const document = parseDocument(sections.frontMatter, {
-    prettyErrors: true,
-    uniqueKeys: true,
-    version: "1.2",
-  });
-
-  if (document.errors.length > 0 || document.warnings.length > 0) {
-    const issue = document.errors[0] ?? document.warnings[0];
+  const parsedYaml = parseYamlRecord(sections.frontMatter);
+  if (!parsedYaml.ok) {
     throw new MemorySchemaError(
-      `Invalid YAML front matter for ${validSlug}: ${issue?.message ?? "unknown YAML error"}`,
-      { cause: issue },
+      `Invalid YAML front matter for ${validSlug}: ${parsedYaml.error}`,
     );
   }
 
-  const value: unknown = document.toJS({ maxAliasCount: 50 });
-  const frontMatter = validateMemoryNodeFrontMatter(value, validSlug);
+  const frontMatter = validateMemoryNodeFrontMatter(
+    parsedYaml.value,
+    validSlug,
+  );
   const node: ParsedMemoryNode = {
     slug: validSlug,
     frontMatter,
@@ -432,14 +428,14 @@ function splitFrontMatter(
   text: string,
   slug: string,
 ): { frontMatter: string; body: string } {
-  const match = FRONT_MATTER_PATTERN.exec(text);
-  if (!match) {
+  const sections = splitMarkdownFrontMatter(text);
+  if (!sections) {
     throw new MemorySchemaError(
       `Memory node ${slug} must start with strict YAML front matter.`,
     );
   }
 
-  const body = text.slice(match[0].length);
+  const body = sections.body;
   if (body.trim() === "") {
     throw new MemorySchemaError(`Memory node ${slug} must have a body.`, {
       field: "body",
@@ -447,7 +443,7 @@ function splitFrontMatter(
   }
 
   return {
-    frontMatter: match[1] ?? "",
+    frontMatter: sections.frontMatter,
     body,
   };
 }
