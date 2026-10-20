@@ -23,6 +23,7 @@ import {
   RecoveryRecordError,
 } from "./recovery.ts";
 import { buildMemoryDocumentIndex } from "./indexer.ts";
+import { searchHybrid } from "./hybrid-search.ts";
 import type { EmbeddingProvider } from "./embedding.ts";
 import type {
   MemorySearchOptions,
@@ -133,18 +134,26 @@ export class MemoryNodeService {
     const index = await buildMemoryDocumentIndex(this.repository.store);
     const mode = options.mode ?? "keyword";
     let results: MemorySearchResult[];
-    if (mode === "semantic") {
+    if (mode === "semantic" || mode === "hybrid") {
       if (!this.semantic) {
         throw new MemoryServiceError(
-          "Semantic search is unavailable because no embedding provider is configured.",
+          "Semantic and hybrid search are unavailable because no embedding provider is configured.",
         );
       }
-      results = await searchSemantically(
-        index,
-        options,
-        this.semantic.provider,
-        this.semantic.index,
-      );
+      results =
+        mode === "hybrid"
+          ? await searchHybrid(
+              index,
+              options,
+              this.semantic.provider,
+              this.semantic.index,
+            )
+          : await searchSemantically(
+              index,
+              options,
+              this.semantic.provider,
+              this.semantic.index,
+            );
     } else {
       results = searchIndexedFiles(index, options);
     }

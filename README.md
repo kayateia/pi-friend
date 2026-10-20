@@ -113,8 +113,8 @@ dimensions. Markdown is synchronized lazily on semantic search; unchanged
 content hashes do not make repeat embedding calls.
 
 The Markdown tree remains canonical. Deleting `index/vectors.sqlite` is always
-safe because the index can be rebuilt from source files. Hybrid ranking is not
-implemented yet.
+safe because the index can be rebuilt from source files. Hybrid mode combines
+keyword and semantic candidates using reciprocal-rank fusion.
 
 ## Inspect lifecycle hooks
 

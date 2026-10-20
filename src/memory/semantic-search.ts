@@ -34,6 +34,16 @@ export async function searchSemantically(
     throw new Error("Embedding provider returned no query vector.");
   }
 
+  return searchSemanticVectors(files, queryEmbedding, options, index);
+}
+
+/** Searches an already-synchronized index with a prepared query embedding. */
+export function searchSemanticVectors(
+  files: IndexedMarkdownFile[],
+  queryEmbedding: Float32Array,
+  options: MemorySearchOptions,
+  index: VectorIndex,
+): MemorySearchResult[] {
   const limit = clampLimit(options.limit);
   const hits = index.search(queryEmbedding, Math.min(100, limit * 4));
   const fileByPath = new Map(files.map((file) => [file.relativePath, file]));

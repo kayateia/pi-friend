@@ -464,6 +464,7 @@ export function registerMemoryTools(
       "Search every Markdown file in the memory tree using deterministic keyword ranking.",
       "Results distinguish memory nodes, staging candidates, and ordinary documents.",
       "Exact slug and title matches rank above tag and body matches.",
+      "Semantic mode uses embeddings; hybrid mode fuses keyword and semantic ranks.",
       "Use the optional type filter to restrict results to one memory-node category.",
     ].join("\n"),
     parameters: Type.Object({
@@ -471,7 +472,7 @@ export function registerMemoryTools(
         description: "Words, slug, title, tag, or phrase to find.",
       }),
       mode: Type.Optional(
-        StringEnum(["keyword", "semantic"] as const, {
+        StringEnum(["keyword", "semantic", "hybrid"] as const, {
           description: "Search mode. Default: keyword.",
         }),
       ),

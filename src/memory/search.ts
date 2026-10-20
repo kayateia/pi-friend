@@ -13,7 +13,7 @@ import type {
 } from "./schema.ts";
 
 /** Supported search modes for the initial implementation. */
-export type MemorySearchMode = "keyword" | "semantic";
+export type MemorySearchMode = "keyword" | "semantic" | "hybrid";
 
 /** Input for a keyword search over indexed Markdown files. */
 export interface MemorySearchOptions {
@@ -36,6 +36,10 @@ export interface MemorySearchResult {
   score: number;
   matchedFields: SearchField[];
   schemaError?: string;
+  /** One-based keyword rank when the result also appeared in keyword search. */
+  keywordRank?: number;
+  /** One-based semantic rank when vector search returned the result. */
+  semanticRank?: number;
 }
 
 /** Indexed fields that can contribute to a keyword result. */
