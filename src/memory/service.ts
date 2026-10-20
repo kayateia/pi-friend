@@ -12,6 +12,7 @@ import type {
   ParsedMemoryNode,
 } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
+import { appendAuditEntry } from "./audit.ts";
 import type {
   MemoryNodeArea,
   MemoryNodeRepository,
@@ -29,6 +30,20 @@ export interface MemoryAddInput {
   tags?: string[];
   links?: string[];
   source?: string;
+}
+
+/** Editable fields on an existing canonical memory node. */
+export interface MemoryEditInput {
+  title?: string;
+  type?: MemoryType;
+  body?: string;
+  speaker?: MemorySpeaker[];
+  agents?: string[];
+  emotionalFlavor?: string;
+  tags?: string[];
+  links?: string[];
+  source?: string;
+  reason?: string;
 }
 
 /** Error raised when a memory operation cannot preserve its invariants. */
@@ -100,6 +115,80 @@ export class MemoryNodeService {
 
       await this.repository.write(node);
       return node;
+    });
+  }
+
+  /** Updates editable node fields while preserving creation and usage state. */
+  async edit(
+    slug: string,
+    input: MemoryEditInput,
+  ): Promise<ParsedMemoryNode> {
+    return this.runSerialized(async () => {
+      const node = await this.repository.read(slug);
+      if (node === null) {
+        throw new MemoryServiceError(`No canonical memory found for "${slug}".`);
+      }
+
+      const hasEdit = [
+        input.title,
+        input.type,
+        input.body,
+        input.speaker,
+        input.agents,
+        input.emotionalFlavor,
+        input.tags,
+        input.links,
+        input.source,
+      ].some((value) => value !== undefined);
+      if (!hasEdit) {
+        throw new MemoryServiceError("No memory fields were supplied to edit.");
+      }
+
+      const timestamp = this.now().toISOString();
+      const frontMatter = {
+        ...node.frontMatter,
+        speaker: node.frontMatter.speaker.map((speaker) => ({ ...speaker })),
+        agents: [...node.frontMatter.agents],
+        tags: [...node.frontMatter.tags],
+        supersedes: [...node.frontMatter.supersedes],
+        links: [...node.frontMatter.links],
+      };
+
+      if (input.title !== undefined) frontMatter.title = input.title;
+      if (input.type !== undefined) frontMatter.type = input.type;
+      if (input.speaker !== undefined) frontMatter.speaker = input.speaker;
+      if (input.agents !== undefined) frontMatter.agents = input.agents;
+      if (input.emotionalFlavor !== undefined) {
+        frontMatter.emotional_flavor = input.emotionalFlavor;
+      }
+      if (input.tags !== undefined) frontMatter.tags = input.tags;
+      if (input.links !== undefined) frontMatter.links = input.links;
+      if (input.source !== undefined) frontMatter.source = input.source;
+      frontMatter.edited = timestamp;
+
+      let body = node.body;
+      if (input.body !== undefined) {
+        const updatedBody = input.body.trim();
+        if (updatedBody === "") {
+          throw new MemoryServiceError("Memory body must not be empty.");
+        }
+        body = `\n${updatedBody}\n`;
+      }
+      body = appendAuditEntry(
+        body,
+        timestamp,
+        input.reason
+          ? `memory_edit: ${input.reason}`
+          : "memory_edit",
+      );
+
+      const updated: ParsedMemoryNode = {
+        slug: node.slug,
+        frontMatter,
+        body,
+      };
+      await this.repository.write(updated);
+      return updated;
     });
   }
 

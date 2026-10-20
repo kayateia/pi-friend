@@ -88,6 +88,8 @@ Pi reads the extension entry point from the `pi.extensions` field in
 
 - `memory_add` creates a canonical active node, derives a unique slug unless one
   is supplied, and records speaker attribution.
+- `memory_edit` updates an existing node while preserving creation and usage
+  metadata and appending a dated audit entry.
 - `memory_read` reads a complete node from canonical, staging, or superseded
   storage.
 

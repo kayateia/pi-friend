@@ -21,12 +21,13 @@ const FIXED_TIME = new Date("2026-10-19T20:00:00.000Z");
 /** Creates a service backed by an isolated memory tree. */
 async function makeService(
   agentDir: string,
+  now: () => Date = () => FIXED_TIME,
 ): Promise<MemoryNodeService> {
   const repository = await MemoryNodeRepository.open({
     agentDir,
     homeDir: agentDir,
   });
-  return new MemoryNodeService(repository, () => FIXED_TIME);
+  return new MemoryNodeService(repository, now);
 }
 
 test("titles become safe lowercase slugs", () => {
@@ -115,6 +116,60 @@ test("schema validation remains active through the service", async () => {
           links: ["Invalid Slug"],
         }),
       /Invalid slug/,
+    );
+  });
+});
+
+test("edit preserves creation state and appends an audit entry", async () => {
+  await withTempDir(async (agentDir) => {
+    let currentTime = FIXED_TIME;
+    const service = await makeService(agentDir, () => currentTime);
+    const created = await service.add({
+      title: "Original Title",
+      type: "fact",
+      body: "Original body.",
+      speaker: [{ name: "Aisling", confident: true }],
+      tags: ["old"],
+    });
+
+    currentTime = new Date("2026-10-19T21:00:00.000Z");
+    const edited = await service.edit(created.slug, {
+      title: "Updated Title",
+      body: "Updated body.",
+      tags: ["new"],
+      reason: "Corrected the wording",
+    });
+
+    assert.equal(edited.frontMatter.created, FIXED_TIME.toISOString());
+    assert.equal(edited.frontMatter.edited, currentTime.toISOString());
+    assert.equal(edited.frontMatter.use_count, created.frontMatter.use_count);
+    assert.equal(edited.frontMatter.decay_weight, created.frontMatter.decay_weight);
+    assert.equal(edited.frontMatter.title, "Updated Title");
+    assert.deepEqual(edited.frontMatter.tags, ["new"]);
+    assert.match(edited.body, /Updated body\./);
+    assert.match(edited.body, /## audit/);
+    assert.match(edited.body, /memory_edit: Corrected the wording/);
+    assert.deepEqual(await service.read(created.slug), edited);
+  });
+});
+
+test("edit requires an existing node and at least one changed field", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await makeService(agentDir);
+    await assert.rejects(
+      () => service.edit("missing", { title: "Nope" }),
+      MemoryServiceError,
+    );
+
+    const node = await service.add({
+      title: "Existing",
+      type: "fact",
+      body: "Body.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    await assert.rejects(
+      () => service.edit(node.slug, { reason: "No actual change" }),
+      /No memory fields/,
     );
   });
 });

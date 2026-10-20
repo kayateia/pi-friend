@@ -22,6 +22,7 @@ import type {
 import type { MemoryNodeArea } from "../memory/repository.ts";
 import type {
   MemoryAddInput,
+  MemoryEditInput,
   MemoryNodeService,
 } from "../memory/service.ts";
 
@@ -45,6 +46,11 @@ interface MemoryAddDetails {
   path: string;
   type: MemoryType;
   status: MemoryStatus;
+}
+
+/** Structured details returned by a successful memory edit. */
+interface MemoryEditDetails extends MemoryAddDetails {
+  edited: string;
 }
 
 /**
@@ -165,6 +171,102 @@ export function registerMemoryTools(
           path: relativePath,
           type: node.frontMatter.type,
           status: node.frontMatter.status,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_edit",
+    label: "Memory Edit",
+    description: [
+      "Edit one canonical memory node by slug.",
+      "Preserves creation, usage, and decay metadata, sets an edited timestamp, and appends an audit entry.",
+      "Supply only the fields that should change; body replaces the existing body before the audit line is appended.",
+    ].join("\n"),
+    parameters: Type.Object({
+      slug: Type.String({
+        description: "Canonical memory slug to edit.",
+      }),
+      title: Type.Optional(
+        Type.String({
+          description: "Replacement short title.",
+        }),
+      ),
+      type: Type.Optional(
+        StringEnum(MEMORY_TYPES, {
+          description: "Replacement semantic category.",
+        }),
+      ),
+      body: Type.Optional(
+        Type.String({
+          description: "Replacement Markdown body, excluding the audit line.",
+        }),
+      ),
+      speaker: Type.Optional(
+        Type.Array(
+          Type.Object({
+            name: Type.String({
+              description: "Actual person or system member who supplied it.",
+            }),
+            confident: Type.Boolean({
+              description: "False when attribution was inferred.",
+            }),
+            note: Type.Optional(Type.String()),
+          }),
+        ),
+      ),
+      agents: Type.Optional(Type.Array(Type.String())),
+      emotional_flavor: Type.Optional(Type.String()),
+      tags: Type.Optional(Type.Array(Type.String())),
+      links: Type.Optional(Type.Array(Type.String())),
+      source: Type.Optional(Type.String()),
+      reason: Type.Optional(
+        Type.String({
+          description: "Short reason recorded in the audit trail.",
+        }),
+      ),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+    ): Promise<AgentToolResult<MemoryEditDetails>> {
+      const service = requireService(getService);
+      const input: MemoryEditInput = {
+        title: params.title,
+        type: params.type,
+        body: params.body,
+        speaker: params.speaker,
+        agents: params.agents,
+        emotionalFlavor: params.emotional_flavor,
+        tags: params.tags,
+        links: params.links,
+        source: params.source,
+        reason: params.reason,
+      };
+      const node = await service.edit(params.slug, input);
+      const relativePath = `nodes/${node.slug}.md`;
+      const edited = node.frontMatter.edited ?? "";
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Updated memory "${node.slug}" at ${edited}.\nPath: ${relativePath}`,
+          },
+        ],
+        details: {
+          slug: node.slug,
+          path: relativePath,
+          type: node.frontMatter.type,
+          status: node.frontMatter.status,
+          edited,
         },
       };
     },
