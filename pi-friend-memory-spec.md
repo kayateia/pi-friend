@@ -47,6 +47,10 @@ memory:
     mode: hybrid
     limit: 5
     max_chars: 6000
+    daily:
+      enabled: true
+      days: 2
+      max_chars: 3000
   auto_capture:
     enabled: true
     every_turns: 5
