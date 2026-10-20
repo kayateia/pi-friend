@@ -25,6 +25,10 @@ import type {
   MemoryEditInput,
   MemoryNodeService,
 } from "../memory/service.ts";
+import type {
+  MemorySearchOptions,
+  MemorySearchResult,
+} from "../memory/search.ts";
 
 const MEMORY_AREAS = [
   "canonical",
@@ -66,6 +70,14 @@ interface MemoryRestoreDetails {
   slug: string;
   recoveryId: string;
   alreadyRestored: boolean;
+}
+
+/** Structured details returned by a keyword search. */
+interface MemorySearchDetails {
+  query: string;
+  mode: "keyword";
+  count: number;
+  results: MemorySearchResult[];
 }
 
 /**
@@ -443,6 +455,107 @@ export function registerMemoryTools(
       };
     },
   });
+
+  pi.registerTool({
+    name: "memory_search",
+    label: "Memory Search",
+    description: [
+      "Search every Markdown file in the memory tree using deterministic keyword ranking.",
+      "Results distinguish memory nodes, staging candidates, and ordinary documents.",
+      "Exact slug and title matches rank above tag and body matches.",
+      "Use the optional type filter to restrict results to one memory-node category.",
+    ].join("\n"),
+    parameters: Type.Object({
+      query: Type.String({
+        description: "Words, slug, title, tag, or phrase to find.",
+      }),
+      mode: Type.Optional(
+        StringEnum(["keyword"] as const, {
+          description: "Search mode. Only keyword is available initially.",
+        }),
+      ),
+      type: Type.Optional(
+        StringEnum(MEMORY_TYPES, {
+          description: "Restrict results to one memory-node type.",
+        }),
+      ),
+      limit: Type.Optional(
+        Type.Number({
+          description: "Maximum results, from 1 to 25. Default: 5.",
+        }),
+      ),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+    ): Promise<AgentToolResult<MemorySearchDetails>> {
+      const service = requireService(getService);
+      const searchOptions: MemorySearchOptions = {
+        query: params.query,
+        mode: params.mode ?? "keyword",
+        type: params.type,
+        limit: params.limit,
+      };
+      const results = await service.search(searchOptions);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: formatSearchResults(params.query, results),
+          },
+        ],
+        details: {
+          query: params.query,
+          mode: "keyword",
+          count: results.length,
+          results,
+        },
+      };
+    },
+  });
+}
+
+/** Formats ranked search results for the model-facing tool response. */
+function formatSearchResults(
+  query: string,
+  results: MemorySearchResult[],
+): string {
+  if (results.length === 0) {
+    return `No memories found for "${query}".`;
+  }
+
+  const blocks = results.map((result, index) => {
+    const heading =
+      result.title ??
+      result.slug ??
+      result.relativePath;
+    const metadata = [
+      `kind: ${result.kind}`,
+      result.type === undefined ? "" : `type: ${result.type}`,
+      result.status === undefined ? "" : `status: ${result.status}`,
+      result.schemaError === undefined ? "" : "schema warning",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    return [
+      `### ${index + 1}. ${heading}`,
+      `Path: ${result.relativePath}`,
+      metadata,
+      result.snippet,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  });
+
+  return `Found ${results.length} result${results.length === 1 ? "" : "s"} for "${query}".\n\n${blocks.join("\n\n---\n\n")}`;
 }
 
 /** Resolves the service or reports that storage initialization failed. */

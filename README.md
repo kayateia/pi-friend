@@ -96,6 +96,8 @@ Pi reads the extension entry point from the `pi.extensions` field in
   overwriting newer canonical content.
 - `memory_read` reads a complete node from canonical, staging, or superseded
   storage.
+- `memory_search` performs ranked keyword search across nodes, staging
+  candidates, and plain Markdown documents.
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.

@@ -52,8 +52,10 @@ export interface AccessLogEntry {
   /** Defaults to the current UTC ISO timestamp. */
   timestamp?: string;
   source: "rag" | "tool";
-  slug: string;
+  slug?: string;
+  path?: string;
   tier?: string;
+  query?: string;
 }
 
 /** Error raised when a storage request violates the store contract. */

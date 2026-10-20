@@ -22,6 +22,12 @@ import {
   parseRecoveryRecord,
   RecoveryRecordError,
 } from "./recovery.ts";
+import { buildMemoryDocumentIndex } from "./indexer.ts";
+import type {
+  MemorySearchOptions,
+  MemorySearchResult,
+} from "./search.ts";
+import { searchIndexedFiles } from "./search.ts";
 import type {
   MemoryNodeArea,
   MemoryNodeRepository,
@@ -102,6 +108,30 @@ export class MemoryNodeService {
     area: MemoryNodeArea = "canonical",
   ): Promise<ParsedMemoryNode | null> {
     return this.repository.read(slug, area);
+  }
+
+  /** Searches all indexed Markdown files and records returned tool hits. */
+  async search(
+    options: MemorySearchOptions,
+  ): Promise<MemorySearchResult[]> {
+    if (options.query.trim() === "") {
+      throw new MemoryServiceError("Search query must not be empty.");
+    }
+
+    const index = await buildMemoryDocumentIndex(this.repository.store);
+    const results = searchIndexedFiles(index, options);
+
+    for (const result of results) {
+      await this.repository.store.appendAccessLog({
+        source: "tool",
+        ...(result.slug === undefined ? {} : { slug: result.slug }),
+        path: result.relativePath,
+        tier: "keyword",
+        query: options.query,
+      });
+    }
+
+    return results;
   }
 
   /** Creates one canonical active node with schema-compliant defaults. */
