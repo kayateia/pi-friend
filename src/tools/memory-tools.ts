@@ -81,6 +81,12 @@ interface MemoryPromoteDetails {
   path: string;
 }
 
+/** Structured details returned by a daily-log append. */
+interface MemoryLogDetails {
+  date: string;
+  path: string;
+}
+
 /** Structured details returned by a keyword search. */
 interface MemorySearchDetails {
   query: string;
@@ -348,6 +354,48 @@ export function registerMemoryTools(
             : { mergedInto: result.mergedInto }),
           path: `nodes/${result.node.slug}.md`,
         },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_log",
+    label: "Memory Log",
+    description: [
+      "Append a timestamped running note to today's daily log.",
+      "Daily logs are append-only and are also available to recent-context injection.",
+      "Use this for day-to-day notes and running context rather than durable single-topic memories.",
+    ].join("\n"),
+    parameters: Type.Object({
+      content: Type.String({
+        description: "Markdown note to append to today's daily log.",
+      }),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+      _signal,
+      _onUpdate,
+      ctx,
+    ): Promise<AgentToolResult<MemoryLogDetails>> {
+      const service = requireService(getService);
+      const result = await service.appendDailyNote(params.content, {
+        sessionId: ctx.sessionManager.getSessionId(),
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Appended daily-log entry: ${result.path}`,
+          },
+        ],
+        details: result,
       };
     },
   });

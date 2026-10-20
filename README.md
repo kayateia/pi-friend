@@ -43,6 +43,10 @@ memory:
     mode: hybrid
     limit: 5
     max_chars: 6000
+    daily:
+      enabled: true
+      days: 2
+      max_chars: 3000
   auto_capture:
     enabled: true
     every_turns: 5
@@ -66,6 +70,10 @@ attached to the previous user turn to preserve the current hot cache prefix.
 Position `0` targets the current turn. `keyword`, `semantic`, and `hybrid`
 retrieval modes are supported; semantic/hybrid failures fall back to keyword
 retrieval so prompt injection does not block the model call.
+
+Recent daily logs are injected as a separate observed-context section. The
+default reads today's and yesterday's logs, taking bounded tails from each
+append-only file.
 
 ## Development
 
@@ -123,6 +131,7 @@ Pi reads the extension entry point from the `pi.extensions` field in
   storage.
 - `memory_search` supports ranked keyword search and semantic search across
   nodes, staging candidates, and plain Markdown documents.
+- `memory_log` appends a timestamped running note to today's daily log.
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.

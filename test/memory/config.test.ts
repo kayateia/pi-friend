@@ -38,6 +38,11 @@ test("missing configuration uses the default memory root", async () => {
       mode: "hybrid",
       limit: 5,
       maxChars: 6_000,
+      daily: {
+        enabled: true,
+        days: 2,
+        maxChars: 3_000,
+      },
     });
     assert.deepEqual(config.autoCapture, {
       enabled: true,
@@ -130,6 +135,10 @@ test("injection settings are parsed and validated", () => {
       "    mode: keyword",
       "    limit: 3",
       "    max_chars: 1200",
+      "    daily:",
+      "      enabled: false",
+      "      days: 3",
+      "      max_chars: 700",
     ].join("\n"),
     configPath,
   );
@@ -140,6 +149,11 @@ test("injection settings are parsed and validated", () => {
     mode: "keyword",
     limit: 3,
     maxChars: 1_200,
+    daily: {
+      enabled: false,
+      days: 3,
+      maxChars: 700,
+    },
   });
 });
 
