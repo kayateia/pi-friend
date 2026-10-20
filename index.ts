@@ -16,6 +16,8 @@ import { defaultRagInjectionConfig } from "./src/memory/config.ts";
 import {
   defaultAutoCaptureConfig,
   type AutoCaptureConfig,
+  defaultSweepConfig,
+  type SweepConfig,
 } from "./src/memory/config.ts";
 import { serializeCaptureTranscript } from "./src/memory/capture.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
@@ -26,6 +28,7 @@ import {
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
 import { injectRagContext } from "./src/memory/rag-injection.ts";
+import { runDailySweep } from "./src/memory/sweep.ts";
 import type { SemanticSearchDependencies } from "./src/memory/service.ts";
 import { MemoryNodeService } from "./src/memory/service.ts";
 import { SqliteVectorIndex } from "./src/memory/vector-index.ts";
@@ -48,6 +51,8 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
   let settledRuns = 0;
   let captureCursor: string | undefined;
   let captureInFlight = false;
+  let sweepConfig: SweepConfig = defaultSweepConfig();
+  let sweepInFlight = false;
 
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
@@ -58,6 +63,7 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
       const repository = await MemoryNodeRepository.open();
       injectionConfig = repository.store.config.injection;
       autoCaptureConfig = repository.store.config.autoCapture;
+      sweepConfig = repository.store.config.sweep;
       semanticSearch = createSemanticSearch(repository, (message) => {
         if (ctx.hasUI) {
           ctx.ui.notify(message, "warning");
@@ -89,6 +95,8 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
     settledRuns = 0;
     captureCursor = undefined;
     captureInFlight = false;
+    sweepConfig = defaultSweepConfig();
+    sweepInFlight = false;
   });
 
   pi.on("before_agent_start", async (event) => {
@@ -202,6 +210,38 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
       debugRag("capture-failed", { error: describeError(error) });
     } finally {
       captureInFlight = false;
+    }
+  });
+
+  pi.on("agent_settled", async (event, ctx) => {
+    if (
+      event.aborted ||
+      sweepInFlight ||
+      !memoryService ||
+      !sweepConfig.enabled
+    ) {
+      return;
+    }
+    sweepInFlight = true;
+    try {
+      const result = await runDailySweep(
+        ctx,
+        memoryService,
+        sweepConfig,
+        {
+          reportWarning: (message) =>
+            reportCaptureWarning(ctx, message),
+        },
+      );
+      debugRag("sweep", { ...result });
+      if (result.error) {
+        reportCaptureWarning(
+          ctx,
+          `pi-friend daily sweep failed: ${result.error}`,
+        );
+      }
+    } finally {
+      sweepInFlight = false;
     }
   });
 

@@ -48,6 +48,10 @@ memory:
     every_turns: 5
     max_candidates: 3
     # model: openrouter/google/gemini-2.5-flash
+  sweep:
+    enabled: true
+    tombstone_grace_days: 30
+    # model: openrouter/google/gemini-2.5-flash
 ```
 
 A missing config uses the default. Malformed configuration is reported and
@@ -130,6 +134,22 @@ Candidates are written to `staging/` with `status: candidate` and are excluded
 from RAG. Exact duplicates of canonical or staged memories are skipped.
 Promotion uses the semantic index to detect near-duplicates, merging close
 matches while preserving links, tags, speakers, and audit history.
+
+## Daily sweep and decay
+
+The daily sweep runs at most once per local calendar day after an agent run
+settles. Before mutation it writes a full canonical preimage under
+`sweeps/preimages/`. It always advances `sweeps/state.json`, including failed
+attempts, and appends a dated decision log under `sweeps/`.
+
+The sweep model chooses `promote`, `merge`, or `drop` for staged candidates.
+Dropped candidates are archived under `sweeps/dropped/`, not hard-deleted.
+Decay is volume-relative: access resets a node to fresh, while new canonical
+memories since its last use lower its `decay_weight`.
+
+Superseded tombstones remain retained. The configured grace period is recorded
+for later hard-deletion work; this pass does not irreversibly remove
+tombstones.
 
 ## Semantic search
 

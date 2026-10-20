@@ -44,6 +44,10 @@ test("missing configuration uses the default memory root", async () => {
       everyTurns: 5,
       maxCandidates: 3,
     });
+    assert.deepEqual(config.sweep, {
+      enabled: true,
+      tombstoneGraceDays: 30,
+    });
   });
 });
 
@@ -186,4 +190,32 @@ test("invalid auto-capture settings fail closed", () => {
       MemoryConfigError,
     );
   }
+});
+
+test("sweep settings are parsed and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  sweep:",
+      "    enabled: false",
+      "    tombstone_grace_days: 14",
+      "    model: openrouter/google/gemini-2.5-flash",
+    ].join("\n"),
+    configPath,
+  );
+
+  assert.deepEqual(config.sweep, {
+    enabled: false,
+    tombstoneGraceDays: 14,
+    model: "openrouter/google/gemini-2.5-flash",
+  });
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        "memory:\n  sweep:\n    tombstone_grace_days: 0\n",
+        configPath,
+      ),
+    MemoryConfigError,
+  );
 });

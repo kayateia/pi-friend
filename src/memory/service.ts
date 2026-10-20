@@ -14,6 +14,7 @@ import type {
 } from "./schema.ts";
 import {
   parseMemoryNode,
+  serializeMemoryNode,
 } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { appendAuditEntry } from "./audit.ts";
@@ -35,6 +36,10 @@ import type { VectorIndex } from "./vector-index.ts";
 import { buildEmbeddingText } from "./vector-sync.ts";
 import { synchronizeVectorIndex } from "./vector-sync.ts";
 import { searchSemanticVectors } from "./semantic-search.ts";
+import {
+  computeDecayUpdates,
+  type DecayUpdate,
+} from "./decay.ts";
 import type {
   MemoryNodeArea,
   MemoryNodeRepository,
@@ -131,6 +136,21 @@ export class MemoryNodeService {
     this.semantic = semantic;
   }
 
+  /** Storage handle used by sweep artifact/state management. */
+  get store() {
+    return this.repository.store;
+  }
+
+  /** Lists staging candidates for sweep decisions. */
+  async listStagingCandidates(): Promise<ParsedMemoryNode[]> {
+    return this.repository.list("staging");
+  }
+
+  /** Lists canonical nodes for sweep decisions and decay. */
+  async listCanonicalNodes(): Promise<ParsedMemoryNode[]> {
+    return this.repository.list("canonical");
+  }
+
   /** Reads a node from one lifecycle area. */
   async read(
     slug: string,
@@ -185,6 +205,28 @@ export class MemoryNodeService {
     }
 
     return results;
+  }
+
+  /** Recomputes volume-relative decay metadata for canonical nodes. */
+  async recomputeDecay(): Promise<DecayUpdate[]> {
+    return this.runSerialized(async () => {
+      const nodes = await this.repository.list("canonical");
+      const accessLog =
+        (await this.repository.store.readTextFileIfExists("access-log")) ?? "";
+      const updates = computeDecayUpdates(nodes, accessLog);
+      const bySlug = new Map(nodes.map((node) => [node.slug, node]));
+
+      for (const update of updates) {
+        const node = bySlug.get(update.slug);
+        if (!node) continue;
+        node.frontMatter.use_count = update.useCount;
+        node.frontMatter.last_used = update.lastUsed;
+        node.frontMatter.decay_weight = update.decayWeight;
+        await this.repository.write(node, "canonical");
+      }
+
+      return updates;
+    });
   }
 
   /** Creates one canonical active node with schema-compliant defaults. */
@@ -279,7 +321,10 @@ export class MemoryNodeService {
    * Promotes one staging candidate, merging into a semantically near-duplicate
    * canonical node when one is found.
    */
-  async promoteCandidate(slug: string): Promise<MemoryPromotionResult> {
+  async promoteCandidate(
+    slug: string,
+    preferredTarget?: string,
+  ): Promise<MemoryPromotionResult> {
     return this.runSerialized(async () => {
       const candidate = await this.repository.read(slug, "staging");
       if (candidate === null) {
@@ -289,7 +334,14 @@ export class MemoryNodeService {
       }
 
       const now = this.now().toISOString();
-      let target = await this.repository.read(candidate.slug, "canonical");
+      let target = preferredTarget
+        ? await this.repository.read(preferredTarget, "canonical")
+        : await this.repository.read(candidate.slug, "canonical");
+      if (preferredTarget && target === null) {
+        throw new MemoryServiceError(
+          `Preferred merge target "${preferredTarget}" does not exist.`,
+        );
+      }
       if (target === null && this.semantic) {
         target = await this.findPromotionDuplicate(candidate);
       }
@@ -320,6 +372,28 @@ export class MemoryNodeService {
       await this.repository.write(promoted, "canonical");
       await this.repository.remove(candidate.slug, "staging");
       return { node: promoted, merged: false };
+    });
+  }
+
+  /** Archives one dropped staging candidate under the sweep artifacts. */
+  async archiveCandidate(
+    slug: string,
+    sweepId: string,
+  ): Promise<string> {
+    return this.runSerialized(async () => {
+      const candidate = await this.repository.read(slug, "staging");
+      if (candidate === null) {
+        throw new MemoryServiceError(
+          `No staging candidate found for "${slug}".`,
+        );
+      }
+      const path = `sweeps/dropped/${sweepId}/${slug}.md`;
+      await this.repository.store.writeTextFile(
+        path,
+        serializeMemoryNode(candidate),
+      );
+      await this.repository.remove(slug, "staging");
+      return path;
     });
   }
 

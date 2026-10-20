@@ -32,6 +32,14 @@ export interface AutoCaptureConfig {
   model?: string;
 }
 
+/** Configuration for the daily consolidation pass. */
+export interface SweepConfig {
+  enabled: boolean;
+  /** Optional provider/model-id override for candidate decisions. */
+  model?: string;
+  tombstoneGraceDays: number;
+}
+
 /** Resolved memory configuration used by the storage layer. */
 export interface MemoryConfig {
   /** Absolute path to the user's pi-friend.yml file. */
@@ -40,6 +48,7 @@ export interface MemoryConfig {
   root: string;
   injection: RagInjectionConfig;
   autoCapture: AutoCaptureConfig;
+  sweep: SweepConfig;
 }
 
 /** Inputs that can be overridden by tests or alternate Pi environments. */
@@ -75,6 +84,14 @@ export function defaultAutoCaptureConfig(): AutoCaptureConfig {
     enabled: true,
     everyTurns: 5,
     maxCandidates: 3,
+  };
+}
+
+/** Returns the default daily-sweep policy. */
+export function defaultSweepConfig(): SweepConfig {
+  return {
+    enabled: true,
+    tombstoneGraceDays: 30,
   };
 }
 
@@ -129,6 +146,7 @@ export function parseMemoryConfig(
       root: defaultRoot,
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
+      sweep: defaultSweepConfig(),
     };
   }
 
@@ -160,6 +178,7 @@ export function parseMemoryConfig(
     root,
     injection: parseRagInjection(memoryConfig.injection, configPath),
     autoCapture: parseAutoCapture(memoryConfig.auto_capture, configPath),
+    sweep: parseSweep(memoryConfig.sweep, configPath),
   };
 }
 
@@ -185,6 +204,7 @@ export async function loadMemoryConfig(
         root: path.join(configDir, "memory"),
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
+        sweep: defaultSweepConfig(),
       };
     }
 
@@ -335,6 +355,54 @@ function parseAutoCapture(
       );
     }
     config.model = value.model.trim();
+  }
+  return config;
+}
+
+/** Parses optional daily-sweep settings. */
+function parseSweep(value: unknown, configPath: string): SweepConfig {
+  const config = defaultSweepConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.sweep must be a YAML object.`,
+    );
+  }
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled !== "boolean") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.sweep.enabled must be a boolean.`,
+      );
+    }
+    config.enabled = value.enabled;
+  }
+  if (value.model !== undefined) {
+    if (
+      typeof value.model !== "string" ||
+      !value.model.includes("/") ||
+      value.model.trim().startsWith("/") ||
+      value.model.trim().endsWith("/")
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.sweep.model must be a provider/model-id string.`,
+      );
+    }
+    config.model = value.model.trim();
+  }
+  if (value.tombstone_grace_days !== undefined) {
+    if (
+      typeof value.tombstone_grace_days !== "number" ||
+      !Number.isInteger(value.tombstone_grace_days) ||
+      value.tombstone_grace_days < 1 ||
+      value.tombstone_grace_days > 3650
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.sweep.tombstone_grace_days must be an integer from 1 to 3650.`,
+      );
+    }
+    config.tombstoneGraceDays = value.tombstone_grace_days;
   }
   return config;
 }

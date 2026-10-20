@@ -145,6 +145,14 @@ export class MemoryStore {
     await this.replaceFile(recoveryRelativePath(recoveryId), content);
   }
 
+  /** Atomically writes one UTF-8 JSON auxiliary file. */
+  async writeJsonFile(relativePath: string, content: string): Promise<void> {
+    if (!relativePath.endsWith(".json")) {
+      throw new MemoryStoreError("JSON auxiliary files must use .json.");
+    }
+    await this.replaceFile(relativePath, content);
+  }
+
   /** Reads a canonical node by validated slug. */
   async readNodeText(slug: string): Promise<string> {
     return this.readTextFile(nodeRelativePath(slug));
