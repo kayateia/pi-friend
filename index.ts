@@ -18,6 +18,8 @@ import {
   type AutoCaptureConfig,
   defaultSweepConfig,
   type SweepConfig,
+  defaultDreamingConfig,
+  type DreamingConfig,
 } from "./src/memory/config.ts";
 import { serializeCaptureTranscript } from "./src/memory/capture.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
@@ -52,6 +54,7 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
   let captureCursor: string | undefined;
   let captureInFlight = false;
   let sweepConfig: SweepConfig = defaultSweepConfig();
+  let dreamingConfig: DreamingConfig = defaultDreamingConfig();
   let sweepInFlight = false;
 
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
@@ -64,6 +67,7 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
       injectionConfig = repository.store.config.injection;
       autoCaptureConfig = repository.store.config.autoCapture;
       sweepConfig = repository.store.config.sweep;
+      dreamingConfig = repository.store.config.dreaming;
       semanticSearch = createSemanticSearch(repository, (message) => {
         if (ctx.hasUI) {
           ctx.ui.notify(message, "warning");
@@ -96,6 +100,7 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
     captureCursor = undefined;
     captureInFlight = false;
     sweepConfig = defaultSweepConfig();
+    dreamingConfig = defaultDreamingConfig();
     sweepInFlight = false;
   });
 
@@ -229,6 +234,7 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
         memoryService,
         sweepConfig,
         {
+          dreaming: dreamingConfig,
           reportWarning: (message) =>
             reportCaptureWarning(ctx, message),
         },

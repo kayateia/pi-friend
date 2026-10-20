@@ -52,6 +52,10 @@ memory:
     enabled: true
     tombstone_grace_days: 30
     # model: openrouter/google/gemini-2.5-flash
+  dreaming:
+    enabled: true
+    max_nodes: 4
+    # model: openrouter/google/gemini-2.5-flash
 ```
 
 A missing config uses the default. Malformed configuration is reported and
@@ -147,9 +151,20 @@ Dropped candidates are archived under `sweeps/dropped/`, not hard-deleted.
 Decay is volume-relative: access resets a node to fresh, while new canonical
 memories since its last use lower its `decay_weight`.
 
-Superseded tombstones remain retained. The configured grace period is recorded
-for later hard-deletion work; this pass does not irreversibly remove
-tombstones.
+Superseded tombstones older than `tombstone_grace_days` are archived under
+`sweeps/archived/<run-id>/`. They remain searchable and are not irreversibly
+deleted.
+
+## Dreaming
+
+After a successful sweep, a separate model pass receives an
+adjacency-weighted shortlist and is asked to choose what it wants to sit with
+before writing one short first-person narrative.
+
+Dreams are stored as canonical nodes with `type: dream`, explicit source-node
+links, and `emotional_flavor: dreamlike`. They are permanently excluded from
+default RAG and can never be promoted as factual memories by automated
+processes.
 
 ## Semantic search
 

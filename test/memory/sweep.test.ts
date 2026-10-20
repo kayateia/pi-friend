@@ -173,6 +173,78 @@ test("sweep failure still advances state and writes a failure log", async () => 
   });
 });
 
+test("sweep archives expired tombstones and creates one dream", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(
+      repository,
+      () => new Date("2026-01-01T05:00:00.000Z"),
+    );
+    const first = await service.add({
+      title: "First Dream Source",
+      type: "fact",
+      body: "First source for dreaming.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const second = await service.add({
+      title: "Second Dream Source",
+      type: "event",
+      body: "Second source for dreaming.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const deleted = await service.add({
+      title: "Expired Tombstone",
+      type: "fact",
+      body: "This tombstone is old.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    await service.delete(deleted.slug);
+
+    const result = await runDailySweep(
+      undefined,
+      service,
+      { enabled: true, tombstoneGraceDays: 30 },
+      {
+        now: new Date("2026-02-15T05:00:00.000Z"),
+        dreaming: { enabled: true, maxNodes: 3 },
+        dream: async () => ({
+          title: "Sweep Dream",
+          narrative: "I held the two sources together.",
+          nodeSlugs: [first.slug, second.slug],
+          agents: ["test-model"],
+        }),
+      },
+    );
+
+    assert.equal(result.archivedTombstones, 1);
+    assert.equal(
+      await service.read(deleted.slug, "superseded"),
+      null,
+    );
+    assert.ok(
+      await readFile(
+        path.join(
+          repository.store.paths.sweeps,
+          "archived",
+          result.runId ?? "",
+          `${deleted.slug}.md`,
+        ),
+        "utf8",
+      ),
+    );
+    assert.ok(result.dreamSlug);
+    const dream = await service.read(result.dreamSlug);
+    assert.equal(dream?.frontMatter.type, "dream");
+    assert.deepEqual(dream?.frontMatter.links, [
+      first.slug,
+      second.slug,
+    ]);
+  });
+});
+
 /** Builds a minimal sweep prompt node fixture. */
 function makeCandidate(slug: string) {
   return {

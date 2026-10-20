@@ -9,12 +9,20 @@
 import { cp, mkdir, readdir } from "node:fs/promises";
 import * as path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { SweepConfig } from "./config.ts";
+import type {
+  DreamingConfig,
+  SweepConfig,
+} from "./config.ts";
 import type { MemoryNodeService } from "./service.ts";
 import {
   runSweepModel,
   type SweepDecision,
 } from "./sweep-model.ts";
+import {
+  runDreamModel,
+  selectDreamShortlist,
+  type DreamDraft,
+} from "./dream.ts";
 
 interface SweepState {
   version: 1;
@@ -34,7 +42,10 @@ export interface SweepResult {
   merged: number;
   dropped: number;
   decayUpdates: number;
+  archivedTombstones: number;
   preimage?: string;
+  dreamSlug?: string;
+  dreamError?: string;
   error?: string;
 }
 
@@ -51,10 +62,16 @@ export async function runDailySweep(
   options: {
     force?: boolean;
     now?: Date;
+    dreaming?: DreamingConfig;
+    random?: () => number;
     decide?: (
       candidates: Awaited<ReturnType<MemoryNodeService["listStagingCandidates"]>>,
       canonical: Awaited<ReturnType<MemoryNodeService["listCanonicalNodes"]>>,
     ) => Promise<SweepDecision[]>;
+    dream?: (
+      shortlist: Awaited<ReturnType<MemoryNodeService["listCanonicalNodes"]>>,
+      maxNodes: number,
+    ) => Promise<DreamDraft>;
     reportWarning?: (message: string) => void;
   } = {},
 ): Promise<SweepResult> {
@@ -80,6 +97,9 @@ export async function runDailySweep(
   let merged = 0;
   let dropped = 0;
   let decayUpdates = 0;
+  let archivedTombstones = 0;
+  let dreamSlug: string | undefined;
+  let dreamError: string | undefined;
 
   try {
     const candidates = await service.listStagingCandidates();
@@ -129,7 +149,52 @@ export async function runDailySweep(
       }
     }
 
+    const tombstoneResult = await service.archiveExpiredTombstones(
+      config.tombstoneGraceDays,
+      runId,
+      now,
+    );
+    archivedTombstones = tombstoneResult.archived.length;
     decayUpdates = (await service.recomputeDecay()).length;
+
+    if (options.dreaming?.enabled) {
+      try {
+        const eligible = (await service.listCanonicalNodes()).filter(
+          (node) =>
+            node.frontMatter.status === "active" &&
+            node.frontMatter.type !== "dream",
+        );
+        if (eligible.length >= 2) {
+          const shortlist = selectDreamShortlist(
+            eligible,
+            options.dreaming.maxNodes,
+            options.random,
+          );
+          const draft = options.dream
+            ? await options.dream(shortlist, options.dreaming.maxNodes)
+            : ctx
+              ? await runDreamModel(
+                  ctx,
+                  options.dreaming.model,
+                  shortlist,
+                  options.dreaming.maxNodes,
+                  options.reportWarning ?? (() => {}),
+                )
+              : (() => {
+                  throw new Error("Dream model context is unavailable.");
+                })();
+          const dream = await service.createDream({
+            ...draft,
+            source: `sweep:${runId}`,
+          });
+          dreamSlug = dream.slug;
+        }
+      } catch (error) {
+        dreamError =
+          error instanceof Error ? error.message : String(error);
+      }
+    }
+
     await appendSweepLog(service, runId, attemptedAt, {
       decisions,
       promoted,
@@ -137,6 +202,9 @@ export async function runDailySweep(
       dropped,
       decayUpdates,
       preimage,
+      archivedTombstones,
+      dreamSlug,
+      dreamError,
     });
     await writeSweepState(service, {
       version: 1,
@@ -153,7 +221,10 @@ export async function runDailySweep(
       merged,
       dropped,
       decayUpdates,
+      archivedTombstones,
       preimage,
+      ...(dreamSlug === undefined ? {} : { dreamSlug }),
+      ...(dreamError === undefined ? {} : { dreamError }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -164,6 +235,9 @@ export async function runDailySweep(
       dropped,
       decayUpdates,
       preimage,
+      archivedTombstones,
+      dreamSlug,
+      dreamError,
       error: message,
     }).catch(() => {});
     await writeSweepState(service, {
@@ -181,7 +255,10 @@ export async function runDailySweep(
       merged,
       dropped,
       decayUpdates,
+      archivedTombstones,
       ...(preimage === undefined ? {} : { preimage }),
+      ...(dreamSlug === undefined ? {} : { dreamSlug }),
+      ...(dreamError === undefined ? {} : { dreamError }),
       error: message,
     };
   }
@@ -235,6 +312,9 @@ async function appendSweepLog(
     merged: number;
     dropped: number;
     decayUpdates: number;
+    archivedTombstones: number;
+    dreamSlug?: string;
+    dreamError?: string;
     preimage?: string;
     error?: string;
   },
@@ -252,6 +332,9 @@ async function appendSweepLog(
     `- Merged: ${summary.merged}`,
     `- Dropped/archived: ${summary.dropped}`,
     `- Decay updates: ${summary.decayUpdates}`,
+    `- Expired tombstones archived: ${summary.archivedTombstones}`,
+    `- Dream: ${summary.dreamSlug ?? "none"}`,
+    ...(summary.dreamError ? [`- Dream error: ${summary.dreamError}`] : []),
     ...(summary.error ? [`- Error: ${summary.error}`] : []),
     "",
     "### Candidate decisions",
@@ -323,6 +406,7 @@ function emptyResult(ran: boolean): SweepResult {
     merged: 0,
     dropped: 0,
     decayUpdates: 0,
+    archivedTombstones: 0,
   };
 }
 

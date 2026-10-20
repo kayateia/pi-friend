@@ -48,6 +48,10 @@ test("missing configuration uses the default memory root", async () => {
       enabled: true,
       tombstoneGraceDays: 30,
     });
+    assert.deepEqual(config.dreaming, {
+      enabled: true,
+      maxNodes: 4,
+    });
   });
 });
 
@@ -214,6 +218,34 @@ test("sweep settings are parsed and validated", () => {
     () =>
       parseMemoryConfig(
         "memory:\n  sweep:\n    tombstone_grace_days: 0\n",
+        configPath,
+      ),
+    MemoryConfigError,
+  );
+});
+
+test("dreaming settings are parsed and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  dreaming:",
+      "    enabled: false",
+      "    max_nodes: 3",
+      "    model: openrouter/google/gemini-2.5-flash",
+    ].join("\n"),
+    configPath,
+  );
+
+  assert.deepEqual(config.dreaming, {
+    enabled: false,
+    maxNodes: 3,
+    model: "openrouter/google/gemini-2.5-flash",
+  });
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        "memory:\n  dreaming:\n    max_nodes: 1\n",
         configPath,
       ),
     MemoryConfigError,

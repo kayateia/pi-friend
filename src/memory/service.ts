@@ -100,6 +100,15 @@ export interface MemoryPromotionResult {
   mergedInto?: string;
 }
 
+/** Input for creating one post-sweep dream node. */
+export interface MemoryDreamInput {
+  title: string;
+  narrative: string;
+  nodeSlugs: string[];
+  agents?: string[];
+  source?: string;
+}
+
 /** Optional semantic-search dependencies, available only when configured. */
 export interface SemanticSearchDependencies {
   provider: EmbeddingProvider;
@@ -149,6 +158,130 @@ export class MemoryNodeService {
   /** Lists canonical nodes for sweep decisions and decay. */
   async listCanonicalNodes(): Promise<ParsedMemoryNode[]> {
     return this.repository.list("canonical");
+  }
+
+  /** Archives superseded tombstones whose grace period has elapsed. */
+  async archiveExpiredTombstones(
+    graceDays: number,
+    runId: string,
+    now: Date = new Date(),
+  ): Promise<{
+    archived: Array<{ slug: string; path: string }>;
+    retained: number;
+  }> {
+    return this.runSerialized(async () => {
+      const tombstones = await this.repository.list("superseded");
+      const archived: Array<{ slug: string; path: string }> = [];
+      let retained = 0;
+      const threshold = now.getTime() - graceDays * 24 * 60 * 60 * 1_000;
+
+      for (const node of tombstones) {
+        const timestamp =
+          node.frontMatter.edited ?? node.frontMatter.created;
+        const parsed = Date.parse(timestamp);
+        if (!Number.isFinite(parsed) || parsed > threshold) {
+          retained += 1;
+          continue;
+        }
+        const path = `sweeps/archived/${runId}/${node.slug}.md`;
+        await this.repository.store.writeTextFile(
+          path,
+          serializeMemoryNode(node),
+        );
+        await this.repository.remove(node.slug, "superseded");
+        archived.push({ slug: node.slug, path });
+      }
+      return { archived, retained };
+    });
+  }
+
+  /** Creates a dream node linked to its canonical source memories. */
+  async createDream(input: MemoryDreamInput): Promise<ParsedMemoryNode> {
+    return this.runSerialized(async () => {
+      const slugs = [...new Set(input.nodeSlugs)];
+      if (slugs.length < 2) {
+        throw new MemoryServiceError(
+          "A dream requires at least two source nodes.",
+        );
+      }
+      const sources: ParsedMemoryNode[] = [];
+      for (const slug of slugs) {
+        const node = await this.repository.read(slug, "canonical");
+        if (
+          node === null ||
+          node.frontMatter.status !== "active" ||
+          node.frontMatter.type === "dream"
+        ) {
+          throw new MemoryServiceError(
+            `Dream source "${slug}" is not an active canonical memory.`,
+          );
+        }
+        sources.push(node);
+      }
+
+      const narrative = input.narrative.trim();
+      if (narrative === "") {
+        throw new MemoryServiceError("Dream narrative must not be empty.");
+      }
+      const dreamSlug = await this.allocateSlug({
+        title: input.title,
+        type: "dream",
+        body: narrative,
+        speaker: [],
+      });
+      const timestamp = this.now().toISOString();
+      const sourceLines = sources.map(
+        (node) =>
+          `- ${node.frontMatter.title} (nodes/${node.slug}.md)`,
+      );
+      const seeAlso = sources.map((node) => {
+        const keywords =
+          node.frontMatter.tags.slice(0, 5).join(", ") ||
+          node.frontMatter.emotional_flavor ||
+          "memory";
+        return `- ${node.frontMatter.title} — ${keywords}`;
+      });
+      const body = [
+        narrative,
+        "Dream synthesized from:",
+        ...sourceLines,
+        "",
+        "see also:",
+        ...seeAlso,
+      ].join("\n");
+
+      const dream: ParsedMemoryNode = {
+        slug: dreamSlug,
+        body: `\n${body}\n`,
+        frontMatter: {
+          title: input.title.trim(),
+          type: "dream",
+          speaker: [
+            {
+              name: "pi-friend",
+              confident: false,
+              note: "synthesized dream",
+            },
+          ],
+          agents: input.agents ?? [],
+          created: timestamp,
+          last_used: timestamp,
+          use_count: 0,
+          decay_weight: 1,
+          status: "active",
+          emotional_flavor: "dreamlike",
+          tags: ["dream"],
+          supersedes: [],
+          superseded_by: "",
+          links: slugs,
+          source:
+            input.source ??
+            `dream; sources: ${slugs.join(", ")}`,
+        },
+      };
+      await this.repository.write(dream, "canonical");
+      return dream;
+    });
   }
 
   /** Reads a node from one lifecycle area. */

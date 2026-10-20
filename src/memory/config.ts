@@ -40,6 +40,14 @@ export interface SweepConfig {
   tombstoneGraceDays: number;
 }
 
+/** Configuration for the post-sweep dream narrative pass. */
+export interface DreamingConfig {
+  enabled: boolean;
+  maxNodes: number;
+  /** Optional provider/model-id override for dream selection and writing. */
+  model?: string;
+}
+
 /** Resolved memory configuration used by the storage layer. */
 export interface MemoryConfig {
   /** Absolute path to the user's pi-friend.yml file. */
@@ -49,6 +57,7 @@ export interface MemoryConfig {
   injection: RagInjectionConfig;
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
+  dreaming: DreamingConfig;
 }
 
 /** Inputs that can be overridden by tests or alternate Pi environments. */
@@ -92,6 +101,14 @@ export function defaultSweepConfig(): SweepConfig {
   return {
     enabled: true,
     tombstoneGraceDays: 30,
+  };
+}
+
+/** Returns the default dreaming policy. */
+export function defaultDreamingConfig(): DreamingConfig {
+  return {
+    enabled: true,
+    maxNodes: 4,
   };
 }
 
@@ -147,6 +164,7 @@ export function parseMemoryConfig(
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
+      dreaming: defaultDreamingConfig(),
     };
   }
 
@@ -179,6 +197,7 @@ export function parseMemoryConfig(
     injection: parseRagInjection(memoryConfig.injection, configPath),
     autoCapture: parseAutoCapture(memoryConfig.auto_capture, configPath),
     sweep: parseSweep(memoryConfig.sweep, configPath),
+    dreaming: parseDreaming(memoryConfig.dreaming, configPath),
   };
 }
 
@@ -205,6 +224,7 @@ export async function loadMemoryConfig(
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
+        dreaming: defaultDreamingConfig(),
       };
     }
 
@@ -403,6 +423,54 @@ function parseSweep(value: unknown, configPath: string): SweepConfig {
       );
     }
     config.tombstoneGraceDays = value.tombstone_grace_days;
+  }
+  return config;
+}
+
+/** Parses optional dreaming settings. */
+function parseDreaming(value: unknown, configPath: string): DreamingConfig {
+  const config = defaultDreamingConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.dreaming must be a YAML object.`,
+    );
+  }
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled !== "boolean") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.dreaming.enabled must be a boolean.`,
+      );
+    }
+    config.enabled = value.enabled;
+  }
+  if (value.max_nodes !== undefined) {
+    if (
+      typeof value.max_nodes !== "number" ||
+      !Number.isInteger(value.max_nodes) ||
+      value.max_nodes < 2 ||
+      value.max_nodes > 10
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.dreaming.max_nodes must be an integer from 2 to 10.`,
+      );
+    }
+    config.maxNodes = value.max_nodes;
+  }
+  if (value.model !== undefined) {
+    if (
+      typeof value.model !== "string" ||
+      !value.model.includes("/") ||
+      value.model.trim().startsWith("/") ||
+      value.model.trim().endsWith("/")
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.dreaming.model must be a provider/model-id string.`,
+      );
+    }
+    config.model = value.model.trim();
   }
   return config;
 }
