@@ -53,6 +53,21 @@ interface MemoryEditDetails extends MemoryAddDetails {
   edited: string;
 }
 
+/** Structured details returned by a recoverable deletion. */
+interface MemoryDeleteDetails {
+  slug: string;
+  recoveryId: string;
+  canonicalPath: string;
+  tombstonePath: string;
+}
+
+/** Structured details returned by a recovery operation. */
+interface MemoryRestoreDetails {
+  slug: string;
+  recoveryId: string;
+  alreadyRestored: boolean;
+}
+
 /**
  * Registers the first model-facing memory tools against a session-scoped
  * service. Tool execution remains unavailable until storage initialization
@@ -171,6 +186,99 @@ export function registerMemoryTools(
           path: relativePath,
           type: node.frontMatter.type,
           status: node.frontMatter.status,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_delete",
+    label: "Memory Delete",
+    description: [
+      "Move one canonical memory node into superseded storage without hard-deleting it.",
+      "The match may be an exact slug or a case-insensitive substring of its title, tags, or body.",
+      "Ambiguous matches are rejected. A durable recovery record is written before the node moves.",
+      "Use memory_restore with the returned recovery ID to undo the deletion.",
+    ].join("\n"),
+    parameters: Type.Object({
+      match: Type.String({
+        description: "Exact slug or uniquely identifying substring.",
+      }),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+    ): Promise<AgentToolResult<MemoryDeleteDetails>> {
+      const service = requireService(getService);
+      const result = await service.delete(params.match);
+      const canonicalPath = `nodes/${result.original.slug}.md`;
+      const tombstonePath = `nodes/superseded/${result.tombstone.slug}.md`;
+
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `Moved memory "${result.original.slug}" to superseded storage.\n` +
+              `Recovery ID: ${result.recoveryId}\n` +
+              `Use memory_restore with this ID to undo the deletion.`,
+          },
+        ],
+        details: {
+          slug: result.original.slug,
+          recoveryId: result.recoveryId,
+          canonicalPath,
+          tombstonePath,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_restore",
+    label: "Memory Restore",
+    description: [
+      "Restore a deleted memory node using the recovery ID returned by memory_delete.",
+      "Restoration never overwrites a newer canonical node.",
+      "Repeated restoration is idempotent.",
+    ].join("\n"),
+    parameters: Type.Object({
+      recoveryId: Type.String({
+        description: "UUID recovery ID returned by memory_delete.",
+      }),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+    ): Promise<AgentToolResult<MemoryRestoreDetails>> {
+      const service = requireService(getService);
+      const result = await service.restore(params.recoveryId);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: result.alreadyRestored
+              ? `Memory "${result.node.slug}" was already restored from recovery ${result.recoveryId}.`
+              : `Restored memory "${result.node.slug}" from recovery ${result.recoveryId}.`,
+          },
+        ],
+        details: {
+          slug: result.node.slug,
+          recoveryId: result.recoveryId,
+          alreadyRestored: result.alreadyRestored,
         },
       };
     },

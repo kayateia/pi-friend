@@ -90,6 +90,10 @@ Pi reads the extension entry point from the `pi.extensions` field in
   is supplied, and records speaker attribution.
 - `memory_edit` updates an existing node while preserving creation and usage
   metadata and appending a dated audit entry.
+- `memory_delete` moves exactly one matched node into superseded storage after
+  writing a durable recovery record.
+- `memory_restore` restores a deleted node from its recovery ID without
+  overwriting newer canonical content.
 - `memory_read` reads a complete node from canonical, staging, or superseded
   storage.
 

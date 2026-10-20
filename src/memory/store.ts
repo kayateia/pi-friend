@@ -15,6 +15,7 @@ import {
   realpath,
   rename,
   rm,
+  unlink,
 } from "node:fs/promises";
 import * as path from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
@@ -34,6 +35,9 @@ import {
   resolveWithin,
   validateSlug,
 } from "./paths.ts";
+
+const RECOVERY_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Stable description of a discoverable Markdown file. */
 export interface StoredMarkdownFile {
@@ -114,15 +118,20 @@ export class MemoryStore {
       throw new MemoryStoreError("Memory text files must use the .md extension.");
     }
 
-    const target = resolveWithin(this.root, relativePath);
-    this.assertWritableTarget(target);
+    await this.replaceFile(relativePath, content);
+  }
 
-    await withFileMutationQueue(target, async () => {
-      await assertNoSymlinkSegments(this.root, target);
-      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-      await assertNoSymlinkSegments(this.root, target);
-      await writeFileAtomically(target, content);
-    });
+  /** Reads one recovery record as raw JSON text, or null when it is absent. */
+  async readRecoveryRecord(recoveryId: string): Promise<string | null> {
+    return this.readTextFileIfExists(recoveryRelativePath(recoveryId));
+  }
+
+  /** Atomically writes one validated recovery record. */
+  async writeRecoveryRecord(
+    recoveryId: string,
+    content: string,
+  ): Promise<void> {
+    await this.replaceFile(recoveryRelativePath(recoveryId), content);
   }
 
   /** Reads a canonical node by validated slug. */
@@ -133,6 +142,17 @@ export class MemoryStore {
   /** Atomically writes a canonical node by validated slug. */
   async writeNodeText(slug: string, content: string): Promise<void> {
     await this.writeTextFile(nodeRelativePath(slug), content);
+  }
+
+  /** Removes one Markdown file that is not protected as append-only. */
+  async removeTextFile(relativePath: string): Promise<void> {
+    const target = resolveWithin(this.root, relativePath);
+    this.assertWritableTarget(target);
+
+    await withFileMutationQueue(target, async () => {
+      await assertNoSymlinkSegments(this.root, target);
+      await unlink(target);
+    });
   }
 
   /** Exact text returned by the validator for a canonical node slug. */
@@ -187,6 +207,22 @@ export class MemoryStore {
       } finally {
         await handle.close();
       }
+    });
+  }
+
+  /** Serializes and atomically replaces any internal file. */
+  private async replaceFile(
+    relativePath: string,
+    content: string,
+  ): Promise<void> {
+    const target = resolveWithin(this.root, relativePath);
+    this.assertWritableTarget(target);
+
+    await withFileMutationQueue(target, async () => {
+      await assertNoSymlinkSegments(this.root, target);
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await assertNoSymlinkSegments(this.root, target);
+      await writeFileAtomically(target, content);
     });
   }
 
@@ -256,6 +292,14 @@ export class MemoryStore {
 /** Builds the canonical node-relative path after slug validation. */
 function nodeRelativePath(slug: string): string {
   return `nodes/${validateSlug(slug)}.md`;
+}
+
+/** Builds and validates a recovery record filename. */
+function recoveryRelativePath(recoveryId: string): string {
+  if (!RECOVERY_ID_PATTERN.test(recoveryId)) {
+    throw new MemoryStoreError("Recovery ID must be a valid UUID.");
+  }
+  return `recovery/${recoveryId}.json`;
 }
 
 /** Validates a real YYYY-MM-DD local-calendar date. */

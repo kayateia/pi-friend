@@ -78,6 +78,15 @@ export class MemoryNodeRepository {
     );
   }
 
+  /** Removes one node from a lifecycle area. */
+  async remove(
+    slug: string,
+    area: MemoryNodeArea = "canonical",
+  ): Promise<void> {
+    const location = nodeLocation(slug, area);
+    await this.store.removeTextFile(location.relativePath);
+  }
+
   /** Reads and validates every node in one lifecycle area. */
   async list(area: MemoryNodeArea = "canonical"): Promise<ParsedMemoryNode[]> {
     const files = (await this.store.listMarkdownFiles()).filter((file) =>
