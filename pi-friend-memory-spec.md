@@ -67,6 +67,7 @@ supersedes: []                      # slugs of nodes this corrects/overrides
 superseded_by: ""                   # set on the overridden node when a correction lands
 links: []                           # slugs of related nodes (the wiki mesh)
 source: ""                          # optional pointer to a daily log / journal / conversation
+edited: 2026-10-18T09:00:00Z        # optional timestamp for when the memory was edited
 ---
 ```
 
