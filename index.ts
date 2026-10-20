@@ -8,7 +8,9 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerHookLogging } from "./src/debug/hook-log.ts";
-import { MemoryStore } from "./src/memory/store.ts";
+import { MemoryNodeRepository } from "./src/memory/repository.ts";
+import { MemoryNodeService } from "./src/memory/service.ts";
+import { registerMemoryTools } from "./src/tools/memory-tools.ts";
 
 /**
  * Pi-facing composition root for the pi-friend-memory extension.
@@ -18,15 +20,18 @@ import { MemoryStore } from "./src/memory/store.ts";
  * retrieval are still being designed.
  */
 export default function registerPiFriend(pi: ExtensionAPI): void {
-  // The store is session-scoped and becomes available to future memory tools.
-  let memoryStore: MemoryStore | undefined;
+  // The memory service is session-scoped and shared by all memory tools.
+  let memoryService: MemoryNodeService | undefined;
 
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
+  registerMemoryTools(pi, () => memoryService);
 
   pi.on("session_start", async (_event, ctx) => {
     try {
-      memoryStore = await MemoryStore.open();
+      memoryService = new MemoryNodeService(
+        await MemoryNodeRepository.open(),
+      );
     } catch (error) {
       const message = `pi-friend memory initialization failed: ${describeError(error)}`;
       if (ctx.hasUI) {
@@ -38,7 +43,7 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", () => {
-    memoryStore = undefined;
+    memoryService = undefined;
   });
 
   pi.registerCommand("hello", {

@@ -4,9 +4,9 @@ A friendship-oriented memory extension for the Pi coding agent. The current
 skeleton provides a single `/hello` command to verify that the package and its
 extension entry point load successfully.
 
-The storage foundation, strict node schema validation, and parsed-node
-repository are implemented. Memory tools, retrieval, and prompt injection are
-still upcoming.
+The storage foundation, strict node schema validation, parsed-node repository,
+and initial `memory_add` / `memory_read` tools are implemented. Retrieval and
+prompt injection are still upcoming.
 
 ## Package layout
 
@@ -83,6 +83,16 @@ pi install ./
 
 Pi reads the extension entry point from the `pi.extensions` field in
 `package.json`.
+
+## Memory tools
+
+- `memory_add` creates a canonical active node, derives a unique slug unless one
+  is supplied, and records speaker attribution.
+- `memory_read` reads a complete node from canonical, staging, or superseded
+  storage.
+
+Supersession through `memory_add` is intentionally deferred until correction
+handling can update both sides of the relationship atomically.
 
 ## Inspect lifecycle hooks
 
