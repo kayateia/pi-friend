@@ -41,6 +41,17 @@ The root config for pi-friend is `~/.pi/agent/pi-friend/pi-friend.yml` with this
 ```yaml
 memory:
   root: ~/workspace/memory
+  injection:
+    enabled: true
+    position: -1
+    mode: hybrid
+    limit: 5
+    max_chars: 6000
+  auto_capture:
+    enabled: true
+    every_turns: 5
+    max_candidates: 3
+    # model: openrouter/google/gemini-2.5-flash
 ```
 
 The `memory` tree is configured as above, but it should default to `~/.pi/agent/pi-friend/memory`.
@@ -86,7 +97,8 @@ Kept from pi-memory, with changes:
 - `memory_delete(match)` → writes recovery record, moves to `superseded/` (does not hard-delete).
 - `memory_edit(slug, edits)` → edits body/front matter, bumps `created`? No: preserves `created`, sets an `edited` timestamp and logs the edit in the node's audit trail (append to a small `## audit` section or separate changelog).
 - `memory_restore(recoveryId)` → unchanged from pi-memory.
-- `memory_search(query, mode, type?)` → hybrid: embedding search over the index + keyword (ripgrep/qmd-style) over ALL files in the memory tree AND linked documents. Returns typed results (`node` / `document` / `staging-candidate`), each with its decay tier and snippet.
+- `memory_promote(candidateSlug)` → promotes one staging candidate. Near-duplicates are merged into an existing canonical node with links and attribution preserved.
+- `memory_search(query, mode, type?)` → `keyword`, `semantic`, or `hybrid`: embedding search over the index plus keyword search over ALL files in the memory tree AND linked documents. Returns typed results (`node` / `document` / `staging-candidate`), each with its decay tier and snippet.
 
 **Search must find documents, not just nodes.** Front matter is required only for `nodes/` and `staging/`.
 
@@ -161,9 +173,7 @@ Once per day, a model pass:
 ## 11. Embeddings / index
 
 - Constraint: qmd's local-only model is unavailable; use an OpenRouter embeddings model (or another hosted embedding API).
-- Index options:
-  - **qdrant** (docker, already in the household stack): justified if we want metadata filtering and room to grow. Ops cost near zero.
-  - **sqlite-vec**: simpler, zero extra service. Note: there are vague danger-vibes about sqlite here (Aisling's prior wariness); not disqualifying, just a preference against if qdrant is free to run.
+- Initial backend: **sqlite-vec** through Node's built-in SQLite runtime. Qdrant remains the migration path if concurrent clients, ANN scale, or richer server-side filtering become necessary.
 - Either way: the index stores `{slug, embedding, decay tier, status, tags}`; everything else is read from markdown at retrieval time. Rebuild script must exist and be exercised.
 
 ## 12. Optional passes (proposals for Aisling's ruling)
@@ -197,10 +207,7 @@ Reviews recent history for patterns in Aisling's (and the system's) behavior and
 
 ## 14. Open questions (decide during/after first pass)
 
-- Exact embeddings model + dimensions (OpenRouter availability/pricing - openai/text-embedding-3-small).
-- N for auto-capture cadence; configurable or adaptive to conversation density?
 - Retention policy for `superseded/` tombstones (grace period length).
 - Should `daily/` logs ever be promoted to nodes automatically, or only via staging capture?
-- Where the injection position lives in pi's prompt structure (verify against pi-memory's injection hook).
 - Dream injection contexts: which conversations "allow" dreams?
 - Ruling needed: adopt retrospective pass (§12a)? Pattern detection pass (§12b)?
