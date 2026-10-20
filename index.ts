@@ -9,11 +9,14 @@
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerHookLogging } from "./src/debug/hook-log.ts";
+import { defaultRagInjectionConfig } from "./src/memory/config.ts";
 import {
   OpenRouterEmbeddingProvider,
   resolveOpenRouterApiKey,
 } from "./src/memory/embedding.ts";
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
+import { buildRagContext } from "./src/memory/rag.ts";
+import { injectRagContext } from "./src/memory/rag-injection.ts";
 import type { SemanticSearchDependencies } from "./src/memory/service.ts";
 import { MemoryNodeService } from "./src/memory/service.ts";
 import { SqliteVectorIndex } from "./src/memory/vector-index.ts";
@@ -30,6 +33,8 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
   // The memory service is session-scoped and shared by all memory tools.
   let memoryService: MemoryNodeService | undefined;
   let semanticSearch: SemanticSearchDependencies | undefined;
+  let ragContext: string | undefined;
+  let injectionConfig = defaultRagInjectionConfig();
 
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
@@ -38,6 +43,7 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     try {
       const repository = await MemoryNodeRepository.open();
+      injectionConfig = repository.store.config.injection;
       semanticSearch = createSemanticSearch(repository, (message) => {
         if (ctx.hasUI) {
           ctx.ui.notify(message, "warning");
@@ -62,8 +68,58 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", () => {
     memoryService = undefined;
+    ragContext = undefined;
     semanticSearch?.index.close();
     semanticSearch = undefined;
+  });
+
+  pi.on("before_agent_start", async (event) => {
+    ragContext = undefined;
+    if (
+      !memoryService ||
+      !injectionConfig.enabled ||
+      event.messageType !== "user"
+    ) {
+      debugRag("skipped", {
+        hasService: memoryService !== undefined,
+        enabled: injectionConfig.enabled,
+        messageType: event.messageType,
+      });
+      return;
+    }
+
+    try {
+      ragContext = (
+        await buildRagContext(
+          memoryService,
+          event.prompt,
+          injectionConfig,
+        )
+      ).text || undefined;
+      debugRag("retrieved", {
+        contextChars: ragContext?.length ?? 0,
+      });
+    } catch (error) {
+      debugRag("failed", { error: describeError(error) });
+      // Retrieval enriches context but must never block the user's prompt.
+    }
+  });
+
+  pi.on("context", (event) => {
+    if (!ragContext) {
+      return;
+    }
+    debugRag("injected", {
+      contextChars: ragContext.length,
+      position: injectionConfig.position,
+    });
+    return {
+      messages: injectRagContext(
+        event.messages,
+        ragContext,
+        injectionConfig.position,
+      ),
+    };
   });
 
   pi.registerCommand("hello", {
@@ -106,4 +162,15 @@ function createSemanticSearch(
 /** Formats unknown thrown values for a user-visible initialization error. */
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Emits opt-in diagnostics for the retrieval and injection pipeline. */
+function debugRag(label: string, value: Record<string, unknown>): void {
+  if (
+    ["1", "true", "yes"].includes(
+      (process.env.PI_FRIEND_DEBUG_HOOKS ?? "").toLowerCase(),
+    )
+  ) {
+    console.log(`[pi-friend rag] ${label}`, value);
+  }
 }

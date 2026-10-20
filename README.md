@@ -37,10 +37,22 @@ Override the root in `~/.pi/agent/pi-friend/pi-friend.yml`:
 ```yaml
 memory:
   root: ~/workspace/memory
+  injection:
+    enabled: true
+    position: -1
+    mode: hybrid
+    limit: 5
+    max_chars: 6000
 ```
 
 A missing config uses the default. Malformed configuration is reported and
 does not fall back to another path. The tree is initialized on `session_start`.
+
+Injection defaults to enabled at position `-1`, meaning the memory block is
+attached to the previous user turn to preserve the current hot cache prefix.
+Position `0` targets the current turn. `keyword`, `semantic`, and `hybrid`
+retrieval modes are supported; semantic/hybrid failures fall back to keyword
+retrieval so prompt injection does not block the model call.
 
 ## Development
 

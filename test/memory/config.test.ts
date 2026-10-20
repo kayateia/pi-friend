@@ -32,6 +32,13 @@ test("missing configuration uses the default memory root", async () => {
       config.root,
       path.join(directory, "pi-friend", "memory"),
     );
+    assert.deepEqual(config.injection, {
+      enabled: true,
+      position: -1,
+      mode: "hybrid",
+      limit: 5,
+      maxChars: 6_000,
+    });
   });
 });
 
@@ -97,4 +104,44 @@ test("the loader reads a custom root from disk", async () => {
 
     assert.equal(config.root, path.join(directory, "custom-memory"));
   });
+});
+
+test("injection settings are parsed and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  injection:",
+      "    enabled: false",
+      "    position: -2",
+      "    mode: keyword",
+      "    limit: 3",
+      "    max_chars: 1200",
+    ].join("\n"),
+    configPath,
+  );
+
+  assert.deepEqual(config.injection, {
+    enabled: false,
+    position: -2,
+    mode: "keyword",
+    limit: 3,
+    maxChars: 1_200,
+  });
+});
+
+test("invalid injection settings fail closed", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  for (const source of [
+    "memory:\n  injection:\n    position: 1\n",
+    "memory:\n  injection:\n    mode: unknown\n",
+    "memory:\n  injection:\n    limit: 0\n",
+    "memory:\n  injection:\n    max_chars: 100\n",
+    "memory:\n  injection:\n    enabled: yes\n",
+  ]) {
+    assert.throws(
+      () => parseMemoryConfig(source, configPath),
+      MemoryConfigError,
+    );
+  }
 });

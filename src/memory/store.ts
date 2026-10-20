@@ -19,7 +19,10 @@ import {
 } from "node:fs/promises";
 import * as path from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import type { MemoryConfigOptions } from "./config.ts";
+import type {
+  MemoryConfig,
+  MemoryConfigOptions,
+} from "./config.ts";
 import { loadMemoryConfig } from "./config.ts";
 import { ensureMemoryLayout } from "./layout.ts";
 import type {
@@ -73,6 +76,7 @@ export class MemoryStoreError extends Error {
  * node validation belong to the schema layer.
  */
 export class MemoryStore {
+  readonly config: MemoryConfig;
   readonly paths: MemoryPaths;
   readonly root: string;
 
@@ -82,10 +86,15 @@ export class MemoryStore {
     const paths = createMemoryPaths(config.root, config.configPath);
     await ensureMemoryLayout(paths);
     const root = await realpath(paths.root);
-    return new MemoryStore(paths, root);
+    return new MemoryStore(config, paths, root);
   }
 
-  private constructor(paths: MemoryPaths, root: string) {
+  private constructor(
+    config: MemoryConfig,
+    paths: MemoryPaths,
+    root: string,
+  ) {
+    this.config = config;
     this.paths = paths;
     this.root = root;
   }

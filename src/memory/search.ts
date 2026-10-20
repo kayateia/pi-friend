@@ -21,6 +21,8 @@ export interface MemorySearchOptions {
   mode?: MemorySearchMode;
   type?: MemoryType;
   limit?: number;
+  /** Minimum meaningful token overlap when no phrase match occurs. */
+  minTokenMatches?: number;
 }
 
 /** One ranked search result with a match-centered snippet. */
@@ -73,7 +75,12 @@ export function searchIndexedFiles(
       continue;
     }
 
-    const score = scoreFile(file, query, queryTokens);
+    const score = scoreFile(
+      file,
+      query,
+      queryTokens,
+      options.minTokenMatches,
+    );
     if (score === null) {
       continue;
     }
@@ -116,6 +123,7 @@ function scoreFile(
   file: IndexedMarkdownFile,
   query: string,
   tokens: string[],
+  minTokenMatches: number | undefined,
 ): { value: number; fields: SearchField[] } | null {
   const slug = normalize(file.slug ?? "");
   const relativePath = normalize(file.relativePath);
@@ -170,9 +178,16 @@ function scoreFile(
     phraseMatch = true;
   }
 
+  const matchedTokenCount = tokens.filter((token) =>
+    haystack.includes(token),
+  ).length;
   const allTokensPresent =
-    tokens.length > 0 && tokens.every((token) => haystack.includes(token));
-  if (!phraseMatch && !allTokensPresent) {
+    tokens.length > 0 && matchedTokenCount === tokens.length;
+  const requiredMatches =
+    minTokenMatches === undefined
+      ? tokens.length
+      : Math.max(1, Math.floor(minTokenMatches));
+  if (!phraseMatch && matchedTokenCount < requiredMatches) {
     return null;
   }
   if (allTokensPresent) {
@@ -194,6 +209,33 @@ function scoreFile(
       fields.push("tags");
     } else if (body.includes(firstToken) && !fields.includes("body")) {
       fields.push("body");
+    }
+  }
+  if (!phraseMatch && matchedTokenCount > 0) {
+    value += matchedTokenCount * 25;
+    if (fields.length === 0) {
+      for (const token of tokens) {
+        if (slug.includes(token)) {
+          fields.push("slug");
+          break;
+        }
+        if (relativePath.includes(token)) {
+          fields.push("path");
+          break;
+        }
+        if (title.includes(token)) {
+          fields.push("title");
+          break;
+        }
+        if (tags.some((tag) => tag.includes(token))) {
+          fields.push("tags");
+          break;
+        }
+        if (body.includes(token)) {
+          fields.push("body");
+          break;
+        }
+      }
     }
   }
 
@@ -240,8 +282,50 @@ function normalize(value: string): string {
 
 /** Splits a normalized query into searchable words. */
 function tokenize(query: string): string[] {
-  return query.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return query
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(
+      (token) => token !== "" && !STOP_WORDS.has(token),
+    );
 }
+
+const STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "do",
+  "does",
+  "for",
+  "from",
+  "how",
+  "i",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "this",
+  "to",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "with",
+  "you",
+  "your",
+]);
 
 /** Clamps a requested result limit into the supported range. */
 function clampLimit(limit: number | undefined): number {
