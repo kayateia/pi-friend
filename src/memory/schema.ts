@@ -282,11 +282,10 @@ export function validateMemoryNodeFrontMatter(
     );
   }
 
-  const claimsSupersession = supersededBy !== "";
   const hasSupersededStatus = status === "superseded";
-  if (claimsSupersession !== hasSupersededStatus) {
+  if (supersededBy !== "" && !hasSupersededStatus) {
     throw new MemorySchemaError(
-      `status and superseded_by must agree in ${slug}.`,
+      `A node with superseded_by must have status "superseded" in ${slug}.`,
       { field: "superseded_by" },
     );
   }

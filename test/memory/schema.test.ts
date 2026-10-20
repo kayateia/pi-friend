@@ -256,7 +256,7 @@ test("supersession status and decay remain consistent", () => {
           .concat("\nbody\n"),
         "warm-memory",
       ),
-    /status and superseded_by must agree/,
+    /must have status "superseded"/,
   );
   assert.throws(
     () =>
@@ -267,6 +267,15 @@ test("supersession status and decay remain consistent", () => {
         "warm-memory",
       ),
     /must have decay_weight 0/,
+  );
+
+  assert.doesNotThrow(() =>
+    parseMemoryNode(
+      VALID_FRONT_MATTER.replace("status: active", "status: superseded")
+        .replace("decay_weight: 0.75", "decay_weight: 0")
+        .concat("\nbody\n"),
+      "warm-memory",
+    ),
   );
 });
 
