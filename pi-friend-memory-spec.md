@@ -52,6 +52,10 @@ memory:
     every_turns: 5
     max_candidates: 3
     # model: openrouter/google/gemini-2.5-flash
+  sweep:
+    enabled: true
+    tombstone_grace_days: 30
+    # model: openrouter/google/gemini-2.5-flash
 ```
 
 The `memory` tree is configured as above, but it should default to `~/.pi/agent/pi-friend/memory`.
