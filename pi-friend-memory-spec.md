@@ -36,12 +36,21 @@ memory/
 └── index/               ← vector store config/state (non-canonical)
 ```
 
+The root config for pi-friend is `~/.pi/agent/pi-friend/pi-friend.yml` with this format:
+
+```yaml
+memory:
+  root: ~/workspace/memory
+```
+
+The `memory` tree is configured as above, but it should default to `~/.pi/agent/pi-friend/memory`.
+
 ## 4. Node schema (strict front matter)
 
 ```yaml
 ---
 title: string                       # human-readable
-type: memory                        # memory | dream | fact | preference | event | person-note
+type: fact                          # dream | fact | preference | event | person-note
 speaker:                            # who said it. Array; ordered by attribution confidence
   - name: Aisling                   #   system member, user name, or agent name
     confident: true                 #   false = inferred/uncertain attribution
