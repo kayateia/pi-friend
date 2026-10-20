@@ -43,6 +43,11 @@ memory:
     mode: hybrid
     limit: 5
     max_chars: 6000
+  auto_capture:
+    enabled: true
+    every_turns: 5
+    max_candidates: 3
+    # model: openrouter/google/gemini-2.5-flash
 ```
 
 A missing config uses the default. Malformed configuration is reported and
@@ -104,6 +109,8 @@ Pi reads the extension entry point from the `pi.extensions` field in
   writing a durable recovery record.
 - `memory_restore` restores a deleted node from its recovery ID without
   overwriting newer canonical content.
+- `memory_promote` promotes one staging candidate, merging semantic
+  near-duplicates into an existing canonical node.
 - `memory_read` reads a complete node from canonical, staging, or superseded
   storage.
 - `memory_search` supports ranked keyword search and semantic search across
@@ -111,6 +118,18 @@ Pi reads the extension entry point from the `pi.extensions` field in
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.
+
+## Auto-capture
+
+After every configured number of completed agent runs, a separate no-tools
+model request reviews only the transcript entries added since the prior
+successful capture. The prompt treats conversation content as observed data,
+requires concrete speaker attribution, and allows only active memory types.
+
+Candidates are written to `staging/` with `status: candidate` and are excluded
+from RAG. Exact duplicates of canonical or staged memories are skipped.
+Promotion uses the semantic index to detect near-duplicates, merging close
+matches while preserving links, tags, speakers, and audit history.
 
 ## Semantic search
 

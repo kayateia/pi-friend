@@ -39,6 +39,11 @@ test("missing configuration uses the default memory root", async () => {
       limit: 5,
       maxChars: 6_000,
     });
+    assert.deepEqual(config.autoCapture, {
+      enabled: true,
+      everyTurns: 5,
+      maxCandidates: 3,
+    });
   });
 });
 
@@ -138,6 +143,43 @@ test("invalid injection settings fail closed", () => {
     "memory:\n  injection:\n    limit: 0\n",
     "memory:\n  injection:\n    max_chars: 100\n",
     "memory:\n  injection:\n    enabled: yes\n",
+  ]) {
+    assert.throws(
+      () => parseMemoryConfig(source, configPath),
+      MemoryConfigError,
+    );
+  }
+});
+
+test("auto-capture settings are parsed and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  auto_capture:",
+      "    enabled: false",
+      "    every_turns: 2",
+      "    max_candidates: 4",
+      "    model: openrouter/google/gemini-2.5-flash",
+    ].join("\n"),
+    configPath,
+  );
+
+  assert.deepEqual(config.autoCapture, {
+    enabled: false,
+    everyTurns: 2,
+    maxCandidates: 4,
+    model: "openrouter/google/gemini-2.5-flash",
+  });
+});
+
+test("invalid auto-capture settings fail closed", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  for (const source of [
+    "memory:\n  auto_capture:\n    every_turns: 0\n",
+    "memory:\n  auto_capture:\n    max_candidates: 0\n",
+    "memory:\n  auto_capture:\n    model: nope\n",
+    "memory:\n  auto_capture:\n    enabled: sometimes\n",
   ]) {
     assert.throws(
       () => parseMemoryConfig(source, configPath),

@@ -7,9 +7,18 @@
  */
 
 import * as path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { registerHookLogging } from "./src/debug/hook-log.ts";
 import { defaultRagInjectionConfig } from "./src/memory/config.ts";
+import {
+  defaultAutoCaptureConfig,
+  type AutoCaptureConfig,
+} from "./src/memory/config.ts";
+import { serializeCaptureTranscript } from "./src/memory/capture.ts";
+import { runCaptureModel } from "./src/memory/capture-runner.ts";
 import {
   OpenRouterEmbeddingProvider,
   resolveOpenRouterApiKey,
@@ -35,6 +44,10 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
   let semanticSearch: SemanticSearchDependencies | undefined;
   let ragContext: string | undefined;
   let injectionConfig = defaultRagInjectionConfig();
+  let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
+  let settledRuns = 0;
+  let captureCursor: string | undefined;
+  let captureInFlight = false;
 
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
@@ -44,6 +57,7 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
     try {
       const repository = await MemoryNodeRepository.open();
       injectionConfig = repository.store.config.injection;
+      autoCaptureConfig = repository.store.config.autoCapture;
       semanticSearch = createSemanticSearch(repository, (message) => {
         if (ctx.hasUI) {
           ctx.ui.notify(message, "warning");
@@ -71,6 +85,10 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
     ragContext = undefined;
     semanticSearch?.index.close();
     semanticSearch = undefined;
+    autoCaptureConfig = defaultAutoCaptureConfig();
+    settledRuns = 0;
+    captureCursor = undefined;
+    captureInFlight = false;
   });
 
   pi.on("before_agent_start", async (event) => {
@@ -120,6 +138,71 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
         injectionConfig.position,
       ),
     };
+  });
+
+  pi.on("agent_settled", async (event, ctx) => {
+    if (
+      event.aborted ||
+      captureInFlight ||
+      !memoryService ||
+      !autoCaptureConfig.enabled
+    ) {
+      return;
+    }
+
+    settledRuns += 1;
+    if (settledRuns < autoCaptureConfig.everyTurns) {
+      return;
+    }
+    settledRuns = 0;
+    captureInFlight = true;
+
+    try {
+      const branch = ctx.sessionManager.getBranch();
+      const cursorIndex = captureCursor
+        ? branch.findIndex((entry) => entry.id === captureCursor)
+        : -1;
+      const entries = branch.slice(cursorIndex + 1);
+      const transcript = serializeCaptureTranscript(entries);
+      if (transcript.trim() === "") {
+        return;
+      }
+
+      const service = memoryService;
+      const drafts = await runCaptureModel(
+        ctx,
+        autoCaptureConfig,
+        transcript,
+        (message) => reportCaptureWarning(ctx, message),
+      );
+      for (const draft of drafts) {
+        await service.stageCandidate({
+          title: draft.title,
+          type: draft.type,
+          body: draft.body,
+          speaker: draft.speaker,
+          agents: draft.agents,
+          emotionalFlavor: draft.emotionalFlavor,
+          tags: draft.tags,
+          links: draft.links,
+          source:
+            draft.source ??
+            `session:${ctx.sessionManager.getSessionId()}`,
+        });
+      }
+
+      const finalEntry = branch[branch.length - 1];
+      if (finalEntry) {
+        captureCursor = finalEntry.id;
+      }
+      debugRag("capture", {
+        candidates: drafts.length,
+      });
+    } catch (error) {
+      debugRag("capture-failed", { error: describeError(error) });
+    } finally {
+      captureInFlight = false;
+    }
   });
 
   pi.registerCommand("hello", {
@@ -172,5 +255,17 @@ function debugRag(label: string, value: Record<string, unknown>): void {
     )
   ) {
     console.log(`[pi-friend rag] ${label}`, value);
+  }
+}
+
+/** Reports capture-model configuration issues without interrupting the session. */
+function reportCaptureWarning(
+  ctx: ExtensionContext,
+  message: string,
+): void {
+  if (ctx.hasUI) {
+    ctx.ui.notify(message, "warning");
+  } else {
+    console.error(message);
   }
 }

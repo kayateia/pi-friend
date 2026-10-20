@@ -73,6 +73,14 @@ interface MemoryRestoreDetails {
   alreadyRestored: boolean;
 }
 
+/** Structured details returned by promotion of a staging candidate. */
+interface MemoryPromoteDetails {
+  slug: string;
+  merged: boolean;
+  mergedInto?: string;
+  path: string;
+}
+
 /** Structured details returned by a keyword search. */
 interface MemorySearchDetails {
   query: string;
@@ -292,6 +300,53 @@ export function registerMemoryTools(
           slug: result.node.slug,
           recoveryId: result.recoveryId,
           alreadyRestored: result.alreadyRestored,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_promote",
+    label: "Memory Promote",
+    description: [
+      "Promote one auto-captured candidate from staging into canonical memory.",
+      "Near-duplicates are merged into an existing active node with links, tags, speakers, and audit history preserved.",
+      "Use memory_search to find staging candidates when their slug is not already known.",
+    ].join("\n"),
+    parameters: Type.Object({
+      slug: Type.String({
+        description: "Staging candidate slug to promote.",
+      }),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+    ): Promise<AgentToolResult<MemoryPromoteDetails>> {
+      const service = requireService(getService);
+      const result = await service.promoteCandidate(params.slug);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: result.merged
+              ? `Merged staging candidate "${params.slug}" into canonical memory "${result.mergedInto}".`
+              : `Promoted staging candidate "${params.slug}" into canonical memory.`,
+          },
+        ],
+        details: {
+          slug: result.node.slug,
+          merged: result.merged,
+          ...(result.mergedInto === undefined
+            ? {}
+            : { mergedInto: result.mergedInto }),
+          path: `nodes/${result.node.slug}.md`,
         },
       };
     },

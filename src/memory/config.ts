@@ -23,6 +23,15 @@ export interface RagInjectionConfig {
   maxChars: number;
 }
 
+/** Configuration for periodic conversation capture into staging. */
+export interface AutoCaptureConfig {
+  enabled: boolean;
+  everyTurns: number;
+  maxCandidates: number;
+  /** Optional provider/model-id override for the capture model. */
+  model?: string;
+}
+
 /** Resolved memory configuration used by the storage layer. */
 export interface MemoryConfig {
   /** Absolute path to the user's pi-friend.yml file. */
@@ -30,6 +39,7 @@ export interface MemoryConfig {
   /** Absolute path to the canonical memory tree. */
   root: string;
   injection: RagInjectionConfig;
+  autoCapture: AutoCaptureConfig;
 }
 
 /** Inputs that can be overridden by tests or alternate Pi environments. */
@@ -56,6 +66,15 @@ export function defaultRagInjectionConfig(): RagInjectionConfig {
     mode: "hybrid",
     limit: 5,
     maxChars: 6_000,
+  };
+}
+
+/** Returns the default staged-capture policy. */
+export function defaultAutoCaptureConfig(): AutoCaptureConfig {
+  return {
+    enabled: true,
+    everyTurns: 5,
+    maxCandidates: 3,
   };
 }
 
@@ -109,6 +128,7 @@ export function parseMemoryConfig(
       configPath,
       root: defaultRoot,
       injection: defaultRagInjectionConfig(),
+      autoCapture: defaultAutoCaptureConfig(),
     };
   }
 
@@ -139,6 +159,7 @@ export function parseMemoryConfig(
     configPath,
     root,
     injection: parseRagInjection(memoryConfig.injection, configPath),
+    autoCapture: parseAutoCapture(memoryConfig.auto_capture, configPath),
   };
 }
 
@@ -163,6 +184,7 @@ export async function loadMemoryConfig(
         configPath,
         root: path.join(configDir, "memory"),
         injection: defaultRagInjectionConfig(),
+        autoCapture: defaultAutoCaptureConfig(),
       };
     }
 
@@ -248,6 +270,72 @@ function parseRagInjection(
     config.maxChars = value.max_chars;
   }
 
+  return config;
+}
+
+/** Parses optional auto-capture settings while applying safe defaults. */
+function parseAutoCapture(
+  value: unknown,
+  configPath: string,
+): AutoCaptureConfig {
+  const config = defaultAutoCaptureConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.auto_capture must be a YAML object.`,
+    );
+  }
+
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled !== "boolean") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.auto_capture.enabled must be a boolean.`,
+      );
+    }
+    config.enabled = value.enabled;
+  }
+  if (value.every_turns !== undefined) {
+    if (
+      typeof value.every_turns !== "number" ||
+      !Number.isInteger(value.every_turns) ||
+      value.every_turns < 1 ||
+      value.every_turns > 100
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.auto_capture.every_turns must be an integer from 1 to 100.`,
+      );
+    }
+    config.everyTurns = value.every_turns;
+  }
+  if (value.max_candidates !== undefined) {
+    if (
+      typeof value.max_candidates !== "number" ||
+      !Number.isInteger(value.max_candidates) ||
+      value.max_candidates < 1 ||
+      value.max_candidates > 20
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.auto_capture.max_candidates must be an integer from 1 to 20.`,
+      );
+    }
+    config.maxCandidates = value.max_candidates;
+  }
+  if (value.model !== undefined) {
+    if (
+      typeof value.model !== "string" ||
+      value.model.trim() === "" ||
+      !value.model.includes("/") ||
+      value.model.trim().startsWith("/") ||
+      value.model.trim().endsWith("/")
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.auto_capture.model must be a non-empty provider/model-id string.`,
+      );
+    }
+    config.model = value.model.trim();
+  }
   return config;
 }
 

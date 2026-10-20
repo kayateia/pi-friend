@@ -32,6 +32,9 @@ import type {
 import { searchIndexedFiles } from "./search.ts";
 import { searchSemantically } from "./semantic-search.ts";
 import type { VectorIndex } from "./vector-index.ts";
+import { buildEmbeddingText } from "./vector-sync.ts";
+import { synchronizeVectorIndex } from "./vector-sync.ts";
+import { searchSemanticVectors } from "./semantic-search.ts";
 import type {
   MemoryNodeArea,
   MemoryNodeRepository,
@@ -77,6 +80,19 @@ export interface MemoryRestorationResult {
   recoveryId: string;
   node: ParsedMemoryNode;
   alreadyRestored: boolean;
+}
+
+/** Result of staging one auto-captured candidate. */
+export interface MemoryStageResult {
+  node: ParsedMemoryNode;
+  created: boolean;
+}
+
+/** Result of promoting one staging candidate. */
+export interface MemoryPromotionResult {
+  node: ParsedMemoryNode;
+  merged: boolean;
+  mergedInto?: string;
 }
 
 /** Optional semantic-search dependencies, available only when configured. */
@@ -205,6 +221,105 @@ export class MemoryNodeService {
 
       await this.repository.write(node);
       return node;
+    });
+  }
+
+  /** Stages one candidate after exact canonical/staging deduplication. */
+  async stageCandidate(input: MemoryAddInput): Promise<MemoryStageResult> {
+    return this.runSerialized(async () => {
+      const signature = memorySignature(input.title, input.body);
+      for (const area of ["canonical", "staging"] as const) {
+        const existing = (await this.repository.list(area)).find(
+          (node) =>
+            memorySignature(
+              node.frontMatter.title,
+              node.body,
+            ) === signature,
+        );
+        if (existing) {
+          return { node: existing, created: false };
+        }
+      }
+
+      const slug = await this.allocateSlug(input);
+      const body = input.body.trim();
+      if (body === "") {
+        throw new MemoryServiceError("Memory body must not be empty.");
+      }
+
+      const timestamp = this.now().toISOString();
+      const node: ParsedMemoryNode = {
+        slug,
+        body: `\n${body}\n`,
+        frontMatter: {
+          title: input.title.trim(),
+          type: input.type,
+          speaker: input.speaker,
+          agents: input.agents ?? [],
+          created: timestamp,
+          last_used: timestamp,
+          use_count: 0,
+          decay_weight: 1,
+          status: "candidate",
+          emotional_flavor: input.emotionalFlavor ?? "neutral",
+          tags: input.tags ?? [],
+          supersedes: [],
+          superseded_by: "",
+          links: input.links ?? [],
+          source: input.source ?? "",
+        },
+      };
+
+      await this.repository.write(node, "staging");
+      return { node, created: true };
+    });
+  }
+
+  /**
+   * Promotes one staging candidate, merging into a semantically near-duplicate
+   * canonical node when one is found.
+   */
+  async promoteCandidate(slug: string): Promise<MemoryPromotionResult> {
+    return this.runSerialized(async () => {
+      const candidate = await this.repository.read(slug, "staging");
+      if (candidate === null) {
+        throw new MemoryServiceError(
+          `No staging candidate found for "${slug}".`,
+        );
+      }
+
+      const now = this.now().toISOString();
+      let target = await this.repository.read(candidate.slug, "canonical");
+      if (target === null && this.semantic) {
+        target = await this.findPromotionDuplicate(candidate);
+      }
+
+      if (target !== null) {
+        const merged = mergeCandidate(target, candidate, now);
+        await this.repository.write(merged, "canonical");
+        await this.repository.remove(candidate.slug, "staging");
+        return {
+          node: merged,
+          merged: true,
+          mergedInto: target.slug,
+        };
+      }
+
+      const promoted = cloneNode(candidate);
+      promoted.frontMatter.status = "active";
+      promoted.frontMatter.decay_weight = 1;
+      promoted.frontMatter.last_used = now;
+      promoted.frontMatter.edited = now;
+      promoted.frontMatter.superseded_by = "";
+      promoted.body = appendAuditEntry(
+        promoted.body,
+        now,
+        "memory_promote: promoted from staging",
+      );
+
+      await this.repository.write(promoted, "canonical");
+      await this.repository.remove(candidate.slug, "staging");
+      return { node: promoted, merged: false };
     });
   }
 
@@ -508,6 +623,57 @@ export class MemoryNodeService {
     return false;
   }
 
+  /** Finds the closest canonical node above the promotion similarity threshold. */
+  private async findPromotionDuplicate(
+    candidate: ParsedMemoryNode,
+  ): Promise<ParsedMemoryNode | null> {
+    if (!this.semantic) {
+      return null;
+    }
+
+    const files = await buildMemoryDocumentIndex(this.repository.store);
+    await synchronizeVectorIndex(
+      files,
+      this.semantic.provider,
+      this.semantic.index,
+    );
+    const candidateFile = files.find(
+      (file) => file.relativePath === `staging/${candidate.slug}.md`,
+    );
+    if (!candidateFile) {
+      return null;
+    }
+
+    const [embedding] = await this.semantic.provider.embed([
+      buildEmbeddingText(candidateFile),
+    ]);
+    if (!embedding) {
+      return null;
+    }
+
+    const results = searchSemanticVectors(
+      files,
+      embedding,
+      {
+        query: candidate.frontMatter.title,
+        mode: "semantic",
+        limit: 10,
+      },
+      this.semantic.index,
+    );
+    const duplicate = results.find(
+      (result) =>
+        result.kind === "node" &&
+        result.status === "active" &&
+        result.slug !== undefined &&
+        result.slug !== candidate.slug &&
+        result.score >= 0.92,
+    );
+    return duplicate?.slug
+      ? this.repository.read(duplicate.slug, "canonical")
+      : null;
+  }
+
   /** Reads and validates one recovery record. */
   private async readRecoveryRecord(
     recoveryId: string,
@@ -588,6 +754,81 @@ function cloneNode(node: ParsedMemoryNode): ParsedMemoryNode {
     },
     body: node.body,
   };
+}
+
+/** Merges a staging candidate into an existing canonical node. */
+function mergeCandidate(
+  target: ParsedMemoryNode,
+  candidate: ParsedMemoryNode,
+  timestamp: string,
+): ParsedMemoryNode {
+  const merged = cloneNode(target);
+  const candidateBody = candidate.body.trim();
+  if (
+    candidateBody !== "" &&
+    !merged.body.replace(/\s+/gu, " ").includes(
+      candidateBody.replace(/\s+/gu, " "),
+    )
+  ) {
+    merged.body = `${merged.body.replace(/\s+$/u, "")}\n\n${candidateBody}\n`;
+  }
+
+  merged.frontMatter.agents = unique([
+    ...merged.frontMatter.agents,
+    ...candidate.frontMatter.agents,
+  ]);
+  merged.frontMatter.tags = unique([
+    ...merged.frontMatter.tags,
+    ...candidate.frontMatter.tags,
+  ]);
+  merged.frontMatter.links = unique([
+    ...merged.frontMatter.links,
+    ...candidate.frontMatter.links,
+  ]).filter((link) => link !== target.slug);
+  merged.frontMatter.supersedes = unique([
+    ...merged.frontMatter.supersedes,
+    ...candidate.frontMatter.supersedes,
+  ]);
+  merged.frontMatter.speaker = mergeSpeakers(
+    merged.frontMatter.speaker,
+    candidate.frontMatter.speaker,
+  );
+  merged.frontMatter.edited = timestamp;
+  merged.body = appendAuditEntry(
+    merged.body,
+    timestamp,
+    `memory_promote: merged staging candidate ${candidate.slug}`,
+  );
+  return merged;
+}
+
+/** Compares titles and bodies after whitespace/case normalization. */
+function memorySignature(title: string, body: string): string {
+  return `${title}\n${body}`
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+/** Deduplicates values while preserving their first-seen order. */
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+/** Merges speaker attribution records by name and confidence. */
+function mergeSpeakers(
+  left: MemorySpeaker[],
+  right: MemorySpeaker[],
+): MemorySpeaker[] {
+  const merged = new Map<string, MemorySpeaker>();
+  for (const speaker of [...left, ...right]) {
+    const key = `${speaker.name.toLowerCase()}|${speaker.confident}|${speaker.note ?? ""}`;
+    if (!merged.has(key)) {
+      merged.set(key, { ...speaker });
+    }
+  }
+  return [...merged.values()];
 }
 
 /** Converts a human title into the repository's lowercase ASCII slug format. */
