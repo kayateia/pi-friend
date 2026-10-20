@@ -190,7 +190,7 @@ export function parseMemoryNodeFile(
     );
   }
 
-  const slug = path.basename(location.relativePath, ".md");
+  const slug = path.posix.basename(location.relativePath, ".md");
   return parseMemoryNode(text, slug, location);
 }
 
@@ -328,6 +328,21 @@ export function validateMemoryNodeLocation(
     );
   }
 
+  const normalizedPath = location.relativePath.split(path.sep).join("/");
+  if (
+    location.kind === "staging-candidate" &&
+    !normalizedPath.startsWith("staging/")
+  ) {
+    throw new MemorySchemaError(
+      `Staging candidate location must be under staging/: ${location.relativePath}`,
+    );
+  }
+  if (location.kind === "node" && !normalizedPath.startsWith("nodes/")) {
+    throw new MemorySchemaError(
+      `Canonical node location must be under nodes/: ${location.relativePath}`,
+    );
+  }
+
   if (
     location.kind === "staging-candidate" &&
     node.frontMatter.status !== "candidate"
@@ -344,6 +359,16 @@ export function validateMemoryNodeLocation(
       { field: "status" },
     );
   }
+  if (
+    location.kind === "node" &&
+    !normalizedPath.startsWith("nodes/superseded/") &&
+    node.frontMatter.status === "superseded"
+  ) {
+    throw new MemorySchemaError(
+      `Superseded node ${node.slug} must live under nodes/superseded/.`,
+      { field: "status" },
+    );
+  }
 
   if (
     location.kind === "staging-candidate" &&
@@ -355,7 +380,6 @@ export function validateMemoryNodeLocation(
     );
   }
 
-  const normalizedPath = location.relativePath.split(path.sep).join("/");
   if (
     normalizedPath.startsWith("nodes/superseded/") &&
     node.frontMatter.status !== "superseded"

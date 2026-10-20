@@ -4,8 +4,9 @@ A friendship-oriented memory extension for the Pi coding agent. The current
 skeleton provides a single `/hello` command to verify that the package and its
 extension entry point load successfully.
 
-The storage foundation and strict node schema validation are implemented.
-Memory tools, retrieval, and prompt injection are still upcoming.
+The storage foundation, strict node schema validation, and parsed-node
+repository are implemented. Memory tools, retrieval, and prompt injection are
+still upcoming.
 
 ## Package layout
 
