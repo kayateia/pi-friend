@@ -23,11 +23,14 @@ import {
   RecoveryRecordError,
 } from "./recovery.ts";
 import { buildMemoryDocumentIndex } from "./indexer.ts";
+import type { EmbeddingProvider } from "./embedding.ts";
 import type {
   MemorySearchOptions,
   MemorySearchResult,
 } from "./search.ts";
 import { searchIndexedFiles } from "./search.ts";
+import { searchSemantically } from "./semantic-search.ts";
+import type { VectorIndex } from "./vector-index.ts";
 import type {
   MemoryNodeArea,
   MemoryNodeRepository,
@@ -75,6 +78,12 @@ export interface MemoryRestorationResult {
   alreadyRestored: boolean;
 }
 
+/** Optional semantic-search dependencies, available only when configured. */
+export interface SemanticSearchDependencies {
+  provider: EmbeddingProvider;
+  index: VectorIndex;
+}
+
 /** Error raised when a memory operation cannot preserve its invariants. */
 export class MemoryServiceError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -92,14 +101,17 @@ export class MemoryServiceError extends Error {
 export class MemoryNodeService {
   private readonly repository: MemoryNodeRepository;
   private readonly now: () => Date;
+  private readonly semantic: SemanticSearchDependencies | undefined;
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(
     repository: MemoryNodeRepository,
     now: () => Date = () => new Date(),
+    semantic: SemanticSearchDependencies | undefined = undefined,
   ) {
     this.repository = repository;
     this.now = now;
+    this.semantic = semantic;
   }
 
   /** Reads a node from one lifecycle area. */
@@ -119,14 +131,30 @@ export class MemoryNodeService {
     }
 
     const index = await buildMemoryDocumentIndex(this.repository.store);
-    const results = searchIndexedFiles(index, options);
+    const mode = options.mode ?? "keyword";
+    let results: MemorySearchResult[];
+    if (mode === "semantic") {
+      if (!this.semantic) {
+        throw new MemoryServiceError(
+          "Semantic search is unavailable because no embedding provider is configured.",
+        );
+      }
+      results = await searchSemantically(
+        index,
+        options,
+        this.semantic.provider,
+        this.semantic.index,
+      );
+    } else {
+      results = searchIndexedFiles(index, options);
+    }
 
     for (const result of results) {
       await this.repository.store.appendAccessLog({
         source: "tool",
         ...(result.slug === undefined ? {} : { slug: result.slug }),
         path: result.relativePath,
-        tier: "keyword",
+        tier: mode,
         query: options.query,
       });
     }

@@ -28,6 +28,7 @@ import type {
 import type {
   MemorySearchOptions,
   MemorySearchResult,
+  MemorySearchMode,
 } from "../memory/search.ts";
 
 const MEMORY_AREAS = [
@@ -75,7 +76,7 @@ interface MemoryRestoreDetails {
 /** Structured details returned by a keyword search. */
 interface MemorySearchDetails {
   query: string;
-  mode: "keyword";
+  mode: MemorySearchMode;
   count: number;
   results: MemorySearchResult[];
 }
@@ -470,8 +471,8 @@ export function registerMemoryTools(
         description: "Words, slug, title, tag, or phrase to find.",
       }),
       mode: Type.Optional(
-        StringEnum(["keyword"] as const, {
-          description: "Search mode. Only keyword is available initially.",
+        StringEnum(["keyword", "semantic"] as const, {
+          description: "Search mode. Default: keyword.",
         }),
       ),
       type: Type.Optional(
@@ -496,9 +497,10 @@ export function registerMemoryTools(
       params,
     ): Promise<AgentToolResult<MemorySearchDetails>> {
       const service = requireService(getService);
+      const mode = params.mode ?? "keyword";
       const searchOptions: MemorySearchOptions = {
         query: params.query,
-        mode: params.mode ?? "keyword",
+        mode,
         type: params.type,
         limit: params.limit,
       };
@@ -513,7 +515,7 @@ export function registerMemoryTools(
         ],
         details: {
           query: params.query,
-          mode: "keyword",
+          mode,
           count: results.length,
           results,
         },

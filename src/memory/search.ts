@@ -13,7 +13,7 @@ import type {
 } from "./schema.ts";
 
 /** Supported search modes for the initial implementation. */
-export type MemorySearchMode = "keyword";
+export type MemorySearchMode = "keyword" | "semantic";
 
 /** Input for a keyword search over indexed Markdown files. */
 export interface MemorySearchOptions {
@@ -39,7 +39,13 @@ export interface MemorySearchResult {
 }
 
 /** Indexed fields that can contribute to a keyword result. */
-export type SearchField = "slug" | "path" | "title" | "tags" | "body";
+export type SearchField =
+  | "slug"
+  | "path"
+  | "title"
+  | "tags"
+  | "body"
+  | "semantic";
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 25;

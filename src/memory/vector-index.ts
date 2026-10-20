@@ -37,18 +37,22 @@ export interface VectorRecord {
   tags?: string[];
 }
 
-/** One nearest-neighbor result. */
-export interface VectorSearchHit {
+/** Stored metadata for one indexed vector. */
+export interface VectorEntryMetadata {
   key: string;
   kind: MemoryFileKind;
   sourcePath: string;
   contentHash: string;
-  distance: number;
   title?: string;
   type?: MemoryType;
   status?: MemoryStatus;
   decayWeight?: number;
   tags: string[];
+}
+
+/** One nearest-neighbor result. */
+export interface VectorSearchHit extends VectorEntryMetadata {
+  distance: number;
 }
 
 /** Options for opening or creating a SQLite vector index. */
@@ -62,6 +66,7 @@ export interface VectorIndex {
   upsert(record: VectorRecord): void;
   remove(key: string): boolean;
   search(embedding: Float32Array, limit?: number): VectorSearchHit[];
+  listEntries(): VectorEntryMetadata[];
   count(): number;
   clear(): void;
   rebuild(records: VectorRecord[]): void;
@@ -187,7 +192,33 @@ export class SqliteVectorIndex implements VectorIndex {
       )
       .all(embedding, safeLimit);
 
-    return rows.map(parseSearchRow);
+    return rows.map((row) => ({
+      ...parseEntryMetadata(row),
+      distance: requireNumber(row.distance, "distance"),
+    }));
+  }
+
+  /** Lists metadata for every indexed vector without loading embeddings. */
+  listEntries(): VectorEntryMetadata[] {
+    return this.database
+      .prepare(
+        `
+          SELECT
+            entry_key,
+            entry_kind,
+            source_path,
+            content_hash,
+            title,
+            memory_type,
+            memory_status,
+            decay_weight,
+            tags_json
+          FROM vector_entries
+          ORDER BY entry_key
+        `,
+      )
+      .all()
+      .map(parseEntryMetadata);
   }
 
   /** Number of records currently stored in the index. */
@@ -379,10 +410,10 @@ export class SqliteVectorIndex implements VectorIndex {
   }
 }
 
-/** Parses one joined vector-search row without using unchecked assertions. */
-function parseSearchRow(
+/** Parses relational vector metadata without using unchecked assertions. */
+function parseEntryMetadata(
   row: Record<string, import("node:sqlite").SQLOutputValue>,
-): VectorSearchHit {
+): VectorEntryMetadata {
   const kind = requireString(row.entry_kind, "entry_kind");
   if (
     kind !== "node" &&
@@ -406,7 +437,6 @@ function parseSearchRow(
     kind,
     sourcePath: requireString(row.source_path, "source_path"),
     contentHash: requireString(row.content_hash, "content_hash"),
-    distance: requireNumber(row.distance, "distance"),
     ...(title === undefined ? {} : { title }),
     ...(isMemoryType(type) ? { type } : {}),
     ...(isMemoryStatus(status) ? { status } : {}),
