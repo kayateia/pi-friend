@@ -65,6 +65,14 @@ memory:
 A missing config uses the default. Malformed configuration is reported and
 does not fall back to another path. The tree is initialized on `session_start`.
 
+The repository includes a complete, ready-to-copy example at
+[`pi-friend.example.yml`](./pi-friend.example.yml). Install it manually with:
+
+```sh
+mkdir -p ~/.pi/agent/pi-friend
+cp pi-friend.example.yml ~/.pi/agent/pi-friend/pi-friend.yml
+```
+
 Injection defaults to enabled at position `-1`, meaning the memory block is
 attached to the previous user turn to preserve the current hot cache prefix.
 Position `0` targets the current turn. `keyword`, `semantic`, and `hybrid`

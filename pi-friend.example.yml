@@ -1,0 +1,29 @@
+memory:
+  root: ~/.pi/agent/pi-friend/memory
+
+  injection:
+    enabled: true
+    position: -1
+    mode: hybrid
+    limit: 5
+    max_chars: 6000
+    daily:
+      enabled: true
+      days: 2
+      max_chars: 3000
+
+  auto_capture:
+    enabled: true
+    every_turns: 5
+    max_candidates: 3
+    # model: openrouter/google/gemini-2.5-flash
+
+  sweep:
+    enabled: true
+    tombstone_grace_days: 30
+    # model: openrouter/google/gemini-2.5-flash
+
+  dreaming:
+    enabled: true
+    max_nodes: 4
+    # model: openrouter/google/gemini-2.5-flash

@@ -24,7 +24,8 @@
   "files": [
     "index.ts",
     "src",
-    "README.md"
+    "README.md",
+    "pi-friend.example.yml"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
