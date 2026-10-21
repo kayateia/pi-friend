@@ -46,6 +46,8 @@ export interface SweepConfig {
   /** Optional provider/model-id override for candidate decisions. */
   model?: string;
   tombstoneGraceDays: number;
+  /** Batches smaller than this bypass the 25% removal guard. */
+  minGuardedBatchSize: number;
 }
 
 /** Configuration for the post-sweep dream narrative pass. */
@@ -114,6 +116,7 @@ export function defaultSweepConfig(): SweepConfig {
   return {
     enabled: true,
     tombstoneGraceDays: 30,
+    minGuardedBatchSize: 10,
   };
 }
 
@@ -478,6 +481,19 @@ function parseSweep(value: unknown, configPath: string): SweepConfig {
       );
     }
     config.tombstoneGraceDays = value.tombstone_grace_days;
+  }
+  if (value.min_guarded_batch_size !== undefined) {
+    if (
+      typeof value.min_guarded_batch_size !== "number" ||
+      !Number.isInteger(value.min_guarded_batch_size) ||
+      value.min_guarded_batch_size < 1 ||
+      value.min_guarded_batch_size > 10_000
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.sweep.min_guarded_batch_size must be an integer from 1 to 10000.`,
+      );
+    }
+    config.minGuardedBatchSize = value.min_guarded_batch_size;
   }
   return config;
 }

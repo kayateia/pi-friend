@@ -59,6 +59,7 @@ memory:
   sweep:
     enabled: true
     tombstone_grace_days: 30
+    min_guarded_batch_size: 10
     # model: openrouter/google/gemini-2.5-flash
   dreaming:
     enabled: true
@@ -173,7 +174,7 @@ Current first pass: expired tombstones are archived under
 **Abort-don't-partial:** if any step fails, abort immediately; do not write partial results.
 
 **State file rule:** the sweep maintains a state file (last-run timestamp, cursor). It MUST be updated in every outcome, including failure. A pass that does not advance the timestamp is a failed pass — otherwise the next run re-reads the same window forever.
-- **Bounded loss**: a sweep that would remove or compact more than 25% of prior entries (per file or per sweep, whichever is tighter) is rejected and must be run in smaller batches. This caps silent history erasure — the record is load-bearing, and the janitor doesn't get to demolish load-bearing walls.
+- **Bounded loss**: for batches at or above `min_guarded_batch_size`, a sweep that would remove or compact more than 25% of prior entries (per file or per sweep, whichever is tighter) is rejected. Smaller batches bypass the ratio guard. This caps silent history erasure while avoiding a guard deadlock when only a few candidates exist.
 - **Every sweep writes a dated log** in `sweeps/`: what moved, what merged, what was dropped, why. Record-is-load-bearing applies to the janitor.
 - **Preimage before every sweep**: before any sweep modifies files, snapshot the prior state (full copy of affected files or a git commit of the memory tree) so any sweep's diff is reversible. Recovery records cover single deletions; the preimage covers a whole sweep gone wrong.
 

@@ -83,7 +83,11 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
     const result = await runDailySweep(
       undefined,
       service,
-      { enabled: true, tombstoneGraceDays: 30 },
+      {
+        enabled: true,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 10,
+      },
       {
         now: new Date("2026-10-20T05:00:00.000Z"),
         decide: async () => [
@@ -125,7 +129,11 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
     const second = await runDailySweep(
       undefined,
       service,
-      { enabled: true, tombstoneGraceDays: 30 },
+      {
+        enabled: true,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 10,
+      },
       { now: new Date("2026-10-20T06:00:00.000Z") },
     );
     assert.equal(second.ran, false);
@@ -149,7 +157,11 @@ test("sweep failure still advances state and writes a failure log", async () => 
     const result = await runDailySweep(
       undefined,
       service,
-      { enabled: true, tombstoneGraceDays: 30 },
+      {
+        enabled: true,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 10,
+      },
       {
         now: new Date("2026-10-21T05:00:00.000Z"),
         decide: async () => {
@@ -206,7 +218,11 @@ test("sweep archives expired tombstones and creates one dream", async () => {
     const result = await runDailySweep(
       undefined,
       service,
-      { enabled: true, tombstoneGraceDays: 30 },
+      {
+        enabled: true,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 10,
+      },
       {
         now: new Date("2026-02-15T05:00:00.000Z"),
         dreaming: { enabled: true, maxNodes: 3 },
@@ -242,6 +258,100 @@ test("sweep archives expired tombstones and creates one dream", async () => {
       first.slug,
       second.slug,
     ]);
+  });
+});
+
+test("small batches may remove more than 25% below the guard threshold", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const candidate = await service.stageCandidate({
+      title: "Small Batch Drop",
+      type: "fact",
+      body: "This small batch may be dropped.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    const result = await runDailySweep(
+      undefined,
+      service,
+      {
+        enabled: true,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 5,
+      },
+      {
+        now: new Date("2026-10-22T05:00:00.000Z"),
+        decide: async () => [
+          {
+            slug: candidate.node.slug,
+            action: "drop",
+            reason: "small batch cleanup",
+          },
+        ],
+      },
+    );
+
+    assert.equal(result.error, undefined);
+    assert.equal(result.dropped, 1);
+    assert.equal(
+      await service.read(candidate.node.slug, "staging"),
+      null,
+    );
+  });
+});
+
+test("the 25% guard still applies at the configured batch threshold", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const first = await service.stageCandidate({
+      title: "Guarded One",
+      type: "fact",
+      body: "First guarded candidate.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const second = await service.stageCandidate({
+      title: "Guarded Two",
+      type: "fact",
+      body: "Second guarded candidate.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    const result = await runDailySweep(
+      undefined,
+      service,
+      {
+        enabled: true,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 2,
+      },
+      {
+        now: new Date("2026-10-23T05:00:00.000Z"),
+        decide: async () => [
+          {
+            slug: first.node.slug,
+            action: "drop",
+            reason: "guarded removal",
+          },
+          {
+            slug: second.node.slug,
+            action: "promote",
+            reason: "durable",
+          },
+        ],
+      },
+    );
+
+    assert.match(result.error ?? "", /guard applies at 2 or more/);
+    assert.ok(await service.read(first.node.slug, "staging"));
+    assert.ok(await service.read(second.node.slug, "staging"));
   });
 });
 

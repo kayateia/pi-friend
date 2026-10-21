@@ -52,6 +52,7 @@ test("missing configuration uses the default memory root", async () => {
     assert.deepEqual(config.sweep, {
       enabled: true,
       tombstoneGraceDays: 30,
+      minGuardedBatchSize: 10,
     });
     assert.deepEqual(config.dreaming, {
       enabled: true,
@@ -218,6 +219,7 @@ test("sweep settings are parsed and validated", () => {
       "  sweep:",
       "    enabled: false",
       "    tombstone_grace_days: 14",
+      "    min_guarded_batch_size: 12",
       "    model: openrouter/google/gemini-2.5-flash",
     ].join("\n"),
     configPath,
@@ -226,12 +228,21 @@ test("sweep settings are parsed and validated", () => {
   assert.deepEqual(config.sweep, {
     enabled: false,
     tombstoneGraceDays: 14,
+    minGuardedBatchSize: 12,
     model: "openrouter/google/gemini-2.5-flash",
   });
   assert.throws(
     () =>
       parseMemoryConfig(
         "memory:\n  sweep:\n    tombstone_grace_days: 0\n",
+        configPath,
+      ),
+    MemoryConfigError,
+  );
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        "memory:\n  sweep:\n    min_guarded_batch_size: 0\n",
         configPath,
       ),
     MemoryConfigError,

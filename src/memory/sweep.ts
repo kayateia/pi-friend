@@ -121,12 +121,17 @@ export async function runDailySweep(
       }
     }
 
-    const dropCount = decisions.filter(
+    const destructiveActions = decisions.filter(
       (decision) => decision.action === "drop",
     ).length;
-    if (dropCount > Math.floor(candidates.length * 0.25)) {
+    const ratioGuardApplies =
+      candidates.length >= config.minGuardedBatchSize;
+    if (
+      ratioGuardApplies &&
+      destructiveActions > Math.floor(candidates.length * 0.25)
+    ) {
       throw new Error(
-        "Sweep would drop more than 25% of staged candidates; run a smaller batch.",
+        `Sweep would remove more than 25% of ${candidates.length} staged candidates; the guard applies at ${config.minGuardedBatchSize} or more.`,
       );
     }
 

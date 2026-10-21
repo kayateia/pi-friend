@@ -55,6 +55,7 @@ memory:
   sweep:
     enabled: true
     tombstone_grace_days: 30
+    min_guarded_batch_size: 10
     # model: openrouter/google/gemini-2.5-flash
   dreaming:
     enabled: true
@@ -170,6 +171,10 @@ The sweep model chooses `promote`, `merge`, or `drop` for staged candidates.
 Dropped candidates are archived under `sweeps/dropped/`, not hard-deleted.
 Decay is volume-relative: access resets a node to fresh, while new canonical
 memories since its last use lower its `decay_weight`.
+
+The 25% removal guard applies only when a sweep has at least
+`min_guarded_batch_size` candidates. Smaller batches can remove or consolidate
+above that ratio without deadlocking on a tiny working set.
 
 Superseded tombstones older than `tombstone_grace_days` are archived under
 `sweeps/archived/<run-id>/`. They remain searchable and are not irreversibly
