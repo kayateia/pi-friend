@@ -9,6 +9,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutoCaptureConfig } from "./config.ts";
+import { debugLog } from "../debug/log.ts";
 import {
   buildCapturePrompt,
   CAPTURE_SYSTEM_PROMPT,
@@ -77,13 +78,7 @@ export async function runCaptureModel(
   const response = finalMessage.content
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("\n");
-  if (
-    ["1", "true", "yes"].includes(
-      (process.env.PI_FRIEND_DEBUG_HOOKS ?? "").toLowerCase(),
-    )
-  ) {
-    console.log("[pi-friend capture response]", response);
-  }
+  debugLog("capture response", response);
   return parseCaptureResponse(response, config.maxCandidates, speakerHint);
 }
 

@@ -12,7 +12,7 @@ import type { ContextEvent } from "@earendil-works/pi-coding-agent";
 export type RagAgentMessage = ContextEvent["messages"][number];
 
 /**
- * Appends one memory block to a selected user message.
+ * Prepends one memory block to a selected user message.
  *
  * Position 0 targets the current user turn. Negative positions select earlier
  * user turns, falling back to the latest turn when the transcript is shorter.
@@ -52,11 +52,11 @@ export function injectRagContext(
     typeof target.content === "string"
       ? {
           ...target,
-          content: `${target.content}\n\n${block}`,
+          content: `${block}\n\n${target.content}`,
         }
       : {
           ...target,
-          content: [...target.content, { type: "text", text: block }],
+          content: [{ type: "text", text: block }, ...target.content],
         };
   return updatedMessages;
 }

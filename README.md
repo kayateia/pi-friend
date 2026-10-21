@@ -79,6 +79,9 @@ Position `0` targets the current turn. `keyword`, `semantic`, and `hybrid`
 retrieval modes are supported; semantic/hybrid failures fall back to keyword
 retrieval so prompt injection does not block the model call.
 
+The injected block is prepended to the selected user message and wrapped in
+`<pi-friend-memory>...</pi-friend-memory>`.
+
 Recent daily logs are injected as a separate observed-context section. The
 default reads today's and yesterday's logs, taking bounded tails from each
 append-only file.
@@ -201,12 +204,21 @@ keyword and semantic candidates using reciprocal-rank fusion.
 
 ## Inspect lifecycle hooks
 
-Set `PI_FRIEND_DEBUG_HOOKS=1` when starting Pi to print each structural
-lifecycle event and its shared extension context with `console.log`:
+Set `PI_FRIEND_DEBUG_HOOKS=1` when starting Pi to append each structural
+lifecycle event to a debug file:
 
 ```sh
 PI_FRIEND_DEBUG_HOOKS=1 pi --extension ./index.ts
 ```
+
+The default file is:
+
+```text
+~/.pi/agent/pi-friend/debug.log
+```
+
+Override it with `PI_FRIEND_DEBUG_LOG=/path/to/debug.log`. Debug output never
+writes to stdout or the TUI.
 
 The logger includes session, agent, turn, prompt, provider, tool, input, model,
 and UI boundaries. It intentionally omits token-level streaming updates.

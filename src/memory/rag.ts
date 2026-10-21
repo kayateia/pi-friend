@@ -96,6 +96,10 @@ export async function buildRagContext(
   const daily = config.daily.enabled
     ? await buildDailySection(service, config, now)
     : { text: "", dates: [] };
+  const openingTag = "<pi-friend-memory>";
+  const closingTag = "</pi-friend-memory>";
+  const wrapperLength = openingTag.length + closingTag.length + 2;
+  const bodyLimit = Math.max(0, config.maxChars - wrapperLength);
   const sections: string[] = [];
   let length = daily.text.length;
   let selectedNodeCount = 0;
@@ -105,9 +109,9 @@ export async function buildRagContext(
   if (nodes.length > 0) {
     const selectedMemory: string[] = [];
     length += memoryHeader.length + (sections.length > 0 ? 2 : 0);
-    if (length <= config.maxChars) {
+    if (length <= bodyLimit) {
       for (const block of blocks) {
-        if (length + block.length + 2 > config.maxChars) {
+        if (length + block.length + 2 > bodyLimit) {
           break;
         }
         selectedMemory.push(block);
@@ -124,7 +128,9 @@ export async function buildRagContext(
   }
 
   return {
-    text: sections.join("\n\n").slice(0, config.maxChars),
+    text: `${openingTag}\n${sections
+      .join("\n\n")
+      .slice(0, bodyLimit)}\n${closingTag}`,
     count: selectedNodeCount,
     slugs: nodes
       .slice(0, selectedNodeCount)

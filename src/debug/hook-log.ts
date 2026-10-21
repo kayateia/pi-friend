@@ -11,16 +11,20 @@ import type {
   ExtensionContext,
   ExtensionEvent,
 } from "@earendil-works/pi-coding-agent";
+import {
+  debugLog,
+  isDebugEnabled,
+} from "./log.ts";
 
 /**
- * Prints one complete hook invocation.
+ * Writes one complete hook invocation to the debug log.
  *
  * Every Pi event handler receives the event-specific payload first and the
  * shared ExtensionContext second. Logging both makes it possible to inspect
  * which fields are available before memory behavior is attached to them.
  */
 function logHook(event: ExtensionEvent, ctx: ExtensionContext): void {
-  console.log(`[pi-friend hook] ${event.type}`, {
+  debugLog(`hook ${event.type}`, {
     event,
     context: ctx,
     contextValues: {
@@ -47,8 +51,7 @@ function logHook(event: ExtensionEvent, ctx: ExtensionContext): void {
  * or partial tool update and would overwhelm the useful lifecycle output.
  */
 export function registerHookLogging(pi: ExtensionAPI): void {
-  const hookLogSetting = (process.env.PI_FRIEND_DEBUG_HOOKS ?? "").toLowerCase();
-  if (hookLogSetting !== "1" && hookLogSetting !== "true" && hookLogSetting !== "yes") {
+  if (!isDebugEnabled()) {
     return;
   }
 

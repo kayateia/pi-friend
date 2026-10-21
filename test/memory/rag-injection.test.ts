@@ -16,7 +16,7 @@ import {
 
 const BLOCK = "## Recalled memories\nMemory block";
 
-test("position zero appends to the latest user message and preserves images", () => {
+test("position zero prepends to the latest user message and preserves images", () => {
   const messages: UserMessage[] = [
     { role: "user", content: "first", timestamp: 1 },
     {
@@ -34,7 +34,7 @@ test("position zero appends to the latest user message and preserves images", ()
   assert.ok(latest && latest.role === "user");
   assert.ok(Array.isArray(latest.content));
   assert.equal(latest.content.length, 3);
-  assert.deepEqual(latest.content[2], { type: "text", text: BLOCK });
+  assert.deepEqual(latest.content[0], { type: "text", text: BLOCK });
   assert.deepEqual(injected[0], messages[0]);
 });
 
@@ -45,11 +45,11 @@ test("negative positions select earlier user prompts and fall back to latest", (
   ];
 
   const previous = injectRagContext(messages, BLOCK, -1);
-  assert.equal(userContent(previous, 0), `first\n\n${BLOCK}`);
+  assert.equal(userContent(previous, 0), `${BLOCK}\n\nfirst`);
   assert.equal(userContent(previous, 1), "second");
 
   const fallback = injectRagContext([messages[0]!], BLOCK, -2);
-  assert.equal(userContent(fallback, 0), `first\n\n${BLOCK}`);
+  assert.equal(userContent(fallback, 0), `${BLOCK}\n\nfirst`);
 });
 
 test("no-op cases keep the original message array", () => {

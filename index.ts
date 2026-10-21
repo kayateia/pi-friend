@@ -12,6 +12,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { registerHookLogging } from "./src/debug/hook-log.ts";
+import { debugLog } from "./src/debug/log.ts";
 import { defaultRagInjectionConfig } from "./src/memory/config.ts";
 import {
   defaultAutoCaptureConfig,
@@ -295,13 +296,7 @@ function describeError(error: unknown): string {
 
 /** Emits opt-in diagnostics for the retrieval and injection pipeline. */
 function debugRag(label: string, value: Record<string, unknown>): void {
-  if (
-    ["1", "true", "yes"].includes(
-      (process.env.PI_FRIEND_DEBUG_HOOKS ?? "").toLowerCase(),
-    )
-  ) {
-    console.log(`[pi-friend rag] ${label}`, value);
-  }
+  debugLog(`rag ${label}`, value);
 }
 
 /** Reports capture-model configuration issues without interrupting the session. */

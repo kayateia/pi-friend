@@ -126,6 +126,8 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
     );
 
     assert.equal(context.count, 3);
+    assert.ok(context.text.startsWith("<pi-friend-memory>\n"));
+    assert.ok(context.text.endsWith("\n</pi-friend-memory>"));
     assert.deepEqual(context.slugs, [
       "orchid-fresh",
       "orchid-middle",
