@@ -1,10 +1,10 @@
 ## Overview
 
-This project represents a memory extension for the pi.dev AI harness.
+This project is a monorepo for extensions to the pi.dev AI harness.
 
 Full information about [pi.dev plugins and practices](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 
-The design of what we want to build is in pi-friend-memory-spec.md in this directory.
+The memory extension design is in docs/pi-friend-memory-spec.md.
 
 ## Needed files
 
@@ -20,7 +20,7 @@ Use the following copyright header in new files:
 
 ```
 /**
- * pi-friend-memory
+ * pi-friend
  *
  * @license
  * Copyright 2026 Kayateia
