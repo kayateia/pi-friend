@@ -1,229 +1,48 @@
-# pi-friend-memory
+# pi-friend
 
-A friendship-oriented memory extension for the Pi coding agent.
+Monorepo for Pi extensions built around friendship-oriented memory and related
+agent capabilities.
 
-The storage foundation, strict schema, repository, memory lifecycle tools,
-keyword and semantic search, and sqlite-vec indexing are implemented. Prompt
-injection is still upcoming.
+## Packages
 
-## Package layout
+- [`pi-friend-memory`](./packages/pi-friend-memory/) — canonical Markdown memory,
+  retrieval, auto-capture, consolidation, and dreaming.
 
-Pi loads the extension from the root-level composition entry:
-
-```text
-index.ts   # Pi-facing hooks, commands, and tool registrations
-src/       # Configuration, storage, and implementation modules
-```
-
-## Memory storage
-
-The default tree is:
-
-```text
-~/.pi/agent/pi-friend/memory/
-├── MEMORY.md
-├── nodes/
-│   └── superseded/
-├── staging/
-├── daily/
-├── access-log
-├── sweeps/
-├── index/
-└── recovery/
-```
-
-Override the root in `~/.pi/agent/pi-friend/pi-friend.yml`:
-
-```yaml
-memory:
-  root: ~/workspace/memory
-  injection:
-    enabled: true
-    position: -1
-    mode: hybrid
-    limit: 5
-    max_chars: 6000
-    daily:
-      enabled: true
-      days: 2
-      max_chars: 3000
-  auto_capture:
-    enabled: true
-    every_turns: 5
-    max_candidates: 3
-    # model: openrouter/google/gemini-2.5-flash
-  sweep:
-    enabled: true
-    tombstone_grace_days: 30
-    min_guarded_batch_size: 10
-    # model: openrouter/google/gemini-2.5-flash
-  dreaming:
-    enabled: true
-    max_nodes: 4
-    # model: openrouter/google/gemini-2.5-flash
-```
-
-A missing config uses the default. Malformed configuration is reported and
-does not fall back to another path. The tree is initialized on `session_start`.
-
-The repository includes a complete, ready-to-copy example at
-[`pi-friend.example.yml`](./pi-friend.example.yml). Install it manually with:
-
-```sh
-mkdir -p ~/.pi/agent/pi-friend
-cp pi-friend.example.yml ~/.pi/agent/pi-friend/pi-friend.yml
-```
-
-Injection defaults to enabled at position `-1`, meaning the memory block is
-attached to the previous user turn to preserve the current hot cache prefix.
-Position `0` targets the current turn. `keyword`, `semantic`, and `hybrid`
-retrieval modes are supported; semantic/hybrid failures fall back to keyword
-retrieval so prompt injection does not block the model call.
-
-The injected block is prepended to the selected user message and wrapped in
-`<pi-friend-memory>...</pi-friend-memory>`.
-
-Recent daily logs are injected as a separate observed-context section. The
-default reads today's and yesterday's logs, taking bounded tails from each
-append-only file.
+The shared design document remains at
+[`pi-friend-memory-spec.md`](./pi-friend-memory-spec.md).
 
 ## Development
 
-Install the development dependencies:
+Install all workspace dependencies from the repository root:
 
 ```sh
 npm install
 ```
 
-Type-check the extension:
+Type-check and test every package:
 
 ```sh
 npm run typecheck
-```
-
-Run the storage tests:
-
-```sh
 npm test
 ```
 
-Load the extension directly from the working tree:
+Work on one package:
 
 ```sh
-pi --extension ./index.ts
+npm test --workspace pi-friend-memory
+npm run typecheck --workspace pi-friend-memory
 ```
 
-Then run `/hello` to greet the world or `/hello Aisling` to greet someone by
-name. Pi compiles TypeScript extensions itself, so no build step is required.
+## Using the memory extension
 
-## Install locally
-
-Install this checkout as a Pi package:
+Load it directly during development:
 
 ```sh
-pi install ./
+pi --extension ./packages/pi-friend-memory/index.ts
 ```
 
-Pi reads the extension entry point from the `pi.extensions` field in
-`package.json`.
-
-## Memory tools
-
-- `memory_add` creates a canonical active node, derives a unique slug unless one
-  is supplied, and records speaker attribution.
-- `memory_edit` updates an existing node while preserving creation and usage
-  metadata and appending a dated audit entry.
-- `memory_delete` moves exactly one matched node into superseded storage after
-  writing a durable recovery record.
-- `memory_restore` restores a deleted node from its recovery ID without
-  overwriting newer canonical content.
-- `memory_promote` promotes one staging candidate, merging semantic
-  near-duplicates into an existing canonical node.
-- `memory_read` reads a complete node from canonical, staging, or superseded
-  storage.
-- `memory_search` supports ranked keyword search and semantic search across
-  nodes, staging candidates, and plain Markdown documents.
-- `memory_log` appends a timestamped running note to today's daily log.
-
-Supersession through `memory_add` is intentionally deferred until correction
-handling can update both sides of the relationship atomically.
-
-## Auto-capture
-
-After every configured number of completed agent runs, a separate no-tools
-model request reviews only the transcript entries added since the prior
-successful capture. The prompt treats conversation content as observed data,
-requires concrete speaker attribution, and allows only active memory types.
-
-Candidates are written to `staging/` with `status: candidate` and are excluded
-from RAG. Exact duplicates of canonical or staged memories are skipped.
-Promotion uses the semantic index to detect near-duplicates, merging close
-matches while preserving links, tags, speakers, and audit history.
-
-## Daily sweep and decay
-
-The daily sweep runs at most once per local calendar day after an agent run
-settles. Before mutation it writes a full canonical preimage under
-`sweeps/preimages/`. It always advances `sweeps/state.json`, including failed
-attempts, and appends a dated decision log under `sweeps/`.
-
-The sweep model chooses `promote`, `merge`, or `drop` for staged candidates.
-Dropped candidates are archived under `sweeps/dropped/`, not hard-deleted.
-Decay is volume-relative: access resets a node to fresh, while new canonical
-memories since its last use lower its `decay_weight`.
-
-The 25% removal guard applies only when a sweep has at least
-`min_guarded_batch_size` candidates. Smaller batches can remove or consolidate
-above that ratio without deadlocking on a tiny working set.
-
-Superseded tombstones older than `tombstone_grace_days` are archived under
-`sweeps/archived/<run-id>/`. They remain searchable and are not irreversibly
-deleted.
-
-## Dreaming
-
-After a successful sweep, a separate model pass receives an
-adjacency-weighted shortlist and is asked to choose what it wants to sit with
-before writing one short first-person narrative.
-
-Dreams are stored as canonical nodes with `type: dream`, explicit source-node
-links, and `emotional_flavor: dreamlike`. They are permanently excluded from
-default RAG and can never be promoted as factual memories by automated
-processes.
-
-## Semantic search
-
-The `index/` directory includes a disposable `sqlite-vec` backend backed by
-Node's built-in SQLite runtime. It supports transactional upsert, removal,
-cosine search, clearing, and rebuild against a declared embedding model and
-dimension count.
-
-Semantic mode uses Pi's stored OpenRouter credential, falling back to
-`OPENROUTER_API_KEY`, and embeds with `openai/text-embedding-3-small` at 1,536
-dimensions. Markdown is synchronized lazily on semantic search; unchanged
-content hashes do not make repeat embedding calls.
-
-The Markdown tree remains canonical. Deleting `index/vectors.sqlite` is always
-safe because the index can be rebuilt from source files. Hybrid mode combines
-keyword and semantic candidates using reciprocal-rank fusion.
-
-## Inspect lifecycle hooks
-
-Set `PI_FRIEND_DEBUG_HOOKS=1` when starting Pi to append each structural
-lifecycle event to a debug file:
+Install the package from its package directory:
 
 ```sh
-PI_FRIEND_DEBUG_HOOKS=1 pi --extension ./index.ts
+pi install ./packages/pi-friend-memory
 ```
-
-The default file is:
-
-```text
-~/.pi/agent/pi-friend/debug.log
-```
-
-Override it with `PI_FRIEND_DEBUG_LOG=/path/to/debug.log`. Debug output never
-writes to stdout or the TUI.
-
-The logger includes session, agent, turn, prompt, provider, tool, input, model,
-and UI boundaries. It intentionally omits token-level streaming updates.
