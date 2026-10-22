@@ -73,6 +73,25 @@ test("configured root expands a leading tilde", () => {
   assert.equal(config.root, path.join(path.sep, "home", "friend", "workspace", "memory"));
 });
 
+test("prompt configuration is ignored by the memory parser", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  root: ~/memory",
+      "prompt:",
+      "  unknown: ignored-by-memory",
+    ].join("\n"),
+    configPath,
+    "/Users/example",
+  );
+
+  assert.equal(
+    config.root,
+    path.join("/Users/example", "memory"),
+  );
+});
+
 test("relative configured roots resolve from the config directory", () => {
   const configDir = path.join(path.sep, "tmp", "agent", "pi-friend");
   const configPath = path.join(configDir, "pi-friend.yml");

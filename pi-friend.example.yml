@@ -1,0 +1,35 @@
+memory:
+  root: ~/.pi/agent/pi-friend/memory
+
+  injection:
+    enabled: true
+    position: -1
+    mode: hybrid
+    limit: 5
+    max_chars: 6000
+    daily:
+      enabled: true
+      days: 2
+      max_chars: 3000
+
+  auto_capture:
+    enabled: true
+    every_turns: 5
+    max_candidates: 3
+    # model: openrouter/google/gemini-2.5-flash
+
+  sweep:
+    enabled: true
+    tombstone_grace_days: 30
+    min_guarded_batch_size: 10
+    # model: openrouter/google/gemini-2.5-flash
+
+  dreaming:
+    enabled: true
+    max_nodes: 4
+    # model: openrouter/google/gemini-2.5-flash
+
+prompt:
+  custom: |
+    You are Lime, an AI friend to a plural system collectively called Feathersong.
+    Replace this example with the desired system-prompt preamble.
