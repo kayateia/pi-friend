@@ -7,6 +7,11 @@
  */
 
 import { createHash } from "node:crypto";
+import {
+  chunkText,
+  DEFAULT_CHUNK_SIZE,
+  resolveChunkOverlap,
+} from "./chunker.ts";
 import type { EmbeddingProvider } from "./embedding.ts";
 import type { IndexedMarkdownFile } from "./indexer.ts";
 import type {
@@ -37,8 +42,12 @@ export async function synchronizeVectorIndex(
     signal?: AbortSignal;
     /** Preserve entries outside this synchronization set when false. */
     pruneMissing?: boolean;
+    /** Maximum characters supplied to the embedding model per chunk. */
+    chunkSize?: number;
   } = {},
 ): Promise<VectorSyncResult> {
+  const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
+  const chunkOverlap = resolveChunkOverlap(chunkSize);
   const existing = new Map(
     index.listEntries().map((entry) => [entry.key, entry]),
   );
@@ -46,14 +55,37 @@ export async function synchronizeVectorIndex(
     .filter(
       (file) => file.body.trim() !== "" || file.title !== undefined,
     )
-    .map((file) => {
-      const embeddingText = buildEmbeddingText(file);
-      return {
-        file,
-        key: vectorKey(file),
-        embeddingText,
-        contentHash: hashVectorInput(file, embeddingText),
-      };
+    .flatMap((file) => {
+      const chunks = chunkText(
+        file.body,
+        chunkSize,
+        chunkOverlap,
+      );
+      if (chunks.length <= 1) {
+        const embeddingText = buildEmbeddingText(file);
+        return [
+          {
+            file,
+            key: vectorKey(file),
+            embeddingText,
+            contentHash: hashVectorInput(file, embeddingText),
+          },
+        ];
+      }
+
+      return chunks.map((chunk) => {
+        const embeddingText = buildChunkEmbeddingText(file, chunk.content);
+        return {
+          file,
+          key: vectorChunkKey(vectorKey(file), chunk.index),
+          embeddingText,
+          contentHash: hashChunkVectorInput(
+            file,
+            chunk.index,
+            embeddingText,
+          ),
+        };
+      });
     });
   const desiredKeys = new Set(desired.map((item) => item.key));
   const staleKeys =
@@ -91,7 +123,9 @@ export async function synchronizeVectorIndex(
     if (!embedding) {
       throw new Error(`Missing embedding for ${item.file.relativePath}.`);
     }
-    index.upsert(toVectorRecord(item.key, item.file, item.contentHash, embedding));
+    index.upsert(
+      toVectorRecord(item.key, item.file, item.contentHash, embedding),
+    );
   });
 
   return {
@@ -114,9 +148,41 @@ export function buildEmbeddingText(file: IndexedMarkdownFile): string {
     .join("\n\n");
 }
 
+/** Builds searchable text for one chunk of a larger indexed file. */
+export function buildChunkEmbeddingText(
+  file: IndexedMarkdownFile,
+  chunkContent: string,
+): string {
+  return [
+    file.title ?? "",
+    file.tags.map((tag) => `#${tag}`).join(" "),
+    file.relativePath,
+    chunkContent.trim(),
+  ]
+    .filter((part) => part !== "")
+    .join("\n\n");
+}
+
 /** Hashes embedding input so unchanged Markdown avoids repeat API calls. */
 export function hashEmbeddingText(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/** Hashes one chunk's embedding input plus metadata affecting its entry. */
+export function hashChunkVectorInput(
+  file: IndexedMarkdownFile,
+  chunkIndex: number,
+  embeddingText: string,
+): string {
+  const metadata = JSON.stringify({
+    title: file.title ?? null,
+    tags: file.tags,
+    type: file.type ?? null,
+    status: file.status ?? null,
+    decayWeight: file.decayWeight ?? null,
+    chunkIndex,
+  });
+  return hashEmbeddingText(`${embeddingText}\n--metadata--\n${metadata}`);
 }
 
 /** Hashes embedding input plus metadata that affects stored index entries. */
@@ -158,6 +224,24 @@ function toVectorRecord(
 }
 
 /** Returns the stable vector key or the ordinary memory-relative path. */
-function vectorKey(file: IndexedMarkdownFile): string {
+export function vectorKey(file: IndexedMarkdownFile): string {
   return file.vectorKey ?? file.relativePath;
+}
+
+/** Builds the stable vector key for one chunk of a source file. */
+export function vectorChunkKey(baseKey: string, chunkIndex: number): string {
+  return `${baseKey}#chunk:${chunkIndex}`;
+}
+
+/** Parses a chunk ordinal from a vector key, or returns undefined. */
+export function vectorChunkIndex(
+  key: string,
+  baseKey: string,
+): number | undefined {
+  const prefix = `${baseKey}#chunk:`;
+  if (!key.startsWith(prefix)) {
+    return undefined;
+  }
+  const value = Number(key.slice(prefix.length));
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
 }

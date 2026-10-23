@@ -7,6 +7,8 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import * as path from "node:path";
 import test from "node:test";
 import type { EmbeddingProvider } from "../../src/memory/embedding.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
@@ -94,5 +96,59 @@ test("semantic mode fails clearly when no provider is configured", async () => {
       () => service.search({ query: "test", mode: "semantic" }),
       /no embedding provider is configured/,
     );
+  });
+});
+
+test("semantic chunk search returns one result with the matching chunk", async () => {
+  await withTempDir(async (agentDir) => {
+    const configDir = path.join(agentDir, "pi-friend");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      path.join(configDir, "pi-friend.yml"),
+      "memory:\n  vector:\n    chunk_size: 200\n",
+      "utf8",
+    );
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const index = SqliteVectorIndex.open({
+      databasePath: ":memory:",
+      model: "test/semantic",
+      dimensions: 3,
+    });
+    const service = new MemoryNodeService(
+      repository,
+      () => new Date("2026-10-20T00:00:00.000Z"),
+      {
+        provider: new SemanticTestProvider(),
+        index,
+      },
+    );
+    try {
+      await service.add({
+        title: "Long Weather Log",
+        type: "event",
+        body: [
+          `Cold opening. ${"snow ".repeat(80)}`,
+          "A warm lantern appears near the end.",
+          `Cold closing. ${"frost ".repeat(80)}`,
+        ].join("\n\n"),
+        speaker: [{ name: "Aisling", confident: true }],
+      });
+
+      assert.ok(index.count() === 0);
+      const results = await service.search({
+        query: "warm",
+        mode: "semantic",
+      });
+
+      assert.ok(index.count() > 1);
+      assert.equal(results.length, 1);
+      assert.match(results[0]?.snippet ?? "", /warm lantern/);
+      assert.doesNotMatch(results[0]?.snippet ?? "", /Cold opening/);
+    } finally {
+      index.close();
+    }
   });
 });

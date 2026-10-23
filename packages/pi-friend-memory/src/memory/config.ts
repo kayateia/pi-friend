@@ -11,6 +11,11 @@ import { homedir } from "node:os";
 import * as path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parse } from "yaml";
+import {
+  DEFAULT_CHUNK_SIZE,
+  MAX_CONFIG_CHUNK_SIZE,
+  MIN_CONFIG_CHUNK_SIZE,
+} from "./chunker.ts";
 import type { MemorySearchMode } from "./search.ts";
 
 /** Configuration for automatic memory retrieval and prompt injection. */
@@ -50,6 +55,12 @@ export interface DreamingConfig {
   model?: string;
 }
 
+/** Configuration for the derived vector index. */
+export interface VectorConfig {
+  /** Maximum characters supplied for one embedding chunk. */
+  chunkSize: number;
+}
+
 /** Default prefix for model-facing memory tool names. */
 export const DEFAULT_MEMORY_TOOL_PREFIX = "memory_";
 
@@ -65,6 +76,7 @@ export interface MemoryConfig {
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
   dreaming: DreamingConfig;
+  vector: VectorConfig;
 }
 
 /** Inputs that can be overridden by tests or alternate Pi environments. */
@@ -117,6 +129,13 @@ export function defaultDreamingConfig(): DreamingConfig {
   return {
     enabled: true,
     maxNodes: 4,
+  };
+}
+
+/** Returns the default derived-index policy. */
+export function defaultVectorConfig(): VectorConfig {
+  return {
+    chunkSize: DEFAULT_CHUNK_SIZE,
   };
 }
 
@@ -174,6 +193,7 @@ export function parseMemoryConfig(
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
       dreaming: defaultDreamingConfig(),
+      vector: defaultVectorConfig(),
     };
   }
 
@@ -208,6 +228,7 @@ export function parseMemoryConfig(
     autoCapture: parseAutoCapture(memoryConfig.auto_capture, configPath),
     sweep: parseSweep(memoryConfig.sweep, configPath),
     dreaming: parseDreaming(memoryConfig.dreaming, configPath),
+    vector: parseVector(memoryConfig.vector, configPath),
   };
 }
 
@@ -236,6 +257,7 @@ export async function loadMemoryConfig(
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
         dreaming: defaultDreamingConfig(),
+        vector: defaultVectorConfig(),
       };
     }
 
@@ -262,6 +284,33 @@ function parseToolPrefix(value: unknown, configPath: string): string {
     );
   }
   return value;
+}
+
+/** Parses optional vector-index settings while applying safe defaults. */
+function parseVector(value: unknown, configPath: string): VectorConfig {
+  const config = defaultVectorConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.vector must be a YAML object.`,
+    );
+  }
+  if (value.chunk_size !== undefined) {
+    if (
+      typeof value.chunk_size !== "number" ||
+      !Number.isInteger(value.chunk_size) ||
+      value.chunk_size < MIN_CONFIG_CHUNK_SIZE ||
+      value.chunk_size > MAX_CONFIG_CHUNK_SIZE
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.vector.chunk_size must be an integer from ${MIN_CONFIG_CHUNK_SIZE} to ${MAX_CONFIG_CHUNK_SIZE}.`,
+      );
+    }
+    config.chunkSize = value.chunk_size;
+  }
+  return config;
 }
 
 /** Parses optional injection settings while applying safe defaults. */

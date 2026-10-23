@@ -55,6 +55,9 @@ test("missing configuration uses the default memory root", async () => {
       enabled: true,
       maxNodes: 4,
     });
+    assert.deepEqual(config.vector, {
+      chunkSize: 4_000,
+    });
   });
 });
 
@@ -85,6 +88,27 @@ test("tool prefix is configurable and validated", () => {
           `memory:\n  tool_prefix: "${prefix}"\n`,
           configPath,
         ),
+      MemoryConfigError,
+    );
+  }
+});
+
+test("vector chunk size is configurable and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    "memory:\n  vector:\n    chunk_size: 1200\n",
+    configPath,
+  );
+
+  assert.equal(config.vector.chunkSize, 1_200);
+  for (const source of [
+    "memory:\n  vector:\n    chunk_size: 199\n",
+    "memory:\n  vector:\n    chunk_size: 20001\n",
+    "memory:\n  vector:\n    chunk_size: 12.5\n",
+    "memory:\n  vector:\n    chunk_size: large\n",
+  ]) {
+    assert.throws(
+      () => parseMemoryConfig(source, configPath),
       MemoryConfigError,
     );
   }

@@ -112,14 +112,19 @@ export async function loadImportedIndexedFiles(
   memoryRoot: string,
 ): Promise<IndexedMarkdownFile[]> {
   const files: IndexedMarkdownFile[] = [];
+  const seenPaths = new Set<string>();
   for (const entry of index.listEntries()) {
-    if (!isImportedVectorEntry(entry)) {
+    if (
+      !isImportedVectorEntry(entry) ||
+      seenPaths.has(entry.sourcePath)
+    ) {
       continue;
     }
+    seenPaths.add(entry.sourcePath);
 
     try {
       const file = await buildIndexedFile(entry.sourcePath, memoryRoot);
-      if (file.vectorKey === entry.key) {
+      if (file.vectorKey !== undefined) {
         files.push(file);
       }
     } catch (error) {

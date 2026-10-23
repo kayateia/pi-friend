@@ -187,3 +187,66 @@ test("metadata-only changes refresh vector metadata", async () => {
     index.close();
   }
 });
+
+test("long documents synchronize as stable vector chunks", async () => {
+  const index = SqliteVectorIndex.open({
+    databasePath: ":memory:",
+    model: "fake/model",
+    dimensions: 3,
+  });
+  const provider = new FakeEmbeddingProvider();
+  try {
+    const file = makeFile(
+      "docs/long.md",
+      [
+        `First section. ${"alpha ".repeat(50)}`,
+        `Second section. ${"beta ".repeat(50)}`,
+        `Third section. ${"gamma ".repeat(50)}`,
+      ].join("\n\n"),
+    );
+    const first = await synchronizeVectorIndex(
+      [file],
+      provider,
+      index,
+      { chunkSize: 200 },
+    );
+
+    assert.ok(first.total > 1);
+    assert.equal(first.embedded, first.total);
+    assert.equal(index.count(), first.total);
+    const entries = index.listEntries();
+    assert.ok(
+      entries.every(
+        (entry) =>
+          entry.sourcePath === "docs/long.md" &&
+          entry.key.startsWith("docs/long.md#chunk:"),
+      ),
+    );
+
+    const callsAfterFirst = provider.calls.length;
+    const second = await synchronizeVectorIndex(
+      [file],
+      provider,
+      index,
+      { chunkSize: 200 },
+    );
+    assert.equal(second.embedded, 0);
+    assert.equal(second.skipped, first.total);
+    assert.equal(provider.calls.length, callsAfterFirst);
+
+    const changed = {
+      ...file,
+      body: `${file.body}\n\nFourth section. ${"delta ".repeat(30)}`,
+    };
+    const third = await synchronizeVectorIndex(
+      [changed],
+      provider,
+      index,
+      { chunkSize: 200 },
+    );
+    assert.ok(third.embedded > 0);
+    assert.ok(third.embedded < third.total);
+  } finally {
+    index.close();
+  }
+});

@@ -28,4 +28,5 @@ test("the example configuration matches supported defaults", async () => {
   assert.equal(config.sweep.tombstoneGraceDays, 30);
   assert.equal(config.sweep.minGuardedBatchSize, 10);
   assert.equal(config.dreaming.maxNodes, 4);
+  assert.equal(config.vector.chunkSize, 4_000);
 });

@@ -13,7 +13,10 @@ import type {
   MemorySearchResult,
 } from "./search.ts";
 import { searchIndexedFiles } from "./search.ts";
-import { searchSemanticVectors } from "./semantic-search.ts";
+import {
+  searchSemanticVectors,
+  type VectorSearchOptions,
+} from "./semantic-search.ts";
 import type { VectorIndex } from "./vector-index.ts";
 import { synchronizeVectorIndex } from "./vector-sync.ts";
 
@@ -31,10 +34,12 @@ export async function searchHybrid(
   options: MemorySearchOptions,
   provider: EmbeddingProvider,
   index: VectorIndex,
-  signal?: AbortSignal,
+  vectorOptions: VectorSearchOptions = {},
 ): Promise<MemorySearchResult[]> {
-  await synchronizeVectorIndex(files, provider, index, { signal });
-  const [queryEmbedding] = await provider.embed([options.query], { signal });
+  await synchronizeVectorIndex(files, provider, index, vectorOptions);
+  const [queryEmbedding] = await provider.embed([options.query], {
+    signal: vectorOptions.signal,
+  });
   if (!queryEmbedding) {
     throw new Error("Embedding provider returned no query vector.");
   }
@@ -49,6 +54,7 @@ export async function searchHybrid(
     queryEmbedding,
     candidateOptions,
     index,
+    vectorOptions.chunkSize,
   );
   return fuseHybridResults(keywordResults, semanticResults, options.limit);
 }

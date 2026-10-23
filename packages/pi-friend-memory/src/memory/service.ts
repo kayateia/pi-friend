@@ -126,7 +126,10 @@ export interface MemoryIndexPathFile {
 /** Result of one additive Markdown bulk-index pass. */
 export interface MemoryIndexPathResult {
   sourcePath: string;
+  /** Number of source Markdown files processed. */
   total: number;
+  /** Number of vector chunks represented by those files. */
+  chunks: number;
   embedded: number;
   skipped: number;
   files: MemoryIndexPathFile[];
@@ -325,6 +328,9 @@ export class MemoryNodeService {
 
     const index = await this.buildSearchIndex();
     const mode = options.mode ?? "keyword";
+    const vectorOptions = {
+      chunkSize: this.store.config.vector.chunkSize,
+    };
     let results: MemorySearchResult[];
     if (mode === "semantic" || mode === "hybrid") {
       if (!this.semantic) {
@@ -339,12 +345,14 @@ export class MemoryNodeService {
               options,
               this.semantic.provider,
               this.semantic.index,
+              vectorOptions,
             )
           : await searchSemantically(
               index,
               options,
               this.semantic.provider,
               this.semantic.index,
+              vectorOptions,
             );
     } else {
       results = searchIndexedFiles(index, options);
@@ -387,11 +395,15 @@ export class MemoryNodeService {
       prepared.files,
       this.semantic.provider,
       this.semantic.index,
-      { pruneMissing: false },
+      {
+        pruneMissing: false,
+        chunkSize: this.store.config.vector.chunkSize,
+      },
     );
     return {
       sourcePath: prepared.sourcePath,
-      total: synchronized.total,
+      total: prepared.files.length,
+      chunks: synchronized.total,
       embedded: synchronized.embedded,
       skipped: synchronized.skipped,
       files: prepared.files.map((file) => ({
@@ -911,6 +923,7 @@ export class MemoryNodeService {
       files,
       this.semantic.provider,
       this.semantic.index,
+      { chunkSize: this.store.config.vector.chunkSize },
     );
     const candidateFile = files.find(
       (file) => file.relativePath === `staging/${candidate.slug}.md`,
@@ -935,6 +948,7 @@ export class MemoryNodeService {
         limit: 10,
       },
       this.semantic.index,
+      this.store.config.vector.chunkSize,
     );
     const duplicate = results.find(
       (result) =>

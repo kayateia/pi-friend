@@ -686,8 +686,8 @@ function formatIndexPathResult(result: MemoryIndexPathResult): string {
   });
 
   return [
-    `Indexed ${result.total} Markdown file${result.total === 1 ? "" : "s"} from ${result.sourcePath}.`,
-    `Embedded: ${result.embedded} · already current: ${result.skipped}`,
+    `Indexed ${result.total} Markdown file${result.total === 1 ? "" : "s"} as ${result.chunks} vector chunk${result.chunks === 1 ? "" : "s"} from ${result.sourcePath}.`,
+    `Embedded chunks: ${result.embedded} · already current: ${result.skipped}`,
     ...fileBlocks,
   ].join("\n");
 }

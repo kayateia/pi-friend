@@ -40,6 +40,8 @@ Override the root in `~/.pi/agent/pi-friend/pi-friend.yml`:
 memory:
   root: ~/workspace/memory
   tool_prefix: memory_
+  vector:
+    chunk_size: 4000
   injection:
     enabled: true
     position: -1
@@ -210,6 +212,12 @@ Semantic mode uses Pi's stored OpenRouter credential, falling back to
 `OPENROUTER_API_KEY`, and embeds with `openai/text-embedding-3-small` at 1,536
 dimensions. Markdown is synchronized lazily on semantic search; unchanged
 content hashes do not make repeat embedding calls.
+
+Markdown longer than `memory.vector.chunk_size` is embedded as overlapping
+chunks of at most that many characters. The default is 4,000 and the accepted
+range is 200–20,000. Chunks prefer nearby paragraph boundaries. Search
+deduplicates chunks back to one result per source document and previews the
+matching chunk.
 
 Use `memory_index_path` to index a Markdown corpus outside the configured
 memory root. Directory walks include nested `.md` files, ignore hidden paths

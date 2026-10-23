@@ -42,6 +42,8 @@ The root config for pi-friend is `~/.pi/agent/pi-friend/pi-friend.yml` with this
 memory:
   root: ~/workspace/memory
   tool_prefix: memory_
+  vector:
+    chunk_size: 4000
   injection:
     enabled: true
     position: -1
@@ -214,6 +216,8 @@ Current first pass: expired tombstones are archived under
 - The default embedding target is `openai/text-embedding-3-small` at 1,536 dimensions. The API key comes from Pi's stored OpenRouter credential, falling back to `OPENROUTER_API_KEY`.
 - The disposable index stores stable source keys, kind, source path, content hash, embedding, title, memory type, status, decay weight, and tags. Markdown remains canonical; deleting the index is safe.
 - Markdown embeddings synchronize lazily during semantic or hybrid search. A SHA-256 content hash skips unchanged files, and metadata changes that affect the embedded representation refresh the record.
+- `memory.vector.chunk_size` controls the maximum characters supplied per embedding chunk. It defaults to 4,000 and accepts integers from 200 through 20,000. Long Markdown is split into overlapping chunks that prefer nearby paragraph boundaries; overlap scales down to stay below small configured chunk sizes.
+- Multiple vector hits from one source collapse to one search result. The result snippet comes from the best-matching chunk rather than the start of the whole document.
 - `memory_index_path` adds external Markdown without pruning unrelated vectors. Imported files are rebuilt from their source paths when search loads the corpus; repeated imports avoid duplicate records and unchanged embeddings.
 - Hybrid retrieval fuses keyword and semantic candidates with reciprocal-rank fusion. Semantic and hybrid failures fall back to keyword retrieval for RAG injection.
 

@@ -2,6 +2,9 @@ memory:
   root: ~/.pi/agent/pi-friend/memory
   tool_prefix: memory_
 
+  vector:
+    chunk_size: 4000
+
   injection:
     enabled: true
     position: -1
