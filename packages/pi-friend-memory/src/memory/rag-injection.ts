@@ -11,6 +11,39 @@ import type { ContextEvent } from "@earendil-works/pi-coding-agent";
 /** Agent message shape used by Pi's request-local context transform. */
 export type RagAgentMessage = ContextEvent["messages"][number];
 
+/** Latest user prompt and its request-local message index. */
+export interface LatestUserPrompt {
+  index: number;
+  prompt: string;
+}
+
+/**
+ * Returns the latest non-empty user prompt from the visible context.
+ *
+ * Text and mixed image/text messages are supported without assuming that user
+ * content is always a plain string.
+ */
+export function latestUserPrompt(
+  messages: RagAgentMessage[],
+): LatestUserPrompt | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== "user") {
+      continue;
+    }
+    const prompt =
+      typeof message.content === "string"
+        ? message.content
+        : message.content
+            .flatMap((block) => (block.type === "text" ? [block.text] : []))
+            .join("\n");
+    if (prompt.trim() !== "") {
+      return { index, prompt };
+    }
+  }
+  return undefined;
+}
+
 /**
  * Prepends one memory block to a selected user message.
  *

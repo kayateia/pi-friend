@@ -87,6 +87,11 @@ The injected block is prepended to the selected user message and wrapped in
 compact `Why recalled:` line with semantic/keyword ranks, matched fields, and
 score so retrieval can be calibrated rather than taken on trust.
 
+Retrieval and injection now happen together in the request-time `context` hook.
+The result is cached per session and user-turn index, so tool-loop requests do
+not repeat embedding searches, and concurrent sessions cannot overwrite one
+another's pending RAG context.
+
 ## Development
 
 From the monorepo root, install all development dependencies:

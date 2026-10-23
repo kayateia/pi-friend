@@ -8,7 +8,10 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadPromptConfig } from "./src/config.ts";
-import { applyCustomPrompt } from "./src/editor.ts";
+import {
+  applyCustomPrompt,
+  injectPromptFallback,
+} from "./src/editor.ts";
 import { loadSystemPromptApi } from "./src/system-prompt-compat.ts";
 
 /**
@@ -33,6 +36,30 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
         config.customPrompt,
         api.buildSystemPromptSections,
       );
+    } catch (error) {
+      if (!warningShown) {
+        warningShown = true;
+        const message = `pi-friend-prompt: ${describeError(error)}`;
+        if (ctx.hasUI) {
+          ctx.ui.notify(message, "warning");
+        } else {
+          console.error(message);
+        }
+      }
+    }
+  });
+
+  pi.on("context_with_system", async (event, ctx) => {
+    try {
+      const config = await loadPromptConfig();
+      const customPrompt = config.customPrompt?.trim();
+      if (!customPrompt || ctx.getSystemPrompt().includes(customPrompt)) {
+        return;
+      }
+
+      return {
+        messages: injectPromptFallback(event.messages, customPrompt),
+      };
     } catch (error) {
       if (!warningShown) {
         warningShown = true;

@@ -11,6 +11,7 @@ import type { UserMessage } from "@earendil-works/pi-ai";
 import test from "node:test";
 import {
   injectRagContext,
+  latestUserPrompt,
   type RagAgentMessage,
 } from "../../src/memory/rag-injection.ts";
 
@@ -58,6 +59,23 @@ test("no-op cases keep the original message array", () => {
   ];
   assert.equal(injectRagContext(messages, "", 0), messages);
   assert.equal(injectRagContext([], BLOCK, 0).length, 0);
+});
+
+test("latest user prompt supports text and mixed-content messages", () => {
+  const prompt = latestUserPrompt([
+    { role: "user", content: "older", timestamp: 1 },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "latest" },
+        { type: "image", data: "abc", mimeType: "image/png" },
+      ],
+      timestamp: 2,
+    },
+  ]);
+
+  assert.deepEqual(prompt, { index: 1, prompt: "latest" });
+  assert.equal(latestUserPrompt([]), undefined);
 });
 
 /** Narrows one context message to a user message for assertions. */

@@ -131,7 +131,7 @@ once-per-day consolidation schedule, not daily-log processing.
 
 ## 6. RAG injection
 
-- A retrieval pass runs **before each model turn**. Relevant nodes are injected into the prompt at a configurable position:
+- Retrieval and injection run in the request-time `context` hook. The RAG result is cached by session and user-turn index so repeated provider requests in one turn do not re-run embeddings, and concurrent sessions cannot overwrite shared RAG text. Relevant nodes are injected into the prompt at a configurable position:
   - position `0` = inside the current user turn (most salient, invalidates cache from that point)
   - position `-1`, `-2`, … = N prompts back (less salient, preserves the hot cache prefix)
 - The retrieved block is prepended to the selected user message and wrapped in `<pi-friend-memory>...</pi-friend-memory>`.

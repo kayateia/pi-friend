@@ -34,12 +34,22 @@ import {
 } from "./src/memory/embedding.ts";
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
-import { injectRagContext } from "./src/memory/rag-injection.ts";
+import {
+  injectRagContext,
+  latestUserPrompt,
+} from "./src/memory/rag-injection.ts";
 import { runDailySweep } from "./src/memory/sweep.ts";
 import type { SemanticSearchDependencies } from "./src/memory/service.ts";
 import { MemoryNodeService } from "./src/memory/service.ts";
 import { SqliteVectorIndex } from "./src/memory/vector-index.ts";
 import { registerMemoryTools } from "./src/tools/memory-tools.ts";
+
+/** Request-local RAG result cached for one user turn within a session. */
+interface RagSessionState {
+  userIndex: number;
+  query: string;
+  context: Promise<string>;
+}
 
 /**
  * Pi-facing composition root for the pi-friend-memory extension.
@@ -54,7 +64,7 @@ export default async function registerPiFriend(
   // The memory service is session-scoped and shared by all memory tools.
   let memoryService: MemoryNodeService | undefined;
   let semanticSearch: SemanticSearchDependencies | undefined;
-  let ragContext: string | undefined;
+  const ragSessions = new Map<string, RagSessionState>();
   let injectionConfig = defaultRagInjectionConfig();
   let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
   let settledRuns = 0;
@@ -142,6 +152,7 @@ export default async function registerPiFriend(
   };
 
   pi.on("session_start", async (_event, ctx) => {
+    ragSessions.delete(ctx.sessionManager.getSessionId());
     try {
       const repository = await MemoryNodeRepository.open();
       injectionConfig = repository.store.config.injection;
@@ -180,7 +191,7 @@ export default async function registerPiFriend(
     await backgroundSweep;
     sweepAbortController = undefined;
     memoryService = undefined;
-    ragContext = undefined;
+    ragSessions.clear();
     semanticSearch?.index.close();
     semanticSearch = undefined;
     autoCaptureConfig = defaultAutoCaptureConfig();
@@ -192,56 +203,66 @@ export default async function registerPiFriend(
     sweepInFlight = false;
   });
 
-  pi.on("before_agent_start", async (event) => {
-    ragContext = undefined;
-    if (
-      !memoryService ||
-      !injectionConfig.enabled ||
-      event.messageType !== "user"
-    ) {
+  pi.on("context", async (event, ctx) => {
+    if (!memoryService || !injectionConfig.enabled) {
       debugRag("skipped", {
         hasService: memoryService !== undefined,
         enabled: injectionConfig.enabled,
-        messageType: event.messageType,
       });
       return;
     }
 
-    try {
-      ragContext = (
-        await buildRagContext(
-          memoryService,
-          event.prompt,
+    const latest = latestUserPrompt(event.messages);
+    if (!latest) {
+      return;
+    }
+
+    const sessionId = ctx.sessionManager.getSessionId();
+    let state = ragSessions.get(sessionId);
+    if (state?.userIndex !== latest.index || state.query !== latest.prompt) {
+      const service = memoryService;
+      state = {
+        userIndex: latest.index,
+        query: latest.prompt,
+        context: buildRagContext(
+          service,
+          latest.prompt,
           injectionConfig,
         )
-      ).text || undefined;
-      debugRag("retrieved", {
-        contextChars: ragContext?.length ?? 0,
-      });
-    } catch (error) {
-      debugRag("failed", { error: describeError(error) });
-      // Retrieval enriches context but must never block the user's prompt.
+          .then((rag) => {
+            debugRag("retrieved", {
+              contextChars: rag.text.length,
+            });
+            return rag.text;
+          })
+          .catch((error: unknown) => {
+            debugRag("failed", { error: describeError(error) });
+            return "";
+          }),
+      };
+      ragSessions.set(sessionId, state);
     }
-  });
 
-  pi.on("context", (event) => {
-    if (!ragContext) {
+    const contextText = await state.context;
+    if (!contextText) {
       return;
     }
+
     debugRag("injected", {
-      contextChars: ragContext.length,
+      contextChars: contextText.length,
       position: injectionConfig.position,
     });
     return {
       messages: injectRagContext(
         event.messages,
-        ragContext,
+        contextText,
         injectionConfig.position,
       ),
     };
   });
 
   pi.on("agent_settled", async (event, ctx) => {
+    ragSessions.delete(ctx.sessionManager.getSessionId());
     if (
       event.aborted ||
       captureInFlight ||

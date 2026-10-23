@@ -25,6 +25,30 @@ prompt:
 The `memory` section is ignored by this extension. A missing `prompt` section
 or empty `prompt.custom` leaves Pi's system prompt unchanged.
 
+## Host compatibility
+
+Some hosts, including `pi-web-ui` with its prompt composer active, run a later
+`before_agent_start` handler that replaces the complete system prompt. Pi still
+awaits every handler, but the later replacement can discard this extension's
+mutation.
+
+To cover that case, `pi-friend-prompt` also checks the final system prompt in
+`context_with_system`. If the configured narrative is missing, it prepends a
+non-displayed `<pi-friend-prompt>` custom message before the request. This
+preserves the host's tool declarations and prompt composition while ensuring
+the configured friend narrative reaches the model.
+
+To let `pi-web-ui` leave the system prompt to Pi and extensions instead, use its
+default prompt composition:
+
+- Restore the default system-prompt template and clear all source overrides.
+- Use the standard/full-capability agent preset.
+- Enable all agent tools.
+- Disable `Tool Lazy Loading`.
+
+When those are default, `pi-web-ui` returns no replacement prompt and the
+normal preamble replacement is preserved directly.
+
 ## Development
 
 From the monorepo root:
