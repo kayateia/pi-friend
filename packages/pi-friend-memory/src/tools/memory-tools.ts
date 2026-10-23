@@ -92,6 +92,14 @@ interface MemorySearchDetails {
   results: MemorySearchResult[];
 }
 
+/** Prepends the configured namespace to one complete memory tool name. */
+export function formatMemoryToolName(
+  prefix: string,
+  toolName: string,
+): string {
+  return `${prefix}${toolName}`;
+}
+
 /**
  * Registers the first model-facing memory tools against a session-scoped
  * service. Tool execution remains unavailable until storage initialization
@@ -103,7 +111,8 @@ export function registerMemoryTools(
   toolPrefix: string = DEFAULT_MEMORY_TOOL_PREFIX,
 ): void {
   // Tool descriptions refer to each other, so resolve prefixed names once.
-  const toolName = (suffix: string): string => `${toolPrefix}${suffix}`;
+  const toolName = (suffix: string): string =>
+    formatMemoryToolName(toolPrefix, suffix);
 
   pi.registerTool({
     name: toolName("memory_add"),

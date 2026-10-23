@@ -33,6 +33,7 @@ test("missing configuration uses the default memory root", async () => {
       config.root,
       path.join(directory, "pi-friend", "memory"),
     );
+    assert.equal(config.toolPrefix, "");
     assert.equal(config.toolPrefix, DEFAULT_MEMORY_TOOL_PREFIX);
     assert.deepEqual(config.injection, {
       enabled: true,
@@ -82,7 +83,12 @@ test("tool prefix is configurable and validated", () => {
   );
 
   assert.equal(config.toolPrefix, "pf_");
-  for (const prefix of ["PF_", "9bad", "has-hyphen", ""]) {
+  const unprefixed = parseMemoryConfig(
+    'memory:\n  tool_prefix: ""\n',
+    configPath,
+  );
+  assert.equal(unprefixed.toolPrefix, "");
+  for (const prefix of ["PF_", "9bad", "has-hyphen"]) {
     assert.throws(
       () =>
         parseMemoryConfig(

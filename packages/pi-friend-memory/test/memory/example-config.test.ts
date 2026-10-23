@@ -21,6 +21,7 @@ test("the example configuration matches supported defaults", async () => {
   );
 
   assert.equal(config.root, "/Users/example/.pi/agent/pi-friend/memory");
+  assert.equal(config.toolPrefix, "");
   assert.equal(config.injection.enabled, true);
   assert.equal(config.injection.position, -1);
   assert.equal(config.injection.mode, "hybrid");

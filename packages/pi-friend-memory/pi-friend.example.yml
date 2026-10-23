@@ -1,6 +1,6 @@
 memory:
   root: ~/.pi/agent/pi-friend/memory
-  tool_prefix: memory_
+  tool_prefix: ""
 
   vector:
     chunk_size: 4000

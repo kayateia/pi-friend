@@ -64,7 +64,7 @@ export interface VectorConfig {
 }
 
 /** Default prefix for model-facing memory tool names. */
-export const DEFAULT_MEMORY_TOOL_PREFIX = "memory_";
+export const DEFAULT_MEMORY_TOOL_PREFIX = "";
 
 /** Resolved memory configuration used by the storage layer. */
 export interface MemoryConfig {
@@ -280,10 +280,10 @@ function parseToolPrefix(value: unknown, configPath: string): string {
   if (
     typeof value !== "string" ||
     value.length > 32 ||
-    !/^[a-z][a-z0-9_]*$/u.test(value)
+    (value !== "" && !/^[a-z][a-z0-9_]*$/u.test(value))
   ) {
     throw new MemoryConfigError(
-      `${configPath}: memory.tool_prefix must start with a lowercase letter and contain only lowercase letters, digits, and underscores (maximum 32 characters).`,
+      `${configPath}: memory.tool_prefix must be empty or start with a lowercase letter and contain only lowercase letters, digits, and underscores (maximum 32 characters).`,
     );
   }
   return value;

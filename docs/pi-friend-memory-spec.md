@@ -41,7 +41,7 @@ The root config for pi-friend is `~/.pi/agent/pi-friend/pi-friend.yml` with this
 ```yaml
 memory:
   root: ~/workspace/memory
-  tool_prefix: memory_
+  tool_prefix: ""
   vector:
     chunk_size: 4000
   injection:
@@ -70,9 +70,11 @@ memory:
 The `memory` tree is configured as above, but it should default to `~/.pi/agent/pi-friend/memory`.
 
 `tool_prefix` is prepended to every registered memory tool name. It defaults to
-`memory_` for backward compatibility; `tool_prefix: pf_`, for example, exposes
-`pf_memory_add` and `pf_memory_search`. This allows two memory extensions to
-load side by side.
+an empty string, producing `memory_add`, `memory_search`, and the other normal
+names. `tool_prefix: pf_`, for example, exposes `pf_memory_add` and
+`pf_memory_search`. This allows two memory extensions to load side by side. An
+explicit `tool_prefix: memory_` would instead produce `memory_memory_add`, so
+the normal configuration should leave the prefix empty.
 
 ## 4. Node schema (strict front matter)
 

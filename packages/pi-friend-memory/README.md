@@ -39,7 +39,7 @@ Override the root in `~/.pi/agent/pi-friend/pi-friend.yml`:
 ```yaml
 memory:
   root: ~/workspace/memory
-  tool_prefix: memory_
+  tool_prefix: ""
   vector:
     chunk_size: 4000
   injection:
@@ -130,8 +130,11 @@ Pi reads the extension entry point from the `pi.extensions` field in
 ## Memory tools
 
 - `memory.tool_prefix` in `pi-friend.yml` is prepended to every memory tool
-  name. The default remains `memory_`; for example, `tool_prefix: pf_` exposes
+  name. The default is empty, so tools are named `memory_add`,
+  `memory_search`, and so on. For example, `tool_prefix: pf_` exposes
   `pf_memory_add` and allows two memory extensions to load side by side.
+  Configurations created from the earlier example may still contain
+  `tool_prefix: memory_`; change that to `""` or remove it.
 - `memory_add` creates a canonical active node, derives a unique slug unless one
   is supplied, and records speaker attribution.
 - `memory_edit` updates an existing node while preserving creation and usage
