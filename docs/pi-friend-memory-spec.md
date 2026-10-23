@@ -1,7 +1,7 @@
 # pi-friend-memory — Specification v0.1
 
 *Drafted by Lime Pi from Aisling's design sketch + review discussion, 2026-10-18. Enriched 2026-10-19 from the OpenClaw memory-pass protocols (consolidation, retrospective, pattern-detection, heartbeat) Aisling shared.*
-*Status: draft for implementation first pass (Codex/DeepSeek). Aisling's rulings outrank this doc.*
+*Status: first-pass implementation, updated 2026-10-23. Aisling's rulings outrank this doc.*
 
 ## 1. Purpose
 
@@ -30,9 +30,10 @@ memory/
 │   ├── <slug>.md
 │   └── superseded/      ← tombstoned nodes awaiting sweep decision
 ├── staging/             ← auto-captured candidates, not yet promoted
-├── access-log           ← append-only: one line per RAG hit / tool use
+├── access-log           ← append-only: one line per returned search hit
 ├── sweeps/              ← dated sweep logs + dream narratives
-└── index/               ← vector store config/state (non-canonical)
+├── index/               ← vector store config/state (non-canonical)
+└── recovery/            ← durable records for recoverable node deletion
 ```
 
 The root config for pi-friend is `~/.pi/agent/pi-friend/pi-friend.yml` with this format:
@@ -64,6 +65,11 @@ memory:
 ```
 
 The `memory` tree is configured as above, but it should default to `~/.pi/agent/pi-friend/memory`.
+
+`tool_prefix` is prepended to every registered memory tool name. It defaults to
+`memory_` for backward compatibility; `tool_prefix: pf_`, for example, exposes
+`pf_memory_add` and `pf_memory_search`. This allows two memory extensions to
+load side by side.
 
 ## 4. Node schema (strict front matter)
 
@@ -100,17 +106,23 @@ Body: concise, single-topic prose. May include short verbatim quotes (with speak
 
 ## 5. Basic tools
 
-Kept from pi-memory, with changes:
+Tool names below use the default `memory_` prefix:
 
-- `memory_add(title, body, front_matter_extras?)` → creates node, links to related nodes (the adding model should propose links), triggers embedding.
+- `memory_add(title, body, front_matter_extras?)` → creates a canonical active node, derives a unique slug, and records links, tags, speaker attribution, and other front-matter metadata.
 - `memory_delete(match)` → writes recovery record, moves to `superseded/` (does not hard-delete).
-- `memory_edit(slug, edits)` → edits body/front matter, bumps `created`? No: preserves `created`, sets an `edited` timestamp and logs the edit in the node's audit trail (append to a small `## audit` section or separate changelog).
-- `memory_restore(recoveryId)` → unchanged from pi-memory.
+- `memory_edit(slug, edits)` → edits body/front matter while preserving `created`, `use_count`, and decay state; sets `edited` and appends an audit entry.
+- `memory_restore(recoveryId)` → restores a deleted node from its durable recovery record without overwriting newer canonical content.
+- `memory_read(slug, area?)` → reads a complete serialized node from canonical, staging, or superseded storage.
 - `memory_promote(candidateSlug)` → promotes one staging candidate. Near-duplicates are merged into an existing canonical node with links and attribution preserved.
-- `memory_search(query, mode, type?)` → `keyword`, `semantic`, or `hybrid`: embedding search over the index plus keyword search over ALL files in the memory tree AND linked documents. Returns typed results (`node` / `document` / `staging-candidate`), each with its decay tier and snippet.
+- `memory_search(query, mode, type?, limit?)` → `keyword`, `semantic`, or `hybrid` search over nodes, staging candidates, ordinary documents, and imported Markdown. Results include typed metadata, a match-centered or document-preview snippet, ranks, matched fields, and score.
 - `memory_index_path(path)` → additively indexes a Markdown file or directory tree. External files use stable absolute source paths, file mtime, first-heading title, and `imported` provenance. Content hashes make repeated indexing idempotent, and importing a subset never removes unrelated vector records.
 
 **Search must find documents, not just nodes.** Front matter is required only for `nodes/` and `staging/`.
+
+There is no daily-log tool or `daily/` subtree. Existing directories or
+Markdown files named `daily/` are left untouched and, if present, are treated as
+ordinary searchable documents. The “daily sweep” described below is a
+once-per-day consolidation schedule, not daily-log processing.
 
 ## 6. RAG injection
 
@@ -118,7 +130,9 @@ Kept from pi-memory, with changes:
   - position `0` = inside the current user turn (most salient, invalidates cache from that point)
   - position `-1`, `-2`, … = N prompts back (less salient, preserves the hot cache prefix)
 - The retrieved block is prepended to the selected user message and wrapped in `<pi-friend-memory>...</pi-friend-memory>`.
-- Each injected memory carries a compact retrieval explanation with its semantic rank, keyword rank, matched fields, and fused score.
+- Only active, non-quarantined memory nodes are injected. Plain documents remain searchable through tools but are not copied into factual RAG context.
+- Each injected memory carries a compact `Why recalled:` explanation with its semantic rank, keyword rank, keyword-matched fields, and score.
+- `dream` and `inner` memories are quarantined from factual RAG. They remain readable and searchable through explicit tools.
 - **Recency beats depth rule**: if a node's `supersedes` list is non-empty, the superseded node is demoted out of RAG entirely (or injected only with an explicit `superseded` annotation) so a correction cannot be argued with on equal footing. See §7.
 - Injection content tiers (per node):
   1. **Fresh/recent**: title + snippet (~2–4 sentences) + link.
@@ -129,21 +143,26 @@ Kept from pi-memory, with changes:
 ## 7. Decay
 
 - **Volume-relative**: each node's weight decreases by a function of *how many new memories have been stored since its last use*, not elapsed clock time. Quiet weeks don't bury things.
-- `decay_weight` is recomputed once per sweep. RAG hit events append one line to `access-log` (timestamp, slug, tier used); they do NOT rewrite node files.
+- `decay_weight` is recomputed once per sweep. Search calls append access records with tier, query, path, and slug when available; RAG retrieval uses the same search path and may log candidate hits before injection filtering. Access logging never rewrites node files.
 - Superseded nodes get `decay_weight: 0` and are excluded from RAG, but remain searchable with an explicit `superseded` marker (so the model can say "an earlier record says X, but it was corrected by Y").
 
 ## 8. Auto-capture (staging)
 
-- Every N turns (configurable, default ~5), a **fast model** reviews the recent conversation and writes candidate nodes to `staging/`, front matter included, `status: candidate`.
+- Every N settled agent runs (configurable, default 5), a **fast model** reviews transcript entries added since the prior successful capture and writes candidate nodes to `staging/`, front matter included, `status: candidate`.
+- The default candidate limit is 3. Auto-capture excludes `dream` and `inner`; those types are not generated from ordinary conversation capture.
 - Candidates are NOT injected into RAG until promoted.
 - Promotion happens two ways:
-  1. **Sweep promotion** (daily): the sweep model reviews candidates and makes a real decision per candidate: promote (and where to link), merge into an existing node, correct it, or drop it. Every decision is logged with reasoning in the sweep log.
-  2. **Main-model promotion**: the interactive model may promote a candidate it has verified mid-conversation (or reject one it knows is wrong).
+  1. **Sweep promotion** (daily): the sweep model chooses `promote`, `merge`, or `drop` for each candidate. Every decision is logged with reasoning in the sweep log.
+  2. **Main-model promotion**: the interactive model may call `memory_promote` for a candidate it has verified mid-conversation. Unpromoted candidates remain staged for a later sweep.
 - Dedupe happens at promotion time: staging candidates are compared (via embedding similarity) against existing nodes before promotion; near-duplicates are merged with `links` preserved.
 
 ## 9. Daily sweep ("sweeping down")
 
 **Division of labor.** Whatever automatic signals the system uses (access counts, embedding similarity, cadence), the sweep is the *judgment pass*: recall frequency is not the criterion. The sweep model makes deliberate per-candidate decisions. Statistics propose; judgment disposes.
+
+The daily sweep does not read or create daily logs. It is scheduled at most once
+per local calendar day and operates on staging candidates, canonical nodes,
+decay state, sweep artifacts, and superseded tombstones.
 
 **Anti-churn discipline.** Aim to leave most nodes byte-identical between sweeps. Rewritten text is churn, not consolidation. Deletion is not the same as consolidation. **Loss of emotional, relational, or operational content is a bug.**
 
@@ -157,7 +176,7 @@ Kept from pi-memory, with changes:
 **Merging cold nodes:** when a summary node absorbs detail, relocate detail, never delete it. Preserve any pointers to full analyses verbatim.
 
 Once per day, a model pass:
-  1. Reviews candidates in `staging/` (promote/merge/drop; log each decision).
+  1. Reviews candidates in `staging/` (`promote`, `merge`, or `drop`; log each decision).
   2. Recomputes `decay_weight` from the access log and volume counters.
   3. Demotes long-unused nodes: updates tier metadata, optionally compacts cold nodes (merge related cold nodes into a summary node with links back).
   4. Handles `superseded/` tombstones: after a grace period, decide to archive or hard-delete (recovery record if deleting).
@@ -192,7 +211,11 @@ Current first pass: expired tombstones are archived under
 
 - Constraint: qmd's local-only model is unavailable; use an OpenRouter embeddings model (or another hosted embedding API).
 - Initial backend: **sqlite-vec** through Node's built-in SQLite runtime. Qdrant remains the migration path if concurrent clients, ANN scale, or richer server-side filtering become necessary.
-- Either way: the index stores `{slug, embedding, decay tier, status, tags}`; everything else is read from markdown at retrieval time. Rebuild script must exist and be exercised.
+- The default embedding target is `openai/text-embedding-3-small` at 1,536 dimensions. The API key comes from Pi's stored OpenRouter credential, falling back to `OPENROUTER_API_KEY`.
+- The disposable index stores stable source keys, kind, source path, content hash, embedding, title, memory type, status, decay weight, and tags. Markdown remains canonical; deleting the index is safe.
+- Markdown embeddings synchronize lazily during semantic or hybrid search. A SHA-256 content hash skips unchanged files, and metadata changes that affect the embedded representation refresh the record.
+- `memory_index_path` adds external Markdown without pruning unrelated vectors. Imported files are rebuilt from their source paths when search loads the corpus; repeated imports avoid duplicate records and unchanged embeddings.
+- Hybrid retrieval fuses keyword and semantic candidates with reciprocal-rank fusion. Semantic and hybrid failures fall back to keyword retrieval for RAG injection.
 
 ## 12. Optional passes (proposals for Aisling's ruling)
 
