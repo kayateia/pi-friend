@@ -14,6 +14,7 @@ import type {
   SweepConfig,
 } from "./config.ts";
 import type { MemoryNodeService } from "./service.ts";
+import { isQuarantinedMemoryType } from "./schema.ts";
 import {
   runSweepModel,
   type SweepDecision,
@@ -167,7 +168,7 @@ export async function runDailySweep(
         const eligible = (await service.listCanonicalNodes()).filter(
           (node) =>
             node.frontMatter.status === "active" &&
-            node.frontMatter.type !== "dream",
+            !isQuarantinedMemoryType(node.frontMatter.type),
         );
         if (eligible.length >= 2) {
           const shortlist = selectDreamShortlist(

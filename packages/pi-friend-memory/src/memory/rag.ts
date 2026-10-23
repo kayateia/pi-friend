@@ -11,6 +11,7 @@ import type { MemoryNodeService } from "./service.ts";
 import type { MemorySearchResult } from "./search.ts";
 import { formatRetrievalExplanation } from "./search.ts";
 import type { ParsedMemoryNode } from "./schema.ts";
+import { isQuarantinedMemoryType } from "./schema.ts";
 import {
   recentDailyDates,
   tailDailyLog,
@@ -74,7 +75,8 @@ export async function buildRagContext(
       result.kind !== "node" ||
       result.slug === undefined ||
       result.status !== "active" ||
-      result.type === "dream"
+      result.type !== undefined &&
+      isQuarantinedMemoryType(result.type)
     ) {
       continue;
     }
@@ -83,7 +85,7 @@ export async function buildRagContext(
     if (
       node === null ||
       node.frontMatter.status !== "active" ||
-      node.frontMatter.type === "dream"
+      isQuarantinedMemoryType(node.frontMatter.type)
     ) {
       continue;
     }

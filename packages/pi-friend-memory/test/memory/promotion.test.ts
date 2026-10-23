@@ -133,3 +133,31 @@ test("promotion merges semantic near-duplicates and preserves links", async () =
     }
   });
 });
+
+test("promotion refuses quarantined merge targets", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const inner = await service.add({
+      title: "Private State",
+      type: "inner",
+      body: "A private inner memory.",
+      speaker: [],
+    });
+    const staged = await service.stageCandidate({
+      title: "External Fact",
+      type: "fact",
+      body: "An external fact that must remain separate.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    await assert.rejects(
+      () => service.promoteCandidate(staged.node.slug, inner.slug),
+      /Cannot merge a staging candidate into inner memory/,
+    );
+    assert.ok(await service.read(staged.node.slug, "staging"));
+  });
+});

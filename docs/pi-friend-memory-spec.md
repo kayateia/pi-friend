@@ -75,7 +75,7 @@ The `memory` tree is configured as above, but it should default to `~/.pi/agent/
 ```yaml
 ---
 title: string                       # human-readable
-type: fact                          # dream | fact | preference | event | person-note
+type: fact                          # dream | inner | fact | preference | event | person-note
 speaker:                            # who said it. Array; ordered by attribution confidence
   - name: Aisling                   #   system member, user name, or agent name
     confident: true                 #   false = inferred/uncertain attribution
@@ -189,6 +189,11 @@ Current first pass: expired tombstones are archived under
   - **A dream is never a promotion candidate.** Dream nodes may not be promoted, merged into canon, or cited as factual memory by any automated process. Only explicit human action can lift something out of a dream into a node, and doing so creates a new node with its own provenance (the dream is the `source`, never the claim itself).
   - Excluded from default injection tiers entirely; may be surfaced only in low-stakes / explicitly reflective contexts (configurable).
 - Dreams are for texture, association, and serendipitous recombination — **not canon**. They carry extra-heavy provenance markers ("this is a dream, synthesized from these nodes: [...]").
+
+### Inner memories
+
+- `inner` memories record inward-facing state or reflection. They are canonical and searchable but, like dreams, are excluded from factual RAG, automated capture, dream-source selection, and automated merge targets.
+- Inner nodes are never staging candidates. The sweep model still receives `type: inner` on existing canonical memories and must respect that boundary when deciding whether to promote, merge, or drop staged material.
 
 ## 11. Embeddings / index
 

@@ -18,6 +18,7 @@ import {
 /** Approved semantic categories for memory nodes. */
 export const MEMORY_TYPES = [
   "dream",
+  "inner",
   "fact",
   "preference",
   "event",
@@ -26,6 +27,14 @@ export const MEMORY_TYPES = [
 
 /** One approved memory node type. */
 export type MemoryType = (typeof MEMORY_TYPES)[number];
+
+/**
+ * Returns true for synthesized or inward-facing memories that must not enter
+ * factual RAG, automated capture, or dream-source selection as ordinary canon.
+ */
+export function isQuarantinedMemoryType(type: MemoryType): boolean {
+  return type === "dream" || type === "inner";
+}
 
 /** Lifecycle states for memory nodes. */
 export const MEMORY_STATUSES = [
@@ -367,10 +376,10 @@ export function validateMemoryNodeLocation(
 
   if (
     location.kind === "staging-candidate" &&
-    node.frontMatter.type === "dream"
+    isQuarantinedMemoryType(node.frontMatter.type)
   ) {
     throw new MemorySchemaError(
-      `Dream node ${node.slug} cannot be a staging candidate.`,
+      `${node.frontMatter.type} node ${node.slug} cannot be a staging candidate.`,
       { field: "type" },
     );
   }

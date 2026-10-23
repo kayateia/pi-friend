@@ -9,6 +9,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   MEMORY_TYPES,
+  isQuarantinedMemoryType,
   type MemorySpeaker,
   type MemoryType,
 } from "./schema.ts";
@@ -37,7 +38,7 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "Use the actual speaker names present in the transcript.",
   "Never use generic labels such as USER, ASSISTANT, or system as speaker names.",
   "If a concrete speaker name cannot be determined, omit that candidate.",
-  "Never create dream nodes.",
+  "Never create dream or inner nodes.",
 ].join("\n");
 
 /** Builds the user-facing JSON extraction prompt. */
@@ -98,7 +99,7 @@ export function parseCaptureResponse(
     .map((candidate) => parseCandidate(candidate, speakerHint))
     .filter(
       (candidate) =>
-        candidate.type !== "dream" &&
+        !isQuarantinedMemoryType(candidate.type) &&
         candidate.speaker.every(
           (speaker) => !isGenericSpeakerName(speaker.name),
         ),

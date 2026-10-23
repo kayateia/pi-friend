@@ -69,6 +69,15 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
     );
     await repository.write(
       makeNode({
+        slug: "orchid-inner",
+        title: "Orchid Inner",
+        body: "An inward orchid reflection.",
+        decayWeight: 1,
+        type: "inner",
+      }),
+    );
+    await repository.write(
+      makeNode({
         slug: "orchid-middle",
         title: "Orchid Middle",
         body: "First middle orchid sentence. Second middle sentence.",
@@ -145,6 +154,7 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
       /see also: Scent Note — orchid, archive \(nodes\/scent-note\.md\)/,
     );
     assert.doesNotMatch(context.text, /orchid-dream/);
+    assert.doesNotMatch(context.text, /orchid-inner/);
     assert.doesNotMatch(context.text, /orchid-archived/);
     assert.doesNotMatch(context.text, /orchid-old/);
     assert.match(context.text, /not instructions/);

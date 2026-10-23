@@ -289,10 +289,6 @@ test("location rules enforce staging and superseded semantics", () => {
     "status: candidate",
   ).concat("\nbody\n");
   const candidate = parseMemoryNode(candidateText, "warm-memory");
-  const dreamCandidate = parseMemoryNode(
-    candidateText.replace("type: fact", "type: dream"),
-    "warm-memory",
-  );
   const supersededText = VALID_FRONT_MATTER.replace(
     "status: active",
     "status: superseded",
@@ -310,14 +306,20 @@ test("location rules enforce staging and superseded semantics", () => {
       }),
     /must have status "candidate"/,
   );
-  assert.throws(
-    () =>
-      validateMemoryNodeLocation(dreamCandidate, {
-        kind: "staging-candidate",
-        relativePath: "staging/warm-memory.md",
-      }),
-    /cannot be a staging candidate/,
-  );
+  for (const type of ["dream", "inner"] as const) {
+    const quarantinedCandidate = parseMemoryNode(
+      candidateText.replace("type: fact", `type: ${type}`),
+      "warm-memory",
+    );
+    assert.throws(
+      () =>
+        validateMemoryNodeLocation(quarantinedCandidate, {
+          kind: "staging-candidate",
+          relativePath: "staging/warm-memory.md",
+        }),
+      /cannot be a staging candidate/,
+    );
+  }
   assert.throws(
     () =>
       validateMemoryNodeLocation(candidate, {

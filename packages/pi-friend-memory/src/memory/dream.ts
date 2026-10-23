@@ -9,6 +9,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ParsedMemoryNode } from "./schema.ts";
+import { isQuarantinedMemoryType } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 
 /** Model-produced dream narrative and selected source nodes. */
@@ -39,19 +40,22 @@ export function selectDreamShortlist(
   maxNodes: number,
   random: () => number = Math.random,
 ): ParsedMemoryNode[] {
-  const slugs = new Set(nodes.map((node) => node.slug));
+  const eligible = nodes.filter(
+    (node) => !isQuarantinedMemoryType(node.frontMatter.type),
+  );
+  const slugs = new Set(eligible.map((node) => node.slug));
   const degree = new Map<string, number>();
-  for (const node of nodes) {
+  for (const node of eligible) {
     const outgoing = node.frontMatter.links.filter((link) =>
       slugs.has(link),
     ).length;
-    const incoming = nodes.filter((candidate) =>
+    const incoming = eligible.filter((candidate) =>
       candidate.frontMatter.links.includes(node.slug),
     ).length;
     degree.set(node.slug, outgoing + incoming);
   }
 
-  return [...nodes]
+  return [...eligible]
     .map((node) => ({
       node,
       degree: degree.get(node.slug) ?? 0,
@@ -63,7 +67,7 @@ export function selectDreamShortlist(
       }
       return left.tie - right.tie;
     })
-    .slice(0, Math.min(nodes.length, maxNodes * 3))
+    .slice(0, Math.min(eligible.length, maxNodes * 3))
     .map((entry) => entry.node);
 }
 

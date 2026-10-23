@@ -63,7 +63,7 @@ test("explicit speaker introductions produce a capture hint", () => {
   assert.equal(inferSpeakerName("USER: Remember this."), undefined);
 });
 
-test("capture response parsing accepts fenced JSON and filters dreams", () => {
+test("capture response parsing accepts fenced JSON and filters quarantined types", () => {
   const candidates = parseCaptureResponse(
     `Here is the result:
 \`\`\`json
@@ -80,6 +80,12 @@ test("capture response parsing accepts fenced JSON and filters dreams", () => {
       "title": "Cup Dream",
       "type": "dream",
       "body": "A dream about cups.",
+      "speaker": []
+    },
+    {
+      "title": "Inner State",
+      "type": "inner",
+      "body": "A private inward observation.",
       "speaker": []
     }
   ]

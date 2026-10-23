@@ -11,11 +11,13 @@ import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import {
+  SWEEP_SYSTEM_PROMPT,
   buildSweepPrompt,
   parseSweepResponse,
 } from "../../src/memory/sweep-model.ts";
 import { runDailySweep } from "../../src/memory/sweep.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
+import type { MemoryType } from "../../src/memory/schema.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
 import { withTempDir } from "../helpers.ts";
 
@@ -50,17 +52,15 @@ test("sweep response parsing validates candidate actions and targets", () => {
     "merge",
     "drop",
   ]);
-  assert.match(
-    buildSweepPrompt(
-      [
-        {
-          ...makeCandidate("candidate"),
-        },
-      ],
-      [makeCandidate("existing")],
-    ),
-    /Candidates:/,
+  const innerCandidate = makeCandidate("inner-state", "inner");
+  const prompt = buildSweepPrompt(
+    [innerCandidate],
+    [makeCandidate("existing")],
   );
+  assert.match(prompt, /Candidates:/);
+  assert.match(prompt, /"type": "inner"/);
+  assert.match(SWEEP_SYSTEM_PROMPT, /Inner memories/);
+  assert.match(SWEEP_SYSTEM_PROMPT, /never merge.*dream or inner/);
 });
 
 test("daily sweep writes preimage, state, log, and promotes candidates", async () => {
@@ -356,13 +356,13 @@ test("the 25% guard still applies at the configured batch threshold", async () =
 });
 
 /** Builds a minimal sweep prompt node fixture. */
-function makeCandidate(slug: string) {
+function makeCandidate(slug: string, type: MemoryType = "fact") {
   return {
     slug,
     body: `\n${slug} body.\n`,
     frontMatter: {
       title: slug,
-      type: "fact" as const,
+      type,
       speaker: [{ name: "Aisling", confident: true }],
       agents: [],
       created: "2026-10-20T00:00:00Z",

@@ -13,6 +13,7 @@ import type {
   ParsedMemoryNode,
 } from "./schema.ts";
 import {
+  isQuarantinedMemoryType,
   parseMemoryNode,
   serializeMemoryNode,
 } from "./schema.ts";
@@ -268,7 +269,7 @@ export class MemoryNodeService {
         if (
           node === null ||
           node.frontMatter.status !== "active" ||
-          node.frontMatter.type === "dream"
+          isQuarantinedMemoryType(node.frontMatter.type)
         ) {
           throw new MemoryServiceError(
             `Dream source "${slug}" is not an active canonical memory.`,
@@ -571,6 +572,11 @@ export class MemoryNodeService {
       if (preferredTarget && target === null) {
         throw new MemoryServiceError(
           `Preferred merge target "${preferredTarget}" does not exist.`,
+        );
+      }
+      if (target !== null && isQuarantinedMemoryType(target.frontMatter.type)) {
+        throw new MemoryServiceError(
+          `Cannot merge a staging candidate into ${target.frontMatter.type} memory "${target.slug}".`,
         );
       }
       if (target === null && this.semantic) {
@@ -970,6 +976,8 @@ export class MemoryNodeService {
       (result) =>
         result.kind === "node" &&
         result.status === "active" &&
+        result.type !== undefined &&
+        !isQuarantinedMemoryType(result.type) &&
         result.slug !== undefined &&
         result.slug !== candidate.slug &&
         result.score >= 0.92,

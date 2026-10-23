@@ -21,7 +21,8 @@ test("dream shortlist prefers linked nodes and parses model output", () => {
   const a = makeNode("a", ["b"]);
   const b = makeNode("b", ["a"]);
   const c = makeNode("c", []);
-  const shortlist = selectDreamShortlist([c, a, b], 2, () => 0.5);
+  const inner = makeNode("inner", [], "inner");
+  const shortlist = selectDreamShortlist([c, a, b, inner], 2, () => 0.5);
 
   assert.deepEqual(shortlist.map((node) => node.slug), ["a", "b", "c"]);
   assert.match(buildDreamPrompt(shortlist, 2), /genuinely want to sit with/);
@@ -63,6 +64,22 @@ test("dream creation stores quarantined provenance and links", async () => {
       speaker: [{ name: "Aisling", confident: true }],
       tags: ["second"],
     });
+    const inner = await service.add({
+      title: "Private Source",
+      type: "inner",
+      body: "A private source body.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    await assert.rejects(
+      () =>
+        service.createDream({
+          title: "Invalid Source Dream",
+          narrative: "This must not use inner memory as a source.",
+          nodeSlugs: [first.slug, inner.slug],
+          agents: ["test-model"],
+        }),
+      /not an active canonical memory/,
+    );
 
     const dream = await service.createDream({
       title: "Kitchen Dream",
@@ -85,13 +102,17 @@ test("dream creation stores quarantined provenance and links", async () => {
 });
 
 /** Builds a minimal dream input node fixture. */
-function makeNode(slug: string, links: string[]) {
+function makeNode(
+  slug: string,
+  links: string[],
+  type: "fact" | "inner" = "fact",
+) {
   return {
     slug,
     body: `\n${slug}.\n`,
     frontMatter: {
       title: slug,
-      type: "fact" as const,
+      type,
       speaker: [{ name: "Aisling", confident: true }],
       agents: [],
       created: "2026-10-20T00:00:00Z",

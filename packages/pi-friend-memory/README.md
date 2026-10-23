@@ -203,6 +203,12 @@ links, and `emotional_flavor: dreamlike`. They are permanently excluded from
 default RAG and can never be promoted as factual memories by automated
 processes.
 
+`type: inner` records inward-facing state or reflection. Inner memories are
+canonical and searchable, but follow the same quarantine rules as dreams:
+they are excluded from factual RAG, automated capture, dream sources, and
+automated merge targets. The sweep model receives each node's type and is
+instructed to preserve the boundary between inner and ordinary memory.
+
 ## Semantic search
 
 The `index/` directory includes a disposable `sqlite-vec` backend backed by

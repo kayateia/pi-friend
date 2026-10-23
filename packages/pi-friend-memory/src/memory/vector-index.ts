@@ -550,6 +550,7 @@ function requireBigInt(value: unknown, field: string): bigint {
 function isMemoryType(value: string | undefined): value is MemoryType {
   return (
     value === "dream" ||
+    value === "inner" ||
     value === "fact" ||
     value === "preference" ||
     value === "event" ||
