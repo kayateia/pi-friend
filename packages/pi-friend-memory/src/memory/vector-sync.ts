@@ -32,7 +32,12 @@ export async function synchronizeVectorIndex(
   files: IndexedMarkdownFile[],
   provider: EmbeddingProvider,
   index: VectorIndex,
-  options: { force?: boolean; signal?: AbortSignal } = {},
+  options: {
+    force?: boolean;
+    signal?: AbortSignal;
+    /** Preserve entries outside this synchronization set when false. */
+    pruneMissing?: boolean;
+  } = {},
 ): Promise<VectorSyncResult> {
   const existing = new Map(
     index.listEntries().map((entry) => [entry.key, entry]),
@@ -45,18 +50,22 @@ export async function synchronizeVectorIndex(
       const embeddingText = buildEmbeddingText(file);
       return {
         file,
+        key: vectorKey(file),
         embeddingText,
         contentHash: hashVectorInput(file, embeddingText),
       };
     });
-  const desiredKeys = new Set(desired.map((item) => item.file.relativePath));
-  const staleKeys = [...existing.keys()].filter((key) => !desiredKeys.has(key));
+  const desiredKeys = new Set(desired.map((item) => item.key));
+  const staleKeys =
+    options.pruneMissing === false
+      ? []
+      : [...existing.keys()].filter((key) => !desiredKeys.has(key));
   const changed =
     options.force === true
       ? desired
       : desired.filter(
           (item) =>
-            existing.get(item.file.relativePath)?.contentHash !==
+            existing.get(item.key)?.contentHash !==
             item.contentHash,
         );
 
@@ -82,7 +91,7 @@ export async function synchronizeVectorIndex(
     if (!embedding) {
       throw new Error(`Missing embedding for ${item.file.relativePath}.`);
     }
-    index.upsert(toVectorRecord(item.file, item.contentHash, embedding));
+    index.upsert(toVectorRecord(item.key, item.file, item.contentHash, embedding));
   });
 
   return {
@@ -127,12 +136,13 @@ export function hashVectorInput(
 
 /** Converts one indexed file plus its current embedding into a vector record. */
 function toVectorRecord(
+  key: string,
   file: IndexedMarkdownFile,
   contentHash: string,
   embedding: Float32Array,
 ): VectorRecord {
   return {
-    key: file.relativePath,
+    key,
     kind: file.kind,
     sourcePath: file.relativePath,
     contentHash,
@@ -145,4 +155,9 @@ function toVectorRecord(
       : { decayWeight: file.decayWeight }),
     tags: file.tags,
   };
+}
+
+/** Returns the stable vector key or the ordinary memory-relative path. */
+function vectorKey(file: IndexedMarkdownFile): string {
+  return file.vectorKey ?? file.relativePath;
 }

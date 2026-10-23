@@ -68,6 +68,12 @@ export function searchSemanticVectors(
       ...(file.decayWeight === undefined
         ? {}
         : { decayWeight: file.decayWeight }),
+      ...(file.modifiedAt === undefined
+        ? {}
+        : { modifiedAt: file.modifiedAt }),
+      ...(file.provenance === undefined
+        ? {}
+        : { provenance: file.provenance }),
       snippet: makeSemanticSnippet(file),
       score: Math.max(0, 1 - hit.distance),
       matchedFields: ["semantic"],

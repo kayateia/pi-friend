@@ -113,6 +113,7 @@ Kept from pi-memory, with changes:
 - `memory_restore(recoveryId)` → unchanged from pi-memory.
 - `memory_promote(candidateSlug)` → promotes one staging candidate. Near-duplicates are merged into an existing canonical node with links and attribution preserved.
 - `memory_search(query, mode, type?)` → `keyword`, `semantic`, or `hybrid`: embedding search over the index plus keyword search over ALL files in the memory tree AND linked documents. Returns typed results (`node` / `document` / `staging-candidate`), each with its decay tier and snippet.
+- `memory_index_path(path)` → additively indexes a Markdown file or directory tree. External files use stable absolute source paths, file mtime, first-heading title, and `imported` provenance. Content hashes make repeated indexing idempotent, and importing a subset never removes unrelated vector records.
 
 **Search must find documents, not just nodes.** Front matter is required only for `nodes/` and `staging/`.
 

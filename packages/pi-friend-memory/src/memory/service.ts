@@ -24,6 +24,7 @@ import {
   RecoveryRecordError,
 } from "./recovery.ts";
 import { buildMemoryDocumentIndex } from "./indexer.ts";
+import type { IndexedMarkdownFile } from "./indexer.ts";
 import { searchHybrid } from "./hybrid-search.ts";
 import type { EmbeddingProvider } from "./embedding.ts";
 import type {
@@ -36,6 +37,10 @@ import type { VectorIndex } from "./vector-index.ts";
 import { buildEmbeddingText } from "./vector-sync.ts";
 import { synchronizeVectorIndex } from "./vector-sync.ts";
 import { searchSemanticVectors } from "./semantic-search.ts";
+import {
+  buildIndexPathFiles,
+  loadImportedIndexedFiles,
+} from "./external-index.ts";
 import {
   computeDecayUpdates,
   type DecayUpdate,
@@ -114,6 +119,23 @@ export interface MemoryDreamInput {
 export interface DailyLogWriteResult {
   date: string;
   path: string;
+}
+
+/** Metadata returned for one Markdown file processed by bulk indexing. */
+export interface MemoryIndexPathFile {
+  path: string;
+  title?: string;
+  modifiedAt: string;
+  provenance: string;
+}
+
+/** Result of one additive Markdown bulk-index pass. */
+export interface MemoryIndexPathResult {
+  sourcePath: string;
+  total: number;
+  embedded: number;
+  skipped: number;
+  files: MemoryIndexPathFile[];
 }
 
 /** Optional semantic-search dependencies, available only when configured. */
@@ -336,7 +358,7 @@ export class MemoryNodeService {
       throw new MemoryServiceError("Search query must not be empty.");
     }
 
-    const index = await buildMemoryDocumentIndex(this.repository.store);
+    const index = await this.buildSearchIndex();
     const mode = options.mode ?? "keyword";
     let results: MemorySearchResult[];
     if (mode === "semantic" || mode === "hybrid") {
@@ -374,6 +396,46 @@ export class MemoryNodeService {
     }
 
     return results;
+  }
+
+  /**
+   * Additively embeds a Markdown file or directory tree.
+   *
+   * Existing vector records outside the supplied path are preserved. Content
+   * hashes make repeated imports cheap and prevent duplicate records.
+   */
+  async indexPath(
+    inputPath: string,
+    options: { cwd: string },
+  ): Promise<MemoryIndexPathResult> {
+    if (!this.semantic) {
+      throw new MemoryServiceError(
+        "Bulk indexing is unavailable because no embedding provider is configured.",
+      );
+    }
+
+    const prepared = await buildIndexPathFiles(inputPath, {
+      cwd: options.cwd,
+      memoryRoot: this.repository.store.root,
+    });
+    const synchronized = await synchronizeVectorIndex(
+      prepared.files,
+      this.semantic.provider,
+      this.semantic.index,
+      { pruneMissing: false },
+    );
+    return {
+      sourcePath: prepared.sourcePath,
+      total: synchronized.total,
+      embedded: synchronized.embedded,
+      skipped: synchronized.skipped,
+      files: prepared.files.map((file) => ({
+        path: file.relativePath,
+        ...(file.title === undefined ? {} : { title: file.title }),
+        modifiedAt: file.modifiedAt ?? "",
+        provenance: file.provenance ?? "imported",
+      })),
+    };
   }
 
   /** Recomputes volume-relative decay metadata for canonical nodes. */
@@ -874,7 +936,7 @@ export class MemoryNodeService {
       return null;
     }
 
-    const files = await buildMemoryDocumentIndex(this.repository.store);
+    const files = await this.buildSearchIndex();
     await synchronizeVectorIndex(
       files,
       this.semantic.provider,
@@ -915,6 +977,19 @@ export class MemoryNodeService {
     return duplicate?.slug
       ? this.repository.read(duplicate.slug, "canonical")
       : null;
+  }
+
+  /** Builds the in-memory search corpus from memory files and imports. */
+  private async buildSearchIndex(): Promise<IndexedMarkdownFile[]> {
+    const memoryFiles = await buildMemoryDocumentIndex(this.repository.store);
+    if (!this.semantic) {
+      return memoryFiles;
+    }
+    const importedFiles = await loadImportedIndexedFiles(
+      this.semantic.index,
+      this.repository.store.root,
+    );
+    return [...memoryFiles, ...importedFiles];
   }
 
   /** Reads and validates one recovery record. */

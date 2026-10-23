@@ -1,0 +1,103 @@
+/**
+ * pi-friend-memory
+ *
+ * @license
+ * Copyright 2026 Kayateia
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import assert from "node:assert/strict";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
+import * as path from "node:path";
+import test from "node:test";
+import type { EmbeddingProvider } from "../../src/memory/embedding.ts";
+import { MemoryNodeRepository } from "../../src/memory/repository.ts";
+import { MemoryNodeService } from "../../src/memory/service.ts";
+import { SqliteVectorIndex } from "../../src/memory/vector-index.ts";
+import { withTempDir } from "../helpers.ts";
+
+/** Embedding provider that makes the imported marigold text easy to retrieve. */
+class ImportTestProvider implements EmbeddingProvider {
+  readonly model = "test/import";
+  readonly dimensions = 2;
+  inputBatches: string[][] = [];
+
+  async embed(texts: string[]): Promise<Float32Array[]> {
+    this.inputBatches.push([...texts]);
+    return texts.map((text) =>
+      text.toLowerCase().includes("marigold")
+        ? new Float32Array([1, 0])
+        : new Float32Array([0, 1]),
+    );
+  }
+}
+
+test("bulk indexing imports plain Markdown idempotently and finds it semantically", async () => {
+  await withTempDir(async (agentDir) => {
+    const oldCorpus = path.join(agentDir, "old-memory");
+    const oldDaily = path.join(oldCorpus, "daily", "2026-09-01.md");
+    await mkdir(path.dirname(oldDaily), { recursive: true });
+    await writeFile(
+      oldDaily,
+      [
+        "# September Garden Log",
+        "",
+        "The marigold by the east window survived the first frost.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const canonicalOldDaily = await realpath(oldDaily);
+
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const provider = new ImportTestProvider();
+    const index = SqliteVectorIndex.open({
+      databasePath: ":memory:",
+      model: provider.model,
+      dimensions: provider.dimensions,
+    });
+    const service = new MemoryNodeService(
+      repository,
+      () => new Date("2026-10-22T12:00:00.000Z"),
+      { provider, index },
+    );
+
+    try {
+      const first = await service.indexPath(oldCorpus, { cwd: agentDir });
+      assert.equal(first.total, 1);
+      assert.equal(first.embedded, 1);
+      assert.equal(first.skipped, 0);
+      assert.equal(first.files[0]?.path, canonicalOldDaily);
+      assert.equal(first.files[0]?.title, "September Garden Log");
+      assert.match(first.files[0]?.modifiedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+      assert.equal(
+        first.files[0]?.provenance,
+        `imported; source: ${canonicalOldDaily}`,
+      );
+      assert.equal(index.count(), 1);
+
+      const results = await service.search({
+        query: "marigold frost",
+        mode: "semantic",
+      });
+      assert.equal(results[0]?.relativePath, canonicalOldDaily);
+      assert.equal(results[0]?.kind, "document");
+      assert.equal(
+        results[0]?.provenance,
+        `imported; source: ${canonicalOldDaily}`,
+      );
+      assert.match(results[0]?.snippet ?? "", /marigold by the east window/);
+
+      const second = await service.indexPath(oldCorpus, { cwd: agentDir });
+      assert.equal(second.total, 1);
+      assert.equal(second.embedded, 0);
+      assert.equal(second.skipped, 1);
+      assert.equal(index.count(), 1);
+    } finally {
+      index.close();
+    }
+  });
+});

@@ -27,6 +27,8 @@ import type { MemoryStore } from "./store.ts";
 export interface IndexedMarkdownFile {
   absolutePath: string;
   relativePath: string;
+  /** Stable vector-index key when it differs from the display path. */
+  vectorKey?: string;
   /** Classification implied by storage location. */
   storageKind: MemoryFileKind;
   /** Effective search kind after schema fallback. */
@@ -38,6 +40,10 @@ export interface IndexedMarkdownFile {
   decayWeight?: number;
   tags: string[];
   body: string;
+  /** File modification timestamp, when indexing imported Markdown. */
+  modifiedAt?: string;
+  /** Fallible origin label for imported content. */
+  provenance?: string;
   schemaError?: string;
 }
 
@@ -80,7 +86,7 @@ export async function buildMemoryDocumentIndex(
             throw error;
           }
 
-          return indexAsDocument(
+          return buildDocumentIndexEntry(
             text,
             file.absolutePath,
             file.relativePath,
@@ -90,7 +96,7 @@ export async function buildMemoryDocumentIndex(
         }
       }
 
-      return indexAsDocument(
+      return buildDocumentIndexEntry(
         text,
         file.absolutePath,
         file.relativePath,
@@ -101,7 +107,7 @@ export async function buildMemoryDocumentIndex(
 }
 
 /** Builds a permissive document entry from arbitrary Markdown. */
-function indexAsDocument(
+export function buildDocumentIndexEntry(
   text: string,
   absolutePath: string,
   relativePath: string,

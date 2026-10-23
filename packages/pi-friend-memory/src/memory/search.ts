@@ -34,6 +34,8 @@ export interface MemorySearchResult {
   type?: MemoryType;
   status?: MemoryStatus;
   decayWeight?: number;
+  modifiedAt?: string;
+  provenance?: string;
   snippet: string;
   score: number;
   matchedFields: SearchField[];
@@ -95,6 +97,12 @@ export function searchIndexedFiles(
       ...(file.decayWeight === undefined
         ? {}
         : { decayWeight: file.decayWeight }),
+      ...(file.modifiedAt === undefined
+        ? {}
+        : { modifiedAt: file.modifiedAt }),
+      ...(file.provenance === undefined
+        ? {}
+        : { provenance: file.provenance }),
       snippet: makeSnippet(file, query, queryTokens),
       score: score.value,
       matchedFields: score.fields,

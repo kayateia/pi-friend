@@ -24,6 +24,7 @@ import type {
   MemoryAddInput,
   MemoryEditInput,
   MemoryNodeService,
+  MemoryIndexPathResult,
 } from "../memory/service.ts";
 import type {
   MemorySearchOptions,
@@ -631,6 +632,50 @@ export function registerMemoryTools(
       };
     },
   });
+
+  pi.registerTool({
+    name: toolName("memory_index_path"),
+    label: "Memory Index Path",
+    description: [
+      "Additively index one Markdown file or directory tree for keyword and semantic search.",
+      "External files keep their absolute source path and receive imported provenance plus the file modification time and first-heading title.",
+      "Content hashes make repeated runs idempotent: unchanged files are skipped, changed files are re-embedded, and files outside the supplied path are preserved.",
+      "Use this to make an existing daily-log or Markdown memory corpus searchable without copying it into the configured memory tree.",
+    ].join("\n"),
+    parameters: Type.Object({
+      path: Type.String({
+        description:
+          "Markdown file or directory path. Absolute paths, relative paths, and leading ~ are accepted.",
+      }),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+      _signal,
+      _onUpdate,
+      ctx,
+    ): Promise<AgentToolResult<MemoryIndexPathResult>> {
+      const service = requireService(getService);
+      const result = await service.indexPath(params.path, {
+        cwd: ctx?.cwd ?? process.cwd(),
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: formatIndexPathResult(result),
+          },
+        ],
+        details: result,
+      };
+    },
+  });
 }
 
 /** Formats ranked search results for the model-facing tool response. */
@@ -667,6 +712,26 @@ function formatSearchResults(
   });
 
   return `Found ${results.length} result${results.length === 1 ? "" : "s"} for "${query}".\n\n${blocks.join("\n\n---\n\n")}`;
+}
+
+/** Formats an additive indexing summary with fallible source metadata. */
+function formatIndexPathResult(result: MemoryIndexPathResult): string {
+  const fileBlocks = result.files.map((file) => {
+    const metadata = [
+      file.title === undefined ? "" : `title: ${file.title}`,
+      `modified: ${file.modifiedAt}`,
+      file.provenance,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return `- ${file.path}\n  ${metadata}`;
+  });
+
+  return [
+    `Indexed ${result.total} Markdown file${result.total === 1 ? "" : "s"} from ${result.sourcePath}.`,
+    `Embedded: ${result.embedded} · already current: ${result.skipped}`,
+    ...fileBlocks,
+  ].join("\n");
 }
 
 /** Resolves the service or reports that storage initialization failed. */

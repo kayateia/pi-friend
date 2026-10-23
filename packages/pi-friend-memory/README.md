@@ -151,6 +151,9 @@ Pi reads the extension entry point from the `pi.extensions` field in
 - `memory_search` supports ranked keyword search and semantic search across
   nodes, staging candidates, and plain Markdown documents.
 - `memory_log` appends a timestamped running note to today's daily log.
+- `memory_index_path` additively embeds a Markdown file or directory tree.
+  Imported files retain their source path, file modification time, first-heading
+  title, and `imported` provenance. Content hashes make repeat runs idempotent.
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.
@@ -209,6 +212,11 @@ Semantic mode uses Pi's stored OpenRouter credential, falling back to
 `OPENROUTER_API_KEY`, and embeds with `openai/text-embedding-3-small` at 1,536
 dimensions. Markdown is synchronized lazily on semantic search; unchanged
 content hashes do not make repeat embedding calls.
+
+Use `memory_index_path` to index a corpus outside the configured memory root,
+including older daily logs. Directory walks include nested `.md` files, ignore
+hidden paths and symlinks, and preserve all vector records outside the supplied
+path.
 
 The Markdown tree remains canonical. Deleting `index/vectors.sqlite` is always
 safe because the index can be rebuilt from source files. Hybrid mode combines
