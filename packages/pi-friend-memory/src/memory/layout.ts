@@ -18,7 +18,6 @@ export async function ensureMemoryLayout(paths: MemoryPaths): Promise<void> {
     paths.nodes,
     paths.supersededNodes,
     paths.staging,
-    paths.daily,
     paths.sweeps,
     paths.index,
     paths.recovery,

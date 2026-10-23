@@ -36,12 +36,10 @@ test("Markdown replacement preserves exact text", async () => {
   });
 });
 
-test("daily logs and the access log are append-only", async () => {
+test("the access log remains append-only", async () => {
   await withTempDir(async (agentDir) => {
     const store = await MemoryStore.open({ agentDir, homeDir: agentDir });
 
-    await store.appendDaily("2026-10-19", "first\n");
-    await store.appendDaily("2026-10-19", "second\n");
     await store.appendAccessLog({
       timestamp: "2026-10-19T20:00:00.000Z",
       source: "rag",
@@ -49,10 +47,6 @@ test("daily logs and the access log are append-only", async () => {
       tier: "fresh",
     });
 
-    assert.equal(
-      await store.readTextFile("daily/2026-10-19.md"),
-      "first\nsecond\n",
-    );
     const accessLines = (await store.readTextFile("access-log"))
       .trim()
       .split("\n");
@@ -65,27 +59,13 @@ test("daily logs and the access log are append-only", async () => {
     });
 
     await assert.rejects(
-      () => store.writeTextFile("daily/2026-10-19.md", "replacement"),
-      /append-only/,
-    );
-    await assert.rejects(
       () => store.writeTextFile("access-log", "replacement"),
       /must use the \.md extension/,
     );
-  });
-});
-
-test("concurrent daily appends are serialized", async () => {
-  await withTempDir(async (agentDir) => {
-    const store = await MemoryStore.open({ agentDir, homeDir: agentDir });
-    const entries = Array.from({ length: 20 }, (_, index) => `${index}\n`);
-
-    await Promise.all(
-      entries.map((entry) => store.appendDaily("2026-10-19", entry)),
+    await assert.rejects(
+      () => store.removeTextFile("access-log"),
+      /append-only/,
     );
-
-    const content = await store.readTextFile("daily/2026-10-19.md");
-    assert.equal(content.split("\n").filter(Boolean).length, entries.length);
   });
 });
 
@@ -103,14 +83,11 @@ test("file inventory classifies nodes and documents and skips index state", asyn
     ]) {
       await store.writeTextFile(relativePath, relativePath);
     }
-    await store.appendDaily("2026-10-19", "daily record\n");
-
     const files = await store.listMarkdownFiles();
     assert.deepEqual(
       files.map((file) => [file.relativePath, file.kind]),
       [
         ["MEMORY.md", "document"],
-        ["daily/2026-10-19.md", "document"],
         ["docs/reference.md", "document"],
         ["nodes/superseded/old.md", "node"],
         ["nodes/topic.md", "node"],
@@ -157,12 +134,14 @@ test("node helpers validate slugs and preserve created files", async () => {
   });
 });
 
-test("invalid daily dates are rejected", async () => {
+test("legacy daily paths are treated as ordinary Markdown", async () => {
   await withTempDir(async (agentDir) => {
     const store = await MemoryStore.open({ agentDir, homeDir: agentDir });
-    await assert.rejects(
-      () => store.appendDaily("2026-02-30", "invalid"),
-      /Invalid daily date/,
+    await store.writeTextFile("daily/2026-10-19.md", "first");
+    await store.writeTextFile("daily/2026-10-19.md", "replacement");
+    assert.equal(
+      await store.readTextFile("daily/2026-10-19.md"),
+      "replacement",
     );
   });
 });

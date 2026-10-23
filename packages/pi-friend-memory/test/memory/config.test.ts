@@ -40,11 +40,6 @@ test("missing configuration uses the default memory root", async () => {
       mode: "hybrid",
       limit: 5,
       maxChars: 6_000,
-      daily: {
-        enabled: true,
-        days: 2,
-        maxChars: 3_000,
-      },
     });
     assert.deepEqual(config.autoCapture, {
       enabled: true,
@@ -177,10 +172,6 @@ test("injection settings are parsed and validated", () => {
       "    mode: keyword",
       "    limit: 3",
       "    max_chars: 1200",
-      "    daily:",
-      "      enabled: false",
-      "      days: 3",
-      "      max_chars: 700",
     ].join("\n"),
     configPath,
   );
@@ -191,11 +182,6 @@ test("injection settings are parsed and validated", () => {
     mode: "keyword",
     limit: 3,
     maxChars: 1_200,
-    daily: {
-      enabled: false,
-      days: 3,
-      maxChars: 700,
-    },
   });
 });
 
@@ -213,6 +199,22 @@ test("invalid injection settings fail closed", () => {
       MemoryConfigError,
     );
   }
+});
+
+test("the removed daily injection section is ignored", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  injection:",
+      "    daily:",
+      "      enabled: false",
+    ].join("\n"),
+    configPath,
+  );
+
+  assert.equal(config.injection.enabled, true);
+  assert.equal(config.injection.mode, "hybrid");
 });
 
 test("auto-capture settings are parsed and validated", () => {

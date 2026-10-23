@@ -84,12 +84,6 @@ interface MemoryPromoteDetails {
   path: string;
 }
 
-/** Structured details returned by a daily-log append. */
-interface MemoryLogDetails {
-  date: string;
-  path: string;
-}
-
 /** Structured details returned by a keyword search. */
 interface MemorySearchDetails {
   query: string;
@@ -366,48 +360,6 @@ export function registerMemoryTools(
   });
 
   pi.registerTool({
-    name: toolName("memory_log"),
-    label: "Memory Log",
-    description: [
-      "Append a timestamped running note to today's daily log.",
-      "Daily logs are append-only and are also available to recent-context injection.",
-      "Use this for day-to-day notes and running context rather than durable single-topic memories.",
-    ].join("\n"),
-    parameters: Type.Object({
-      content: Type.String({
-        description: "Markdown note to append to today's daily log.",
-      }),
-    }),
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
-    async execute(
-      _toolCallId,
-      params,
-      _signal,
-      _onUpdate,
-      ctx,
-    ): Promise<AgentToolResult<MemoryLogDetails>> {
-      const service = requireService(getService);
-      const result = await service.appendDailyNote(params.content, {
-        sessionId: ctx.sessionManager.getSessionId(),
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Appended daily-log entry: ${result.path}`,
-          },
-        ],
-        details: result,
-      };
-    },
-  });
-
-  pi.registerTool({
     name: toolName("memory_edit"),
     label: "Memory Edit",
     description: [
@@ -641,7 +593,7 @@ export function registerMemoryTools(
       "Additively index one Markdown file or directory tree for keyword and semantic search.",
       "External files keep their absolute source path and receive imported provenance plus the file modification time and first-heading title.",
       "Content hashes make repeated runs idempotent: unchanged files are skipped, changed files are re-embedded, and files outside the supplied path are preserved.",
-      "Use this to make an existing daily-log or Markdown memory corpus searchable without copying it into the configured memory tree.",
+      "Use this to make an existing Markdown corpus searchable without copying it into the configured memory tree.",
     ].join("\n"),
     parameters: Type.Object({
       path: Type.String({

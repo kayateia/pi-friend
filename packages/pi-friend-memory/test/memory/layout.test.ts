@@ -34,7 +34,6 @@ test("layout creation is idempotent and preserves existing content", async () =>
       paths.nodes,
       paths.supersededNodes,
       paths.staging,
-      paths.daily,
       paths.sweeps,
       paths.index,
       paths.recovery,

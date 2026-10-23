@@ -17,7 +17,6 @@ export interface MemoryPaths {
   nodes: string;
   supersededNodes: string;
   staging: string;
-  daily: string;
   accessLog: string;
   sweeps: string;
   index: string;
@@ -46,7 +45,6 @@ export function createMemoryPaths(root: string, configPath: string): MemoryPaths
     nodes: path.join(resolvedRoot, "nodes"),
     supersededNodes: path.join(resolvedRoot, "nodes", "superseded"),
     staging: path.join(resolvedRoot, "staging"),
-    daily: path.join(resolvedRoot, "daily"),
     accessLog: path.join(resolvedRoot, "access-log"),
     sweeps: path.join(resolvedRoot, "sweeps"),
     index: path.join(resolvedRoot, "index"),

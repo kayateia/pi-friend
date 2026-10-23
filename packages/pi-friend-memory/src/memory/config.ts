@@ -21,14 +21,6 @@ export interface RagInjectionConfig {
   mode: MemorySearchMode;
   limit: number;
   maxChars: number;
-  daily: DailyInjectionConfig;
-}
-
-/** Configuration for recent daily-log prompt injection. */
-export interface DailyInjectionConfig {
-  enabled: boolean;
-  days: number;
-  maxChars: number;
 }
 
 /** Configuration for periodic conversation capture into staging. */
@@ -99,11 +91,6 @@ export function defaultRagInjectionConfig(): RagInjectionConfig {
     mode: "hybrid",
     limit: 5,
     maxChars: 6_000,
-    daily: {
-      enabled: true,
-      days: 2,
-      maxChars: 3_000,
-    },
   };
 }
 
@@ -349,48 +336,6 @@ function parseRagInjection(
       );
     }
     config.maxChars = value.max_chars;
-  }
-
-  if (value.daily !== undefined) {
-    if (!isRecord(value.daily)) {
-      throw new MemoryConfigError(
-        `${configPath}: memory.injection.daily must be a YAML object.`,
-      );
-    }
-    if (value.daily.enabled !== undefined) {
-      if (typeof value.daily.enabled !== "boolean") {
-        throw new MemoryConfigError(
-          `${configPath}: memory.injection.daily.enabled must be a boolean.`,
-        );
-      }
-      config.daily.enabled = value.daily.enabled;
-    }
-    if (value.daily.days !== undefined) {
-      if (
-        typeof value.daily.days !== "number" ||
-        !Number.isInteger(value.daily.days) ||
-        value.daily.days < 1 ||
-        value.daily.days > 14
-      ) {
-        throw new MemoryConfigError(
-          `${configPath}: memory.injection.daily.days must be an integer from 1 to 14.`,
-        );
-      }
-      config.daily.days = value.daily.days;
-    }
-    if (value.daily.max_chars !== undefined) {
-      if (
-        typeof value.daily.max_chars !== "number" ||
-        !Number.isInteger(value.daily.max_chars) ||
-        value.daily.max_chars < 200 ||
-        value.daily.max_chars > 20_000
-      ) {
-        throw new MemoryConfigError(
-          `${configPath}: memory.injection.daily.max_chars must be an integer from 200 to 20000.`,
-        );
-      }
-      config.daily.maxChars = value.daily.max_chars;
-    }
   }
 
   return config;

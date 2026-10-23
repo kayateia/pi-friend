@@ -24,7 +24,6 @@ test("the example configuration matches supported defaults", async () => {
   assert.equal(config.injection.enabled, true);
   assert.equal(config.injection.position, -1);
   assert.equal(config.injection.mode, "hybrid");
-  assert.equal(config.injection.daily.days, 2);
   assert.equal(config.autoCapture.everyTurns, 5);
   assert.equal(config.sweep.tombstoneGraceDays, 30);
   assert.equal(config.sweep.minGuardedBatchSize, 10);

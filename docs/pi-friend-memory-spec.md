@@ -30,7 +30,6 @@ memory/
 │   ├── <slug>.md
 │   └── superseded/      ← tombstoned nodes awaiting sweep decision
 ├── staging/             ← auto-captured candidates, not yet promoted
-├── daily/               ← day logs (unchanged from pi-memory)
 ├── access-log           ← append-only: one line per RAG hit / tool use
 ├── sweeps/              ← dated sweep logs + dream narratives
 └── index/               ← vector store config/state (non-canonical)
@@ -48,10 +47,6 @@ memory:
     mode: hybrid
     limit: 5
     max_chars: 6000
-    daily:
-      enabled: true
-      days: 2
-      max_chars: 3000
   auto_capture:
     enabled: true
     every_turns: 5
@@ -91,7 +86,7 @@ tags: []                            # searchable keywords
 supersedes: []                      # slugs of nodes this corrects/overrides
 superseded_by: ""                   # set on the overridden node when a correction lands
 links: []                           # slugs of related nodes (the wiki mesh)
-source: ""                          # optional pointer to a daily log / journal / conversation
+source: ""                          # optional pointer to a journal / conversation / document
 edited: 2026-10-18T09:00:00Z        # optional timestamp for when the memory was edited
 ---
 ```
@@ -138,8 +133,6 @@ Kept from pi-memory, with changes:
 - Superseded nodes get `decay_weight: 0` and are excluded from RAG, but remain searchable with an explicit `superseded` marker (so the model can say "an earlier record says X, but it was corrected by Y").
 
 ## 8. Auto-capture (staging)
-
-`daily/` logs are append-only **by design, not convention**: auto-capture and retrospectives track snippets against daily entries; rewriting a daily log corrupts that tracking and breaks capture integrity.
 
 - Every N turns (configurable, default ~5), a **fast model** reviews the recent conversation and writes candidate nodes to `staging/`, front matter included, `status: candidate`.
 - Candidates are NOT injected into RAG until promoted.
@@ -233,6 +226,5 @@ Reviews recent history for patterns in Aisling's (and the system's) behavior and
 ## 14. Open questions (decide during/after first pass)
 
 - Retention policy for `superseded/` tombstones (grace period length).
-- Should `daily/` logs ever be promoted to nodes automatically, or only via staging capture?
 - Dream injection contexts: which conversations "allow" dreams?
 - Ruling needed: adopt retrospective pass (§12a)? Pattern detection pass (§12b)?

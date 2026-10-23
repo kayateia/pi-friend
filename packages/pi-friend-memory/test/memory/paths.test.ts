@@ -50,6 +50,6 @@ test("memory Markdown files are classified by location", () => {
     classifyMemoryMarkdown("staging/candidate.md"),
     "staging-candidate",
   );
-  assert.equal(classifyMemoryMarkdown("daily/2026-10-19.md"), "document");
+  assert.equal(classifyMemoryMarkdown("archive/2026-10-19.md"), "document");
   assert.equal(classifyMemoryMarkdown("MEMORY.md"), "document");
 });

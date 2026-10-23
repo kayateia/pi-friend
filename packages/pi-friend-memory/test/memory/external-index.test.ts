@@ -35,10 +35,10 @@ class ImportTestProvider implements EmbeddingProvider {
 test("bulk indexing imports plain Markdown idempotently and finds it semantically", async () => {
   await withTempDir(async (agentDir) => {
     const oldCorpus = path.join(agentDir, "old-memory");
-    const oldDaily = path.join(oldCorpus, "daily", "2026-09-01.md");
-    await mkdir(path.dirname(oldDaily), { recursive: true });
+    const oldNote = path.join(oldCorpus, "notes", "2026-09-01.md");
+    await mkdir(path.dirname(oldNote), { recursive: true });
     await writeFile(
-      oldDaily,
+      oldNote,
       [
         "# September Garden Log",
         "",
@@ -47,7 +47,7 @@ test("bulk indexing imports plain Markdown idempotently and finds it semanticall
       ].join("\n"),
       "utf8",
     );
-    const canonicalOldDaily = await realpath(oldDaily);
+    const canonicalOldNote = await realpath(oldNote);
 
     const repository = await MemoryNodeRepository.open({
       agentDir,
@@ -70,12 +70,12 @@ test("bulk indexing imports plain Markdown idempotently and finds it semanticall
       assert.equal(first.total, 1);
       assert.equal(first.embedded, 1);
       assert.equal(first.skipped, 0);
-      assert.equal(first.files[0]?.path, canonicalOldDaily);
+      assert.equal(first.files[0]?.path, canonicalOldNote);
       assert.equal(first.files[0]?.title, "September Garden Log");
       assert.match(first.files[0]?.modifiedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
       assert.equal(
         first.files[0]?.provenance,
-        `imported; source: ${canonicalOldDaily}`,
+        `imported; source: ${canonicalOldNote}`,
       );
       assert.equal(index.count(), 1);
 
@@ -83,11 +83,11 @@ test("bulk indexing imports plain Markdown idempotently and finds it semanticall
         query: "marigold frost",
         mode: "semantic",
       });
-      assert.equal(results[0]?.relativePath, canonicalOldDaily);
+      assert.equal(results[0]?.relativePath, canonicalOldNote);
       assert.equal(results[0]?.kind, "document");
       assert.equal(
         results[0]?.provenance,
-        `imported; source: ${canonicalOldDaily}`,
+        `imported; source: ${canonicalOldNote}`,
       );
       assert.match(results[0]?.snippet ?? "", /marigold by the east window/);
 

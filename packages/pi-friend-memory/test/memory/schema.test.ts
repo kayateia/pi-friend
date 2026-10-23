@@ -39,7 +39,7 @@ supersedes: []
 superseded_by: ""
 links:
   - shared-ritual
-source: "daily/2026-10-18.md"
+source: "journal/2026-10-18.md"
 edited: 2026-10-18T10:00:00Z
 ---
 `;
@@ -72,7 +72,7 @@ test("valid nodes parse into strict typed metadata with an exact body", () => {
 test("optional source, speaker note, and edited timestamp may be omitted", () => {
   const text = VALID_FRONT_MATTER
     .replace('    note: "fronting at the time"\n', "")
-    .replace('source: "daily/2026-10-18.md"\n', "")
+    .replace('source: "journal/2026-10-18.md"\n', "")
     .replace("edited: 2026-10-18T10:00:00Z\n", "")
     .concat("\nbody\n");
   const node = parseMemoryNode(text, "warm-memory");

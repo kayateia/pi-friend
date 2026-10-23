@@ -4,7 +4,7 @@ A friendship-oriented memory extension for the Pi coding agent.
 
 The storage foundation, strict schema, repository, memory lifecycle tools,
 keyword and semantic search, sqlite-vec indexing, RAG injection, auto-capture,
-consolidation, daily logs, and dreaming are implemented.
+consolidation, and dreaming are implemented.
 
 This package lives at `packages/pi-friend-memory` in the `pi-friend` npm
 workspace.
@@ -28,7 +28,6 @@ The default tree is:
 ├── nodes/
 │   └── superseded/
 ├── staging/
-├── daily/
 ├── access-log
 ├── sweeps/
 ├── index/
@@ -47,10 +46,6 @@ memory:
     mode: hybrid
     limit: 5
     max_chars: 6000
-    daily:
-      enabled: true
-      days: 2
-      max_chars: 3000
   auto_capture:
     enabled: true
     every_turns: 5
@@ -88,10 +83,6 @@ The injected block is prepended to the selected user message and wrapped in
 `<pi-friend-memory>...</pi-friend-memory>`. Each recalled node includes a
 compact `Why recalled:` line with semantic/keyword ranks, matched fields, and
 score so retrieval can be calibrated rather than taken on trust.
-
-Recent daily logs are injected as a separate observed-context section. The
-default reads today's and yesterday's logs, taking bounded tails from each
-append-only file.
 
 ## Development
 
@@ -152,7 +143,6 @@ Pi reads the extension entry point from the `pi.extensions` field in
   storage.
 - `memory_search` supports ranked keyword search and semantic search across
   nodes, staging candidates, and plain Markdown documents.
-- `memory_log` appends a timestamped running note to today's daily log.
 - `memory_index_path` additively embeds a Markdown file or directory tree.
   Imported files retain their source path, file modification time, first-heading
   title, and `imported` provenance. Content hashes make repeat runs idempotent.
@@ -221,10 +211,9 @@ Semantic mode uses Pi's stored OpenRouter credential, falling back to
 dimensions. Markdown is synchronized lazily on semantic search; unchanged
 content hashes do not make repeat embedding calls.
 
-Use `memory_index_path` to index a corpus outside the configured memory root,
-including older daily logs. Directory walks include nested `.md` files, ignore
-hidden paths and symlinks, and preserve all vector records outside the supplied
-path.
+Use `memory_index_path` to index a Markdown corpus outside the configured
+memory root. Directory walks include nested `.md` files, ignore hidden paths
+and symlinks, and preserve all vector records outside the supplied path.
 
 The Markdown tree remains canonical. Deleting `index/vectors.sqlite` is always
 safe because the index can be rebuilt from source files. Hybrid mode combines

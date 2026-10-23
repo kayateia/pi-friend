@@ -121,8 +121,8 @@ export class MemoryStore {
   /**
    * Atomically replaces a Markdown file while preserving exact content.
    *
-   * Daily logs and the access log deliberately reject this operation because
-   * their integrity depends on append-only behavior.
+   * The access log deliberately rejects this operation because its integrity
+   * depends on append-only behavior.
    */
   async writeTextFile(relativePath: string, content: string): Promise<void> {
     if (!relativePath.endsWith(".md")) {
@@ -177,15 +177,6 @@ export class MemoryStore {
   /** Exact text returned by the validator for a canonical node slug. */
   nodeRelativePath(slug: string): string {
     return nodeRelativePath(validateSlug(slug));
-  }
-
-  /** Appends exact text to a validated local-calendar daily log. */
-  async appendDaily(date: string, content: string): Promise<void> {
-    if (!isValidDailyDate(date)) {
-      throw new MemoryStoreError(`Invalid daily date: ${date}. Expected YYYY-MM-DD.`);
-    }
-
-    await this.appendText(`daily/${date}.md`, content);
   }
 
   /** Appends one JSON line to the access log. */
@@ -255,7 +246,7 @@ export class MemoryStore {
   /** Rejects replacement of files whose integrity depends on append-only writes. */
   private assertWritableTarget(target: string): void {
     const key = relativeKey(this.root, target);
-    if (key === "access-log" || key.startsWith("daily/")) {
+    if (key === "access-log") {
       throw new MemoryStoreError(
         `${key} is append-only and cannot be replaced.`,
       );
@@ -319,25 +310,6 @@ function recoveryRelativePath(recoveryId: string): string {
     throw new MemoryStoreError("Recovery ID must be a valid UUID.");
   }
   return `recovery/${recoveryId}.json`;
-}
-
-/** Validates a real YYYY-MM-DD local-calendar date. */
-export function isValidDailyDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-
-  const [yearText, monthText, dayText] = value.split("-");
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-
-  return (
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day
-  );
 }
 
 /** Writes a same-directory temporary file, syncs it, then renames it. */

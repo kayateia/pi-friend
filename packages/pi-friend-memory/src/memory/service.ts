@@ -46,7 +46,6 @@ import {
   computeDecayUpdates,
   type DecayUpdate,
 } from "./decay.ts";
-import { formatDailyEntry, localDate } from "./daily.ts";
 import type {
   MemoryNodeArea,
   MemoryNodeRepository,
@@ -116,12 +115,6 @@ export interface MemoryDreamInput {
   source?: string;
 }
 
-/** Result of appending one daily-log note. */
-export interface DailyLogWriteResult {
-  date: string;
-  path: string;
-}
-
 /** Metadata returned for one Markdown file processed by bulk indexing. */
 export interface MemoryIndexPathFile {
   path: string;
@@ -188,35 +181,6 @@ export class MemoryNodeService {
   /** Lists canonical nodes for sweep decisions and decay. */
   async listCanonicalNodes(): Promise<ParsedMemoryNode[]> {
     return this.repository.list("canonical");
-  }
-
-  /** Appends one timestamped note to a local-calendar daily log. */
-  async appendDailyNote(
-    content: string,
-    options: {
-      sessionId: string;
-      timestamp?: Date;
-    },
-  ): Promise<DailyLogWriteResult> {
-    const text = content.trim();
-    if (text === "") {
-      throw new MemoryServiceError("Daily log content must not be empty.");
-    }
-    const timestamp = options.timestamp ?? this.now();
-    const date = localDate(timestamp);
-    const relative = `daily/${date}.md`;
-    const existing =
-      (await this.repository.store.readTextFileIfExists(relative)) ?? "";
-    const separator = existing.trim() ? "\n" : "";
-    await this.repository.store.appendDaily(
-      date,
-      `${separator}${formatDailyEntry(
-        timestamp.toISOString(),
-        options.sessionId,
-        text,
-      )}`,
-    );
-    return { date, path: relative };
   }
 
   /** Archives superseded tombstones whose grace period has elapsed. */
