@@ -72,6 +72,7 @@ test("semantic search embeds documents and reports access-log tier", async () =>
       });
       assert.equal(results[0]?.slug, "warm-memory");
       assert.deepEqual(results[0]?.matchedFields, ["semantic"]);
+      assert.equal(results[0]?.semanticRank, 1);
       assert.ok((results[0]?.score ?? 0) > (results[1]?.score ?? 0));
 
       const accessLog = await repository.store.readTextFile("access-log");

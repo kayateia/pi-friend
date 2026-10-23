@@ -71,6 +71,10 @@ test("keyword search ranks exact slug, title, tag, and body matches", async () =
     assert.deepEqual(results[1]?.matchedFields, ["title"]);
     assert.deepEqual(results[2]?.matchedFields, ["tags"]);
     assert.deepEqual(results[3]?.matchedFields, ["body"]);
+    assert.deepEqual(
+      results.map((result) => result.keywordRank),
+      [1, 2, 3, 4],
+    );
   });
 });
 

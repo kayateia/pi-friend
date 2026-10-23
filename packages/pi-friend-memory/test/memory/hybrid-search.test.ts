@@ -11,7 +11,10 @@ import test from "node:test";
 import type { EmbeddingProvider } from "../../src/memory/embedding.ts";
 import { fuseHybridResults } from "../../src/memory/hybrid-search.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
-import type { MemorySearchResult } from "../../src/memory/search.ts";
+import {
+  formatRetrievalExplanation,
+  type MemorySearchResult,
+} from "../../src/memory/search.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
 import { SqliteVectorIndex } from "../../src/memory/vector-index.ts";
 import { withTempDir } from "../helpers.ts";
@@ -46,6 +49,10 @@ test("reciprocal-rank fusion promotes results present in both lists", () => {
   assert.equal(fused[0]?.keywordRank, 2);
   assert.equal(fused[0]?.semanticRank, 2);
   assert.equal(fused.length, 3);
+  assert.equal(
+    formatRetrievalExplanation(fused[0]!),
+    "Why recalled: semantic rank #2 · keyword rank #2 · matched fields: body · score 0.0323",
+  );
 });
 
 /** Provider maps warm and cozy content into the same semantic direction. */

@@ -123,7 +123,39 @@ export function searchIndexedFiles(
           ? 1
           : 0;
     })
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((result, index) => ({
+      ...result,
+      keywordRank: index + 1,
+    }));
+}
+
+/** Explains the retrieval signals behind one model-facing search result. */
+export function formatRetrievalExplanation(
+  result: MemorySearchResult,
+): string {
+  const details: string[] = [];
+  if (result.semanticRank !== undefined) {
+    details.push(`semantic rank #${result.semanticRank}`);
+  }
+  if (result.keywordRank !== undefined) {
+    details.push(`keyword rank #${result.keywordRank}`);
+  }
+
+  const keywordFields = result.matchedFields.filter(
+    (field) => field !== "semantic",
+  );
+  if (keywordFields.length > 0) {
+    details.push(`matched fields: ${keywordFields.join(", ")}`);
+  } else if (
+    result.matchedFields.includes("semantic") &&
+    result.semanticRank === undefined
+  ) {
+    details.push("semantic match");
+  }
+  details.push(`score ${result.score.toFixed(4)}`);
+
+  return `Why recalled: ${details.join(" · ")}`;
 }
 
 /** Scores one indexed file, or returns null when no query field matches. */

@@ -135,6 +135,10 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
     ]);
     assert.match(context.text, /First orchid sentence\. Second orchid sentence/);
     assert.match(context.text, /First middle orchid sentence\./);
+    assert.match(
+      context.text,
+      /Why recalled: keyword rank #1 · matched fields: body · score \d+\.\d{4}/,
+    );
     assert.doesNotMatch(context.text, /Second middle sentence/);
     assert.match(
       context.text,
@@ -176,5 +180,6 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
     assert.ok(context.count >= 1);
     assert.ok(context.text.length <= config.maxChars);
     assert.match(context.text, /Orchid 0/);
+    assert.match(context.text, /Why recalled: keyword rank #\d+/);
   });
 });

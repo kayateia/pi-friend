@@ -85,7 +85,9 @@ retrieval modes are supported; semantic/hybrid failures fall back to keyword
 retrieval so prompt injection does not block the model call.
 
 The injected block is prepended to the selected user message and wrapped in
-`<pi-friend-memory>...</pi-friend-memory>`.
+`<pi-friend-memory>...</pi-friend-memory>`. Each recalled node includes a
+compact `Why recalled:` line with semantic/keyword ranks, matched fields, and
+score so retrieval can be calibrated rather than taken on trust.
 
 Recent daily logs are injected as a separate observed-context section. The
 default reads today's and yesterday's logs, taking bounded tails from each

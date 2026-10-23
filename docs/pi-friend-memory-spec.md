@@ -123,6 +123,7 @@ Kept from pi-memory, with changes:
   - position `0` = inside the current user turn (most salient, invalidates cache from that point)
   - position `-1`, `-2`, … = N prompts back (less salient, preserves the hot cache prefix)
 - The retrieved block is prepended to the selected user message and wrapped in `<pi-friend-memory>...</pi-friend-memory>`.
+- Each injected memory carries a compact retrieval explanation with its semantic rank, keyword rank, matched fields, and fused score.
 - **Recency beats depth rule**: if a node's `supersedes` list is non-empty, the superseded node is demoted out of RAG entirely (or injected only with an explicit `superseded` annotation) so a correction cannot be argued with on equal footing. See §7.
 - Injection content tiers (per node):
   1. **Fresh/recent**: title + snippet (~2–4 sentences) + link.

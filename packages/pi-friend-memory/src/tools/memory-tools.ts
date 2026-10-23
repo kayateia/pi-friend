@@ -31,6 +31,7 @@ import type {
   MemorySearchResult,
   MemorySearchMode,
 } from "../memory/search.ts";
+import { formatRetrievalExplanation } from "../memory/search.ts";
 import { DEFAULT_MEMORY_TOOL_PREFIX } from "../memory/config.ts";
 
 const MEMORY_AREAS = [
@@ -696,6 +697,10 @@ function formatSearchResults(
       `kind: ${result.kind}`,
       result.type === undefined ? "" : `type: ${result.type}`,
       result.status === undefined ? "" : `status: ${result.status}`,
+      result.modifiedAt === undefined
+        ? ""
+        : `modified: ${result.modifiedAt}`,
+      result.provenance ?? "",
       result.schemaError === undefined ? "" : "schema warning",
     ]
       .filter(Boolean)
@@ -705,6 +710,7 @@ function formatSearchResults(
       `### ${index + 1}. ${heading}`,
       `Path: ${result.relativePath}`,
       metadata,
+      formatRetrievalExplanation(result),
       result.snippet,
     ]
       .filter(Boolean)

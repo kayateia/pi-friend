@@ -58,6 +58,7 @@ export function searchSemanticVectors(
       continue;
     }
 
+    const rank = results.length + 1;
     results.push({
       relativePath: file.relativePath,
       kind: file.kind,
@@ -77,6 +78,7 @@ export function searchSemanticVectors(
       snippet: makeSemanticSnippet(file),
       score: Math.max(0, 1 - hit.distance),
       matchedFields: ["semantic"],
+      semanticRank: rank,
       ...(file.schemaError === undefined
         ? {}
         : { schemaError: file.schemaError }),
