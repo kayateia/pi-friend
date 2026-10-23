@@ -20,6 +20,7 @@ memory:
 
   sweep:
     enabled: true
+    background: false
     tombstone_grace_days: 30
     min_guarded_batch_size: 10
     # model: openrouter/google/gemini-2.5-flash

@@ -63,6 +63,9 @@ export default async function registerPiFriend(
   let sweepConfig: SweepConfig = defaultSweepConfig();
   let dreamingConfig: DreamingConfig = defaultDreamingConfig();
   let sweepInFlight = false;
+  let backgroundSweepTimer: ReturnType<typeof setTimeout> | undefined;
+  let backgroundSweep: Promise<void> | undefined;
+  let sweepAbortController: AbortController | undefined;
   let toolPrefix = DEFAULT_MEMORY_TOOL_PREFIX;
 
   // Tools must be registered before session_start. Load the prefix here and
@@ -77,6 +80,66 @@ export default async function registerPiFriend(
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
   registerMemoryTools(pi, () => memoryService, toolPrefix);
+
+  /** Runs one sweep and reports its outcome without throwing to Pi hooks. */
+  const executeSweep = async (
+    ctx: ExtensionContext,
+    service: MemoryNodeService,
+    config: SweepConfig,
+    dreaming: DreamingConfig,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    try {
+      const result = await runDailySweep(ctx, service, config, {
+        dreaming,
+        signal,
+        reportWarning: (message) => reportCaptureWarning(ctx, message),
+      });
+      debugRag("sweep", { ...result });
+      if (result.error && !signal?.aborted) {
+        reportCaptureWarning(
+          ctx,
+          `pi-friend daily sweep failed: ${result.error}`,
+        );
+      }
+    } catch (error) {
+      debugRag("sweep-failed", { error: describeError(error) });
+      if (!signal?.aborted) {
+        reportCaptureWarning(
+          ctx,
+          `pi-friend daily sweep failed: ${describeError(error)}`,
+        );
+      }
+    }
+  };
+
+  /** Starts a sweep on the next task without delaying agent settlement. */
+  const scheduleBackgroundSweep = (
+    ctx: ExtensionContext,
+    service: MemoryNodeService,
+    config: SweepConfig,
+    dreaming: DreamingConfig,
+  ): void => {
+    const controller = new AbortController();
+    sweepAbortController = controller;
+    backgroundSweepTimer = setTimeout(() => {
+      backgroundSweepTimer = undefined;
+      const tracked = executeSweep(
+        ctx,
+        service,
+        config,
+        dreaming,
+        controller.signal,
+      ).finally(() => {
+        if (sweepAbortController === controller) {
+          sweepAbortController = undefined;
+        }
+        backgroundSweep = undefined;
+        sweepInFlight = false;
+      });
+      backgroundSweep = tracked;
+    }, 0);
+  };
 
   pi.on("session_start", async (_event, ctx) => {
     try {
@@ -107,7 +170,15 @@ export default async function registerPiFriend(
     }
   });
 
-  pi.on("session_shutdown", () => {
+  pi.on("session_shutdown", async () => {
+    if (backgroundSweepTimer !== undefined) {
+      clearTimeout(backgroundSweepTimer);
+      backgroundSweepTimer = undefined;
+      sweepInFlight = false;
+    }
+    sweepAbortController?.abort();
+    await backgroundSweep;
+    sweepAbortController = undefined;
     memoryService = undefined;
     ragContext = undefined;
     semanticSearch?.index.close();
@@ -235,7 +306,7 @@ export default async function registerPiFriend(
     }
   });
 
-  pi.on("agent_settled", async (event, ctx) => {
+  pi.on("agent_settled", (event, ctx) => {
     if (
       event.aborted ||
       sweepInFlight ||
@@ -245,27 +316,23 @@ export default async function registerPiFriend(
       return;
     }
     sweepInFlight = true;
-    try {
-      const result = await runDailySweep(
-        ctx,
-        memoryService,
-        sweepConfig,
-        {
-          dreaming: dreamingConfig,
-          reportWarning: (message) =>
-            reportCaptureWarning(ctx, message),
-        },
-      );
-      debugRag("sweep", { ...result });
-      if (result.error) {
-        reportCaptureWarning(
-          ctx,
-          `pi-friend daily sweep failed: ${result.error}`,
-        );
-      }
-    } finally {
-      sweepInFlight = false;
+    const service = memoryService;
+    const config = { ...sweepConfig };
+    const dreaming = { ...dreamingConfig };
+    if (config.background) {
+      scheduleBackgroundSweep(ctx, service, config, dreaming);
+      return;
     }
+
+    const controller = new AbortController();
+    sweepAbortController = controller;
+    return executeSweep(ctx, service, config, dreaming, controller.signal)
+      .finally(() => {
+        if (sweepAbortController === controller) {
+          sweepAbortController = undefined;
+        }
+        sweepInFlight = false;
+      });
   });
 
   pi.registerCommand("hello", {

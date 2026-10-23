@@ -85,6 +85,7 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
       service,
       {
         enabled: true,
+        background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
       },
@@ -131,6 +132,7 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
       service,
       {
         enabled: true,
+        background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
       },
@@ -159,6 +161,7 @@ test("sweep failure still advances state and writes a failure log", async () => 
       service,
       {
         enabled: true,
+        background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
       },
@@ -182,6 +185,41 @@ test("sweep failure still advances state and writes a failure log", async () => 
     };
     assert.equal(state.lastAttemptAt, "2026-10-21T05:00:00.000Z");
     assert.equal(state.lastError, "model unavailable");
+  });
+});
+
+test("an aborted background sweep does not mutate candidates", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const candidate = await service.stageCandidate({
+      title: "Abort Candidate",
+      type: "fact",
+      body: "This candidate must remain staged.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(
+      () =>
+        runDailySweep(
+          undefined,
+          service,
+          {
+            enabled: true,
+            background: true,
+            tombstoneGraceDays: 30,
+            minGuardedBatchSize: 10,
+          },
+          { signal: controller.signal },
+        ),
+      /aborted/i,
+    );
+    assert.ok(await service.read(candidate.node.slug, "staging"));
   });
 });
 
@@ -220,6 +258,7 @@ test("sweep archives expired tombstones and creates one dream", async () => {
       service,
       {
         enabled: true,
+        background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
       },
@@ -280,6 +319,7 @@ test("small batches may remove more than 25% below the guard threshold", async (
       service,
       {
         enabled: true,
+        background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 5,
       },
@@ -329,6 +369,7 @@ test("the 25% guard still applies at the configured batch threshold", async () =
       service,
       {
         enabled: true,
+        background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 2,
       },

@@ -137,6 +137,7 @@ export async function runDreamModel(
   shortlist: ParsedMemoryNode[],
   maxNodes: number,
   reportWarning: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<DreamDraft> {
   const model = resolveDreamModel(ctx, configuredModel, reportWarning);
   if (!model) {
@@ -156,7 +157,9 @@ export async function runDreamModel(
       ],
     },
     {
-      signal: AbortSignal.timeout(30_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+        : AbortSignal.timeout(30_000),
       maxTokens: 2_000,
     },
   );

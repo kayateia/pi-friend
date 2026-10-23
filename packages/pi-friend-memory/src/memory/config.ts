@@ -40,6 +40,8 @@ export interface AutoCaptureConfig {
 /** Configuration for the daily consolidation pass. */
 export interface SweepConfig {
   enabled: boolean;
+  /** Run post-turn consolidation without holding up agent settlement. */
+  background: boolean;
   /** Optional provider/model-id override for candidate decisions. */
   model?: string;
   tombstoneGraceDays: number;
@@ -119,6 +121,7 @@ export function defaultAutoCaptureConfig(): AutoCaptureConfig {
 export function defaultSweepConfig(): SweepConfig {
   return {
     enabled: true,
+    background: false,
     tombstoneGraceDays: 30,
     minGuardedBatchSize: 10,
   };
@@ -474,6 +477,14 @@ function parseSweep(value: unknown, configPath: string): SweepConfig {
       );
     }
     config.enabled = value.enabled;
+  }
+  if (value.background !== undefined) {
+    if (typeof value.background !== "boolean") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.sweep.background must be a boolean.`,
+      );
+    }
+    config.background = value.background;
   }
   if (value.model !== undefined) {
     if (

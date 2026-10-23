@@ -310,3 +310,56 @@ test("restore rejects invalid recovery IDs", async () => {
     );
   });
 });
+
+test("exclusive operations are re-entrant and block other mutations", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await makeService(agentDir);
+    const entered = deferred();
+    const release = deferred();
+
+    const exclusive = service.runExclusive(async () => {
+      const node = await service.add({
+        title: "Inside Exclusive",
+        type: "fact",
+        body: "Nested service calls must not deadlock.",
+        speaker: [{ name: "Aisling", confident: true }],
+      });
+      entered.resolve();
+      await release.promise;
+      return node.slug;
+    });
+    await entered.promise;
+
+    let externalFinished = false;
+    const external = service
+      .add({
+        title: "After Exclusive",
+        type: "fact",
+        body: "This write waits for the exclusive operation.",
+        speaker: [{ name: "Aisling", confident: true }],
+      })
+      .then((node) => {
+        externalFinished = true;
+        return node;
+      });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(externalFinished, false);
+
+    release.resolve();
+    assert.equal(await exclusive, "inside-exclusive");
+    assert.equal((await external).slug, "after-exclusive");
+  });
+});
+
+/** Creates a manually resolved promise gate. */
+function deferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}

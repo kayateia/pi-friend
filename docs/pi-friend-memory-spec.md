@@ -57,6 +57,7 @@ memory:
     # model: openrouter/google/gemini-2.5-flash
   sweep:
     enabled: true
+    background: false
     tombstone_grace_days: 30
     min_guarded_batch_size: 10
     # model: openrouter/google/gemini-2.5-flash
@@ -165,6 +166,13 @@ once-per-day consolidation schedule, not daily-log processing.
 The daily sweep does not read or create daily logs. It is scheduled at most once
 per local calendar day and operates on staging candidates, canonical nodes,
 decay state, sweep artifacts, and superseded tombstones.
+
+`memory.sweep.background` defaults to `false`. When enabled, the
+`agent_settled` hook schedules the sweep on the next event-loop task and returns
+immediately. The sweep holds a re-entrant exclusive mutation lock for its full
+pass, so other state-changing memory operations queue rather than observing or
+interleaving with a partially consolidated tree. Session shutdown aborts the
+background signal and waits for cleanup before closing the semantic index.
 
 **Anti-churn discipline.** Aim to leave most nodes byte-identical between sweeps. Rewritten text is churn, not consolidation. Deletion is not the same as consolidation. **Loss of emotional, relational, or operational content is a bug.**
 

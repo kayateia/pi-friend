@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import type {
   MemorySpeaker,
@@ -159,6 +160,7 @@ export class MemoryNodeService {
   private readonly repository: MemoryNodeRepository;
   private readonly now: () => Date;
   private readonly semantic: SemanticSearchDependencies | undefined;
+  private readonly lockContext = new AsyncLocalStorage<boolean>();
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -184,6 +186,16 @@ export class MemoryNodeService {
   /** Lists canonical nodes for sweep decisions and decay. */
   async listCanonicalNodes(): Promise<ParsedMemoryNode[]> {
     return this.repository.list("canonical");
+  }
+
+  /**
+   * Runs a multi-step operation while blocking other state-changing service
+   * calls. Nested service calls made by the operation are re-entrant.
+   */
+  async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    return this.runSerialized(() =>
+      this.lockContext.run(true, operation),
+    );
   }
 
   /** Archives superseded tombstones whose grace period has elapsed. */
@@ -381,38 +393,40 @@ export class MemoryNodeService {
     inputPath: string,
     options: { cwd: string },
   ): Promise<MemoryIndexPathResult> {
-    if (!this.semantic) {
-      throw new MemoryServiceError(
-        "Bulk indexing is unavailable because no embedding provider is configured.",
-      );
-    }
+    return this.runSerialized(async () => {
+      if (!this.semantic) {
+        throw new MemoryServiceError(
+          "Bulk indexing is unavailable because no embedding provider is configured.",
+        );
+      }
 
-    const prepared = await buildIndexPathFiles(inputPath, {
-      cwd: options.cwd,
-      memoryRoot: this.repository.store.root,
+      const prepared = await buildIndexPathFiles(inputPath, {
+        cwd: options.cwd,
+        memoryRoot: this.repository.store.root,
+      });
+      const synchronized = await synchronizeVectorIndex(
+        prepared.files,
+        this.semantic.provider,
+        this.semantic.index,
+        {
+          pruneMissing: false,
+          chunkSize: this.store.config.vector.chunkSize,
+        },
+      );
+      return {
+        sourcePath: prepared.sourcePath,
+        total: prepared.files.length,
+        chunks: synchronized.total,
+        embedded: synchronized.embedded,
+        skipped: synchronized.skipped,
+        files: prepared.files.map((file) => ({
+          path: file.relativePath,
+          ...(file.title === undefined ? {} : { title: file.title }),
+          modifiedAt: file.modifiedAt ?? "",
+          provenance: file.provenance ?? "imported",
+        })),
+      };
     });
-    const synchronized = await synchronizeVectorIndex(
-      prepared.files,
-      this.semantic.provider,
-      this.semantic.index,
-      {
-        pruneMissing: false,
-        chunkSize: this.store.config.vector.chunkSize,
-      },
-    );
-    return {
-      sourcePath: prepared.sourcePath,
-      total: prepared.files.length,
-      chunks: synchronized.total,
-      embedded: synchronized.embedded,
-      skipped: synchronized.skipped,
-      files: prepared.files.map((file) => ({
-        path: file.relativePath,
-        ...(file.title === undefined ? {} : { title: file.title }),
-        modifiedAt: file.modifiedAt ?? "",
-        provenance: file.provenance ?? "imported",
-      })),
-    };
   }
 
   /** Recomputes volume-relative decay metadata for canonical nodes. */
@@ -856,14 +870,23 @@ export class MemoryNodeService {
     });
   }
 
-  /** Serializes state-changing operations that allocate slugs. */
-  private runSerialized<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.mutationQueue.then(operation, operation);
-    this.mutationQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+  /** Serializes state-changing operations, except when already inside a lock. */
+  private async runSerialized<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.lockContext.getStore() === true) {
+      return operation();
+    }
+
+    const previous = this.mutationQueue;
+    let release: () => void = () => {};
+    this.mutationQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   /** Chooses an explicit slug or derives a unique slug from the title. */

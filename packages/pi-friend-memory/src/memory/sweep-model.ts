@@ -127,6 +127,7 @@ export async function runSweepModel(
   candidates: ParsedMemoryNode[],
   canonical: ParsedMemoryNode[],
   reportWarning: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<SweepDecision[]> {
   const model = resolveSweepModel(ctx, configuredModel, reportWarning);
   if (!model) {
@@ -146,7 +147,9 @@ export async function runSweepModel(
       ],
     },
     {
-      signal: AbortSignal.timeout(30_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+        : AbortSignal.timeout(30_000),
       maxTokens: 3_000,
     },
   );

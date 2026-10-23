@@ -55,6 +55,7 @@ memory:
     # model: openrouter/google/gemini-2.5-flash
   sweep:
     enabled: true
+    background: false
     tombstone_grace_days: 30
     min_guarded_batch_size: 10
     # model: openrouter/google/gemini-2.5-flash
@@ -170,6 +171,13 @@ The daily sweep runs at most once per local calendar day after an agent run
 settles. Before mutation it writes a full canonical preimage under
 `sweeps/preimages/`. It always advances `sweeps/state.json`, including failed
 attempts, and appends a dated decision log under `sweeps/`.
+
+Set `memory.sweep.background: true` to schedule the sweep on the next event-loop
+task instead of making agent settlement wait for its model calls. The sweep
+holds an exclusive memory-mutation lock while it runs, so interactive memory
+writes wait rather than racing with promotion, decay, or dream creation.
+Session shutdown aborts an unfinished background sweep before closing the
+semantic index. The default remains `false`.
 
 The sweep model chooses `promote`, `merge`, or `drop` for staged candidates.
 Dropped candidates are archived under `sweeps/dropped/`, not hard-deleted.

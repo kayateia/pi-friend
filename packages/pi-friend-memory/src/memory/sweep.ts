@@ -50,6 +50,26 @@ export interface SweepResult {
   error?: string;
 }
 
+/** Optional overrides and cancellation for one sweep run. */
+export interface RunDailySweepOptions {
+  force?: boolean;
+  now?: Date;
+  dreaming?: DreamingConfig;
+  random?: () => number;
+  signal?: AbortSignal;
+  decide?: (
+    candidates: Awaited<ReturnType<MemoryNodeService["listStagingCandidates"]>>,
+    canonical: Awaited<ReturnType<MemoryNodeService["listCanonicalNodes"]>>,
+    signal?: AbortSignal,
+  ) => Promise<SweepDecision[]>;
+  dream?: (
+    shortlist: Awaited<ReturnType<MemoryNodeService["listCanonicalNodes"]>>,
+    maxNodes: number,
+    signal?: AbortSignal,
+  ) => Promise<DreamDraft>;
+  reportWarning?: (message: string) => void;
+}
+
 /**
  * Runs the daily consolidation pass once when it has not succeeded today.
  *
@@ -60,26 +80,24 @@ export async function runDailySweep(
   ctx: ExtensionContext | undefined,
   service: MemoryNodeService,
   config: SweepConfig,
-  options: {
-    force?: boolean;
-    now?: Date;
-    dreaming?: DreamingConfig;
-    random?: () => number;
-    decide?: (
-      candidates: Awaited<ReturnType<MemoryNodeService["listStagingCandidates"]>>,
-      canonical: Awaited<ReturnType<MemoryNodeService["listCanonicalNodes"]>>,
-    ) => Promise<SweepDecision[]>;
-    dream?: (
-      shortlist: Awaited<ReturnType<MemoryNodeService["listCanonicalNodes"]>>,
-      maxNodes: number,
-    ) => Promise<DreamDraft>;
-    reportWarning?: (message: string) => void;
-  } = {},
+  options: RunDailySweepOptions = {},
 ): Promise<SweepResult> {
   if (!config.enabled) {
     return emptyResult(false);
   }
+  return service.runExclusive(() =>
+    runDailySweepLocked(ctx, service, config, options),
+  );
+}
 
+/** Executes a sweep while the service's exclusive mutation lock is held. */
+async function runDailySweepLocked(
+  ctx: ExtensionContext | undefined,
+  service: MemoryNodeService,
+  config: SweepConfig,
+  options: RunDailySweepOptions,
+): Promise<SweepResult> {
+  options.signal?.throwIfAborted();
   const now = options.now ?? new Date();
   const previous = await readSweepState(service);
   if (
@@ -107,7 +125,11 @@ export async function runDailySweep(
     const canonical = await service.listCanonicalNodes();
     if (candidates.length > 0) {
       if (options.decide) {
-        decisions = await options.decide(candidates, canonical);
+        decisions = await options.decide(
+          candidates,
+          canonical,
+          options.signal,
+        );
       } else {
         if (!ctx) {
           throw new Error("Sweep model context is unavailable.");
@@ -118,8 +140,10 @@ export async function runDailySweep(
           candidates,
           canonical,
           options.reportWarning ?? (() => {}),
+          options.signal,
         );
       }
+      options.signal?.throwIfAborted();
     }
 
     const destructiveActions = decisions.filter(
@@ -137,8 +161,10 @@ export async function runDailySweep(
     }
 
     preimage = await createPreimage(service, runId);
+    options.signal?.throwIfAborted();
 
     for (const decision of decisions) {
+      options.signal?.throwIfAborted();
       if (decision.action === "drop") {
         await service.archiveCandidate(decision.slug, runId);
         dropped += 1;
@@ -155,6 +181,7 @@ export async function runDailySweep(
       }
     }
 
+    options.signal?.throwIfAborted();
     const tombstoneResult = await service.archiveExpiredTombstones(
       config.tombstoneGraceDays,
       runId,
@@ -162,6 +189,7 @@ export async function runDailySweep(
     );
     archivedTombstones = tombstoneResult.archived.length;
     decayUpdates = (await service.recomputeDecay()).length;
+    options.signal?.throwIfAborted();
 
     if (options.dreaming?.enabled) {
       try {
@@ -177,7 +205,11 @@ export async function runDailySweep(
             options.random,
           );
           const draft = options.dream
-            ? await options.dream(shortlist, options.dreaming.maxNodes)
+            ? await options.dream(
+                shortlist,
+                options.dreaming.maxNodes,
+                options.signal,
+              )
             : ctx
               ? await runDreamModel(
                   ctx,
@@ -185,10 +217,12 @@ export async function runDailySweep(
                   shortlist,
                   options.dreaming.maxNodes,
                   options.reportWarning ?? (() => {}),
+                  options.signal,
                 )
               : (() => {
                   throw new Error("Dream model context is unavailable.");
                 })();
+          options.signal?.throwIfAborted();
           const dream = await service.createDream({
             ...draft,
             source: `sweep:${runId}`,
