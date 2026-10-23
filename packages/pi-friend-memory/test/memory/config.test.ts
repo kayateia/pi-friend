@@ -11,6 +11,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import {
+  DEFAULT_MEMORY_TOOL_PREFIX,
   loadMemoryConfig,
   MemoryConfigError,
   parseMemoryConfig,
@@ -32,6 +33,7 @@ test("missing configuration uses the default memory root", async () => {
       config.root,
       path.join(directory, "pi-friend", "memory"),
     );
+    assert.equal(config.toolPrefix, DEFAULT_MEMORY_TOOL_PREFIX);
     assert.deepEqual(config.injection, {
       enabled: true,
       position: -1,
@@ -71,6 +73,26 @@ test("configured root expands a leading tilde", () => {
   );
 
   assert.equal(config.root, path.join(path.sep, "home", "friend", "workspace", "memory"));
+});
+
+test("tool prefix is configurable and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    "memory:\n  tool_prefix: pf_\n",
+    configPath,
+  );
+
+  assert.equal(config.toolPrefix, "pf_");
+  for (const prefix of ["PF_", "9bad", "has-hyphen", ""]) {
+    assert.throws(
+      () =>
+        parseMemoryConfig(
+          `memory:\n  tool_prefix: "${prefix}"\n`,
+          configPath,
+        ),
+      MemoryConfigError,
+    );
+  }
 });
 
 test("prompt configuration is ignored by the memory parser", () => {

@@ -58,10 +58,15 @@ export interface DreamingConfig {
   model?: string;
 }
 
+/** Default prefix for model-facing memory tool names. */
+export const DEFAULT_MEMORY_TOOL_PREFIX = "memory_";
+
 /** Resolved memory configuration used by the storage layer. */
 export interface MemoryConfig {
   /** Absolute path to the user's pi-friend.yml file. */
   configPath: string;
+  /** Prefix prepended to every registered memory tool name. */
+  toolPrefix: string;
   /** Absolute path to the canonical memory tree. */
   root: string;
   injection: RagInjectionConfig;
@@ -176,6 +181,7 @@ export function parseMemoryConfig(
   if (document === null || document === undefined) {
     return {
       configPath,
+      toolPrefix: DEFAULT_MEMORY_TOOL_PREFIX,
       root: defaultRoot,
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
@@ -209,6 +215,7 @@ export function parseMemoryConfig(
 
   return {
     configPath,
+    toolPrefix: parseToolPrefix(memoryConfig.tool_prefix, configPath),
     root,
     injection: parseRagInjection(memoryConfig.injection, configPath),
     autoCapture: parseAutoCapture(memoryConfig.auto_capture, configPath),
@@ -236,6 +243,7 @@ export async function loadMemoryConfig(
     if (getErrorCode(error) === "ENOENT") {
       return {
         configPath,
+        toolPrefix: DEFAULT_MEMORY_TOOL_PREFIX,
         root: path.join(configDir, "memory"),
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
@@ -250,6 +258,23 @@ export async function loadMemoryConfig(
   }
 
   return parseMemoryConfig(source, configPath, homeDir);
+}
+
+/** Parses a safe lowercase prefix that is prepended to memory tool names. */
+function parseToolPrefix(value: unknown, configPath: string): string {
+  if (value === undefined) {
+    return DEFAULT_MEMORY_TOOL_PREFIX;
+  }
+  if (
+    typeof value !== "string" ||
+    value.length > 32 ||
+    !/^[a-z][a-z0-9_]*$/u.test(value)
+  ) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.tool_prefix must start with a lowercase letter and contain only lowercase letters, digits, and underscores (maximum 32 characters).`,
+    );
+  }
+  return value;
 }
 
 /** Parses optional injection settings while applying safe defaults. */

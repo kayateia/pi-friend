@@ -1,5 +1,6 @@
 memory:
   root: ~/.pi/agent/pi-friend/memory
+  tool_prefix: memory_
 
   injection:
     enabled: true

@@ -13,7 +13,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { registerHookLogging } from "./src/debug/hook-log.ts";
 import { debugLog } from "./src/debug/log.ts";
-import { defaultRagInjectionConfig } from "./src/memory/config.ts";
+import {
+  DEFAULT_MEMORY_TOOL_PREFIX,
+  defaultRagInjectionConfig,
+  loadMemoryConfig,
+} from "./src/memory/config.ts";
 import {
   defaultAutoCaptureConfig,
   type AutoCaptureConfig,
@@ -44,7 +48,9 @@ import { registerMemoryTools } from "./src/tools/memory-tools.ts";
  * command keeps package loading independently testable while storage and
  * retrieval are still being designed.
  */
-export default function registerPiFriend(pi: ExtensionAPI): void {
+export default async function registerPiFriend(
+  pi: ExtensionAPI,
+): Promise<void> {
   // The memory service is session-scoped and shared by all memory tools.
   let memoryService: MemoryNodeService | undefined;
   let semanticSearch: SemanticSearchDependencies | undefined;
@@ -57,10 +63,20 @@ export default function registerPiFriend(pi: ExtensionAPI): void {
   let sweepConfig: SweepConfig = defaultSweepConfig();
   let dreamingConfig: DreamingConfig = defaultDreamingConfig();
   let sweepInFlight = false;
+  let toolPrefix = DEFAULT_MEMORY_TOOL_PREFIX;
+
+  // Tools must be registered before session_start. Load the prefix here and
+  // repeat the full validation in session_start, where startup errors can be
+  // reported through Pi's UI.
+  try {
+    toolPrefix = (await loadMemoryConfig()).toolPrefix;
+  } catch {
+    // The session_start handler reports the actionable configuration error.
+  }
 
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
-  registerMemoryTools(pi, () => memoryService);
+  registerMemoryTools(pi, () => memoryService, toolPrefix);
 
   pi.on("session_start", async (_event, ctx) => {
     try {

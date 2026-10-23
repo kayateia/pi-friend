@@ -30,6 +30,7 @@ import type {
   MemorySearchResult,
   MemorySearchMode,
 } from "../memory/search.ts";
+import { DEFAULT_MEMORY_TOOL_PREFIX } from "../memory/config.ts";
 
 const MEMORY_AREAS = [
   "canonical",
@@ -103,9 +104,13 @@ interface MemorySearchDetails {
 export function registerMemoryTools(
   pi: ExtensionAPI,
   getService: () => MemoryNodeService | undefined,
+  toolPrefix: string = DEFAULT_MEMORY_TOOL_PREFIX,
 ): void {
+  // Tool descriptions refer to each other, so resolve prefixed names once.
+  const toolName = (suffix: string): string => `${toolPrefix}${suffix}`;
+
   pi.registerTool({
-    name: "memory_add",
+    name: toolName("memory_add"),
     label: "Memory Add",
     description: [
       "Create one canonical memory node about a single topic.",
@@ -219,13 +224,13 @@ export function registerMemoryTools(
   });
 
   pi.registerTool({
-    name: "memory_delete",
+    name: toolName("memory_delete"),
     label: "Memory Delete",
     description: [
       "Move one canonical memory node into superseded storage without hard-deleting it.",
       "The match may be an exact slug or a case-insensitive substring of its title, tags, or body.",
       "Ambiguous matches are rejected. A durable recovery record is written before the node moves.",
-      "Use memory_restore with the returned recovery ID to undo the deletion.",
+      `Use ${toolName("memory_restore")} with the returned recovery ID to undo the deletion.`,
     ].join("\n"),
     parameters: Type.Object({
       match: Type.String({
@@ -254,7 +259,7 @@ export function registerMemoryTools(
             text:
               `Moved memory "${result.original.slug}" to superseded storage.\n` +
               `Recovery ID: ${result.recoveryId}\n` +
-              `Use memory_restore with this ID to undo the deletion.`,
+              `Use ${toolName("memory_restore")} with this ID to undo the deletion.`,
           },
         ],
         details: {
@@ -268,16 +273,16 @@ export function registerMemoryTools(
   });
 
   pi.registerTool({
-    name: "memory_restore",
+    name: toolName("memory_restore"),
     label: "Memory Restore",
     description: [
-      "Restore a deleted memory node using the recovery ID returned by memory_delete.",
+      `Restore a deleted memory node using the recovery ID returned by ${toolName("memory_delete")}.`,
       "Restoration never overwrites a newer canonical node.",
       "Repeated restoration is idempotent.",
     ].join("\n"),
     parameters: Type.Object({
       recoveryId: Type.String({
-        description: "UUID recovery ID returned by memory_delete.",
+        description: `UUID recovery ID returned by ${toolName("memory_delete")}.`,
       }),
     }),
     annotations: {
@@ -312,12 +317,12 @@ export function registerMemoryTools(
   });
 
   pi.registerTool({
-    name: "memory_promote",
+    name: toolName("memory_promote"),
     label: "Memory Promote",
     description: [
       "Promote one auto-captured candidate from staging into canonical memory.",
       "Near-duplicates are merged into an existing active node with links, tags, speakers, and audit history preserved.",
-      "Use memory_search to find staging candidates when their slug is not already known.",
+      `Use ${toolName("memory_search")} to find staging candidates when their slug is not already known.`,
     ].join("\n"),
     parameters: Type.Object({
       slug: Type.String({
@@ -359,7 +364,7 @@ export function registerMemoryTools(
   });
 
   pi.registerTool({
-    name: "memory_log",
+    name: toolName("memory_log"),
     label: "Memory Log",
     description: [
       "Append a timestamped running note to today's daily log.",
@@ -401,7 +406,7 @@ export function registerMemoryTools(
   });
 
   pi.registerTool({
-    name: "memory_edit",
+    name: toolName("memory_edit"),
     label: "Memory Edit",
     description: [
       "Edit one canonical memory node by slug.",
@@ -497,7 +502,7 @@ export function registerMemoryTools(
   });
 
   pi.registerTool({
-    name: "memory_read",
+    name: toolName("memory_read"),
     label: "Memory Read",
     description: [
       "Read one memory node by slug.",
@@ -561,7 +566,7 @@ export function registerMemoryTools(
   });
 
   pi.registerTool({
-    name: "memory_search",
+    name: toolName("memory_search"),
     label: "Memory Search",
     description: [
       "Search every Markdown file in the memory tree using deterministic keyword ranking.",

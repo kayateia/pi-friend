@@ -41,6 +41,7 @@ The root config for pi-friend is `~/.pi/agent/pi-friend/pi-friend.yml` with this
 ```yaml
 memory:
   root: ~/workspace/memory
+  tool_prefix: memory_
   injection:
     enabled: true
     position: -1
