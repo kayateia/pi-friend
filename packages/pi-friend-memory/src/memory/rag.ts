@@ -18,6 +18,18 @@ export interface RagContext {
   text: string;
   count: number;
   slugs: string[];
+  diagnostics: RagRetrievalDiagnostics;
+}
+
+/** Counts and fallback details for one RAG retrieval attempt. */
+export interface RagRetrievalDiagnostics {
+  mode: RagInjectionConfig["mode"];
+  modeUsed: RagInjectionConfig["mode"];
+  fallbackUsed: boolean;
+  searchError?: string;
+  searchResultCount: number;
+  eligibleNodeCount: number;
+  selectedNodeCount: number;
 }
 
 type RagTier = "fresh" | "middle" | "cold";
@@ -34,27 +46,50 @@ export async function buildRagContext(
   config: RagInjectionConfig,
 ): Promise<RagContext> {
   if (!config.enabled || query.trim() === "") {
-    return { text: "", count: 0, slugs: [] };
+    return {
+      text: "",
+      count: 0,
+      slugs: [],
+      diagnostics: {
+        mode: config.mode,
+        modeUsed: config.mode,
+        fallbackUsed: false,
+        searchResultCount: 0,
+        eligibleNodeCount: 0,
+        selectedNodeCount: 0,
+      },
+    };
   }
 
   let results: MemorySearchResult[] = [];
+  let modeUsed: RagInjectionConfig["mode"] = config.mode;
+  let fallbackUsed = false;
+  let searchError: string | undefined;
   try {
     results = await service.search({
       query,
       mode: config.mode,
+      kind: "node",
+      status: "active",
       limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
       ...(config.mode === "keyword" ? { minTokenMatches: 1 } : {}),
     });
   } catch (error) {
+    searchError = describeError(error);
     if (config.mode !== "keyword") {
+      fallbackUsed = true;
+      modeUsed = "keyword";
       try {
         results = await service.search({
           query,
           mode: "keyword",
+          kind: "node",
+          status: "active",
           limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
           minTokenMatches: 1,
         });
-      } catch {
+      } catch (fallbackError) {
+        searchError = `${searchError}; keyword fallback: ${describeError(fallbackError)}`;
         results = [];
       }
     }
@@ -120,7 +155,20 @@ export async function buildRagContext(
     }
   }
   if (sections.length === 0) {
-    return { text: "", count: 0, slugs: [] };
+    return {
+      text: "",
+      count: 0,
+      slugs: [],
+      diagnostics: {
+        mode: config.mode,
+        modeUsed,
+        fallbackUsed,
+        ...(searchError === undefined ? {} : { searchError }),
+        searchResultCount: results.length,
+        eligibleNodeCount: retrieved.length,
+        selectedNodeCount: 0,
+      },
+    };
   }
 
   return {
@@ -131,6 +179,15 @@ export async function buildRagContext(
     slugs: retrieved
       .slice(0, selectedNodeCount)
       .map(({ node }) => node.slug),
+    diagnostics: {
+      mode: config.mode,
+      modeUsed,
+      fallbackUsed,
+      ...(searchError === undefined ? {} : { searchError }),
+      searchResultCount: results.length,
+      eligibleNodeCount: retrieved.length,
+      selectedNodeCount,
+    },
   };
 }
 
@@ -189,4 +246,9 @@ function summarizeBody(
   return summary.length <= charLimit
     ? summary
     : `${summary.slice(0, charLimit - 1).trimEnd()}…`;
+}
+
+/** Returns a readable error message for diagnostics. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

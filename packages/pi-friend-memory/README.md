@@ -97,6 +97,12 @@ With `PI_FRIEND_DEBUG_HOOKS=1`, retrieval logs `rag retrieved`, and the later
 `rag delivery-failed`. Delivery confirmation checks that the exact RAG block is
 still present in the full request context after all context hooks have run.
 
+The `rag retrieved` entry includes the query, configured and fallback search
+modes, search errors, search result count, eligible active-node count, selected
+node count, and final context size. RAG restricts ranking to active nodes before
+applying its result limit, so ordinary documents and non-active memory files
+cannot crowd out injectable memories.
+
 ## Development
 
 From the monorepo root, install all development dependencies:

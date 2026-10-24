@@ -131,14 +131,14 @@ once-per-day consolidation schedule, not daily-log processing.
 
 ## 6. RAG injection
 
-- Retrieval and injection run in the request-time `context` hook. The RAG result is cached by session and user-turn index so repeated provider requests in one turn do not re-run embeddings, and concurrent sessions cannot overwrite shared RAG text. Relevant nodes are injected into the prompt at a configurable position:
+- Retrieval and injection run in the request-time `context` hook. The RAG result is cached by session and user-turn index so repeated provider requests in one turn do not re-run embeddings, and concurrent sessions cannot overwrite shared RAG text. Ranking is filtered to active nodes before the candidate limit; documents, staging entries, and inactive memory files cannot crowd out injectable memories. Relevant nodes are injected into the prompt at a configurable position:
   - position `0` = inside the current user turn (most salient, invalidates cache from that point)
   - position `-1`, `-2`, … = N prompts back (less salient, preserves the hot cache prefix)
 - The retrieved block is prepended to the selected user message and wrapped in `<pi-friend-memory>...</pi-friend-memory>`.
 - Only active, non-quarantined memory nodes are injected. Plain documents remain searchable through tools but are not copied into factual RAG context.
 - Each injected memory carries a compact `Why recalled:` explanation with its semantic rank, keyword rank, keyword-matched fields, and score.
 - `dream` and `inner` memories are quarantined from factual RAG. They remain readable and searchable through explicit tools.
-- When debug logging is enabled, a later `context_with_system` diagnostic verifies that the exact injected RAG block remains in the final request context.
+- When debug logging is enabled, the retrieval log records the query, search mode/fallback, errors, candidate/eligible/selected counts, and context size. A later `context_with_system` diagnostic verifies that the exact injected RAG block remains in the final request context.
 - **Recency beats depth rule**: if a node's `supersedes` list is non-empty, the superseded node is demoted out of RAG entirely (or injected only with an explicit `superseded` annotation) so a correction cannot be argued with on equal footing. See §7.
 - Injection content tiers (per node):
   1. **Fresh/recent**: title + snippet (~2–4 sentences) + link.

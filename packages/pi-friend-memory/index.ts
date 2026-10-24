@@ -233,7 +233,9 @@ export default async function registerPiFriend(
         )
           .then((rag) => {
             debugRag("retrieved", {
+              query: latest.prompt,
               contextChars: rag.text.length,
+              ...rag.diagnostics,
             });
             return rag.text;
           })

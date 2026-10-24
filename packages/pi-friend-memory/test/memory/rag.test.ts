@@ -193,3 +193,39 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
     assert.match(context.text, /Why recalled: keyword rank #\d+/);
   });
 });
+
+test("RAG ranks active nodes without ordinary documents crowding them out", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    await repository.write(
+      makeNode({
+        slug: "needle-memory",
+        title: "Needle Memory",
+        body: "A durable needle fact.",
+        decayWeight: 1,
+      }),
+    );
+    for (let index = 0; index < 25; index += 1) {
+      await repository.store.writeTextFile(
+        `docs/needle-${index}.md`,
+        `# Needle ${index}\n\nNeedle needle needle from an ordinary document.\n`,
+      );
+    }
+    const service = new MemoryNodeService(repository);
+    const config = {
+      ...defaultRagInjectionConfig(),
+      mode: "keyword" as const,
+      limit: 5,
+    };
+
+    const context = await buildRagContext(service, "needle", config);
+    assert.equal(context.count, 1);
+    assert.deepEqual(context.slugs, ["needle-memory"]);
+    assert.equal(context.diagnostics.searchResultCount, 1);
+    assert.equal(context.diagnostics.eligibleNodeCount, 1);
+    assert.equal(context.diagnostics.selectedNodeCount, 1);
+  });
+});

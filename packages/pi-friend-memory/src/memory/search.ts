@@ -20,6 +20,8 @@ export interface MemorySearchOptions {
   query: string;
   mode?: MemorySearchMode;
   type?: MemoryType;
+  kind?: IndexedMarkdownFile["kind"];
+  status?: MemoryStatus;
   limit?: number;
   /** Minimum meaningful token overlap when no phrase match occurs. */
   minTokenMatches?: number;
@@ -74,6 +76,12 @@ export function searchIndexedFiles(
 
   for (const file of files) {
     if (options.type !== undefined && file.type !== options.type) {
+      continue;
+    }
+    if (options.kind !== undefined && file.kind !== options.kind) {
+      continue;
+    }
+    if (options.status !== undefined && file.status !== options.status) {
       continue;
     }
 

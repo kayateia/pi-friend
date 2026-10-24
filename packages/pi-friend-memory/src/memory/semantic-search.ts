@@ -84,6 +84,12 @@ export function searchSemanticVectors(
     if (options.type !== undefined && file.type !== options.type) {
       continue;
     }
+    if (options.kind !== undefined && file.kind !== options.kind) {
+      continue;
+    }
+    if (options.status !== undefined && file.status !== options.status) {
+      continue;
+    }
 
     const rank = results.length + 1;
     results.push({
