@@ -35,6 +35,7 @@ import {
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
 import {
+  containsRagContext,
   injectRagContext,
   latestUserPrompt,
 } from "./src/memory/rag-injection.ts";
@@ -49,6 +50,7 @@ interface RagSessionState {
   userIndex: number;
   query: string;
   context: Promise<string>;
+  text?: string;
 }
 
 /**
@@ -244,6 +246,7 @@ export default async function registerPiFriend(
     }
 
     const contextText = await state.context;
+    state.text = contextText;
     if (!contextText) {
       return;
     }
@@ -259,6 +262,24 @@ export default async function registerPiFriend(
         injectionConfig.position,
       ),
     };
+  });
+
+  pi.on("context_with_system", (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const state = ragSessions.get(sessionId);
+    if (!state?.text) {
+      return;
+    }
+    debugRag(
+      containsRagContext(event.messages, state.text)
+        ? "delivery-confirmed"
+        : "delivery-failed",
+      {
+        sessionId,
+        userIndex: state.userIndex,
+        contextChars: state.text.length,
+      },
+    );
   });
 
   pi.on("agent_settled", async (event, ctx) => {

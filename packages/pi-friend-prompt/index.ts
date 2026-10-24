@@ -6,13 +6,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  BeforeAgentStartEvent,
+  ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { loadPromptConfig } from "./src/config.ts";
-import {
-  applyCustomPrompt,
-  injectPromptFallback,
-} from "./src/editor.ts";
+import { promptDebugLog } from "./src/debug-log.ts";
+import { applyCustomPrompt } from "./src/editor.ts";
 import { loadSystemPromptApi } from "./src/system-prompt-compat.ts";
+import {
+  analyzePromptDelivery,
+  readWebUiPromptSettings,
+} from "./src/web-ui-diagnostics.ts";
+
+/** Prompt state captured for one run and inspected after later handlers. */
+interface PromptRunState {
+  options: BeforeAgentStartEvent["systemPromptOptions"];
+  narrative?: string;
+}
 
 /**
  * Registers configurable system-prompt editing.
@@ -22,8 +33,13 @@ import { loadSystemPromptApi } from "./src/system-prompt-compat.ts";
  */
 export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
   let warningShown = false;
+  const promptRuns = new Map<string, PromptRunState>();
 
   pi.on("before_agent_start", async (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    promptRuns.set(sessionId, {
+      options: event.systemPromptOptions,
+    });
     try {
       const config = await loadPromptConfig();
       if (!config.customPrompt) {
@@ -36,6 +52,10 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
         config.customPrompt,
         api.buildSystemPromptSections,
       );
+      promptRuns.set(sessionId, {
+        options: event.systemPromptOptions,
+        narrative: config.customPrompt.trim(),
+      });
     } catch (error) {
       if (!warningShown) {
         warningShown = true;
@@ -50,27 +70,32 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
   });
 
   pi.on("context_with_system", async (event, ctx) => {
-    try {
-      const config = await loadPromptConfig();
-      const customPrompt = config.customPrompt?.trim();
-      if (!customPrompt || ctx.getSystemPrompt().includes(customPrompt)) {
-        return;
-      }
+    const sessionId = ctx.sessionManager.getSessionId();
+    const state = promptRuns.get(sessionId);
+    promptRuns.delete(sessionId);
 
-      return {
-        messages: injectPromptFallback(event.messages, customPrompt),
-      };
-    } catch (error) {
-      if (!warningShown) {
-        warningShown = true;
-        const message = `pi-friend-prompt: ${describeError(error)}`;
-        if (ctx.hasUI) {
-          ctx.ui.notify(message, "warning");
-        } else {
-          console.error(message);
-        }
-      }
-    }
+    const finalPrompt = ctx.getSystemPrompt();
+    const webUi = readWebUiPromptSettings();
+    const delivery = analyzePromptDelivery(
+      finalPrompt,
+      state?.narrative,
+      state?.options.forceSystemPrompt,
+      webUi,
+    );
+
+    promptDebugLog("web-ui prompt diagnostics", {
+      sessionId,
+      ...delivery,
+      webUi,
+    });
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    promptRuns.delete(ctx.sessionManager.getSessionId());
+  });
+
+  pi.on("session_shutdown", () => {
+    promptRuns.clear();
   });
 }
 

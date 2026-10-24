@@ -31,17 +31,28 @@ export function latestUserPrompt(
     if (!message || message.role !== "user") {
       continue;
     }
-    const prompt =
-      typeof message.content === "string"
-        ? message.content
-        : message.content
-            .flatMap((block) => (block.type === "text" ? [block.text] : []))
-            .join("\n");
+    const prompt = messageText(message.content);
     if (prompt.trim() !== "") {
       return { index, prompt };
     }
   }
   return undefined;
+}
+
+/** Returns whether a user message contains a previously injected RAG block. */
+export function containsRagContext(
+  messages: RagAgentMessage[],
+  block: string,
+): boolean {
+  const normalized = block.trim();
+  if (normalized === "") {
+    return false;
+  }
+  return messages.some(
+    (message) =>
+      message.role === "user" &&
+      messageText(message.content).includes(normalized),
+  );
 }
 
 /**
@@ -92,4 +103,19 @@ export function injectRagContext(
           content: [{ type: "text", text: block }, ...target.content],
         };
   return updatedMessages;
+}
+
+/** Extracts textual content from a user or custom message payload. */
+function messageText(
+  content: string | Array<{ type: string; text?: string }>,
+): string {
+  return typeof content === "string"
+    ? content
+    : content
+        .flatMap((block) =>
+          block.type === "text" && typeof block.text === "string"
+            ? [block.text]
+            : [],
+        )
+        .join("\n");
 }

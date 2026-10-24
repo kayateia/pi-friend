@@ -8,18 +8,12 @@
 
 import type {
   BuildSystemPromptOptions,
-  ContextWithSystemEvent,
   NormalizedBuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 
 type SectionBuilder = (
   input: BuildSystemPromptOptions,
 ) => Record<string, string>;
-
-type PromptContextMessage = Extract<
-  ContextWithSystemEvent["messages"][number],
-  { role: "custom" }
->;
 
 /**
  * Replaces only the prompt preamble while restoring stock generated sections.
@@ -55,39 +49,6 @@ export function applyCustomPrompt(
       : {}),
   };
   return true;
-}
-
-/**
- * Builds a non-displayed fallback message for hosts that override the final
- * system prompt after earlier before_agent_start mutations.
- */
-export function createPromptFallbackMessage(
-  customPrompt: string,
-  timestamp: number = Date.now(),
-): PromptContextMessage {
-  return {
-    role: "custom",
-    customType: "pi-friend-prompt",
-    content: `<pi-friend-prompt>\n${customPrompt.trim()}\n</pi-friend-prompt>`,
-    display: false,
-    timestamp,
-  };
-}
-
-/**
- * Inserts the fallback after the leading system message when present, keeping
- * provider-required prompt and tool declarations first.
- */
-export function injectPromptFallback(
-  messages: ContextWithSystemEvent["messages"],
-  customPrompt: string,
-  timestamp: number = Date.now(),
-): ContextWithSystemEvent["messages"] {
-  const fallback = createPromptFallbackMessage(customPrompt, timestamp);
-  if (messages[0]?.role === "system") {
-    return [messages[0], fallback, ...messages.slice(1)];
-  }
-  return [fallback, ...messages];
 }
 
 /** Removes one automatic section wrapper before storing its inner content. */

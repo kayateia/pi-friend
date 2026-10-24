@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import type { UserMessage } from "@earendil-works/pi-ai";
 import test from "node:test";
 import {
+  containsRagContext,
   injectRagContext,
   latestUserPrompt,
   type RagAgentMessage,
@@ -76,6 +77,16 @@ test("latest user prompt supports text and mixed-content messages", () => {
 
   assert.deepEqual(prompt, { index: 1, prompt: "latest" });
   assert.equal(latestUserPrompt([]), undefined);
+});
+
+test("RAG delivery checks detect the injected block in user messages", () => {
+  const messages: UserMessage[] = [
+    { role: "user", content: "hello", timestamp: 1 },
+  ];
+  const injected = injectRagContext(messages, BLOCK, 0);
+
+  assert.equal(containsRagContext(injected, BLOCK), true);
+  assert.equal(containsRagContext(messages, BLOCK), false);
 });
 
 /** Narrows one context message to a user message for assertions. */

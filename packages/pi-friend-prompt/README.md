@@ -32,11 +32,9 @@ Some hosts, including `pi-web-ui` with its prompt composer active, run a later
 awaits every handler, but the later replacement can discard this extension's
 mutation.
 
-To cover that case, `pi-friend-prompt` also checks the final system prompt in
-`context_with_system`. If the configured narrative is missing, it prepends a
-non-displayed `<pi-friend-prompt>` custom message before the request. This
-preserves the host's tool declarations and prompt composition while ensuring
-the configured friend narrative reaches the model.
+To diagnose that case, `pi-friend-prompt` also checks the final system prompt in
+`context_with_system` and records whether the configured narrative survived.
+It does not inject a fallback message.
 
 To let `pi-web-ui` leave the system prompt to Pi and extensions instead, use its
 default prompt composition:
@@ -48,6 +46,25 @@ default prompt composition:
 
 When those are default, `pi-web-ui` returns no replacement prompt and the
 normal preamble replacement is preserved directly.
+
+## Diagnostics
+
+Set `PI_FRIEND_DEBUG_HOOKS=1` when starting Pi. Each run appends a
+`web-ui prompt diagnostics` entry to the normal pi-friend debug log. The entry
+contains:
+
+- Whether `forceSystemPrompt` was set by a later handler.
+- Whether that forced prompt included the configured narrative.
+- Whether the narrative remains in the final request prompt.
+- `overriddenByLaterHandler` when the final prompt lost the narrative.
+- `likelyWebUiOverride` when the final prompt lost the narrative and one of the
+  web UI prompt-composer settings below is active.
+- The persisted `pi-web-ui` settings: prompt template activity, prompt override
+  sources, default agent preset, disabled tool count, lazy tool loading, and
+  whether their combination causes web UI to replace the system prompt.
+
+The diagnostic reads `client-state.json` from `PI_WEB_DATA_DIR`, defaulting to
+`~/.pi-web`. A missing file is reported as `available: false`.
 
 ## Development
 

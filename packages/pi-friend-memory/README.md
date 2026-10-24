@@ -92,6 +92,11 @@ The result is cached per session and user-turn index, so tool-loop requests do
 not repeat embedding searches, and concurrent sessions cannot overwrite one
 another's pending RAG context.
 
+With `PI_FRIEND_DEBUG_HOOKS=1`, retrieval logs `rag retrieved`, and the later
+`context_with_system` hook logs either `rag delivery-confirmed` or
+`rag delivery-failed`. Delivery confirmation checks that the exact RAG block is
+still present in the full request context after all context hooks have run.
+
 ## Development
 
 From the monorepo root, install all development dependencies:

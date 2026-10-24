@@ -138,6 +138,7 @@ once-per-day consolidation schedule, not daily-log processing.
 - Only active, non-quarantined memory nodes are injected. Plain documents remain searchable through tools but are not copied into factual RAG context.
 - Each injected memory carries a compact `Why recalled:` explanation with its semantic rank, keyword rank, keyword-matched fields, and score.
 - `dream` and `inner` memories are quarantined from factual RAG. They remain readable and searchable through explicit tools.
+- When debug logging is enabled, a later `context_with_system` diagnostic verifies that the exact injected RAG block remains in the final request context.
 - **Recency beats depth rule**: if a node's `supersedes` list is non-empty, the superseded node is demoted out of RAG entirely (or injected only with an explicit `superseded` annotation) so a correction cannot be argued with on equal footing. See §7.
 - Injection content tiers (per node):
   1. **Fresh/recent**: title + snippet (~2–4 sentences) + link.

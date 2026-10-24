@@ -12,11 +12,7 @@ import type {
   NormalizedBuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 import test from "node:test";
-import {
-  applyCustomPrompt,
-  createPromptFallbackMessage,
-  injectPromptFallback,
-} from "../src/editor.ts";
+import { applyCustomPrompt } from "../src/editor.ts";
 
 test("custom prompt replacement preserves stock generated sections", () => {
   const options = normalizedOptions();
@@ -48,29 +44,6 @@ test("empty custom prompt leaves options unchanged", () => {
 
   assert.equal(applied, false);
   assert.deepEqual(JSON.parse(JSON.stringify(options)) as unknown, before);
-});
-
-test("prompt fallback is non-displayed and namespaced", () => {
-  const message = createPromptFallbackMessage("You are Lime.", 123);
-  assert.deepEqual(message, {
-    role: "custom",
-    customType: "pi-friend-prompt",
-    content: "<pi-friend-prompt>\nYou are Lime.\n</pi-friend-prompt>",
-    display: false,
-    timestamp: 123,
-  });
-});
-
-test("prompt fallback stays behind the leading system message", () => {
-  const messages = [
-    { role: "system" as const, content: "system", timestamp: 1 },
-    { role: "user" as const, content: "hello", timestamp: 2 },
-  ];
-  const injected = injectPromptFallback(messages, "You are Lime.", 3);
-
-  assert.equal(injected[0], messages[0]);
-  assert.equal(injected[1]?.role, "custom");
-  assert.equal(injected[2], messages[1]);
 });
 
 /** Builds a complete normalized options fixture. */
