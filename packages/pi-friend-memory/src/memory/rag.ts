@@ -72,7 +72,9 @@ export async function buildRagContext(
       kind: "node",
       status: "active",
       limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
-      ...(config.mode === "keyword" ? { minTokenMatches: 1 } : {}),
+      // A conversational prompt should contribute any matching memory term,
+      // not require every word from the sentence to occur in one node.
+      minTokenMatches: 1,
     });
   } catch (error) {
     searchError = describeError(error);
