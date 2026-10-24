@@ -10,9 +10,11 @@ import assert from "node:assert/strict";
 import type { UserMessage } from "@earendil-works/pi-ai";
 import test from "node:test";
 import {
+  EMPTY_RAG_BLOCK,
   containsRagContext,
   injectRagContext,
   latestUserPrompt,
+  ragBlockForDelivery,
   type RagAgentMessage,
 } from "../../src/memory/rag-injection.ts";
 
@@ -87,6 +89,12 @@ test("RAG delivery checks detect the injected block in user messages", () => {
 
   assert.equal(containsRagContext(injected, BLOCK), true);
   assert.equal(containsRagContext(messages, BLOCK), false);
+});
+
+test("debug runs receive an empty RAG block when retrieval selects nothing", () => {
+  assert.equal(ragBlockForDelivery("", false), "");
+  assert.equal(ragBlockForDelivery("", true), EMPTY_RAG_BLOCK);
+  assert.equal(ragBlockForDelivery(BLOCK, true), BLOCK);
 });
 
 /** Narrows one context message to a user message for assertions. */

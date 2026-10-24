@@ -11,6 +11,18 @@ import type { ContextEvent } from "@earendil-works/pi-coding-agent";
 /** Agent message shape used by Pi's request-local context transform. */
 export type RagAgentMessage = ContextEvent["messages"][number];
 
+/** Empty marker injected during debug runs when retrieval selects no nodes. */
+export const EMPTY_RAG_BLOCK =
+  "<pi-friend-memory>\n</pi-friend-memory>";
+
+/** Returns the requested RAG text or the debug-only empty marker. */
+export function ragBlockForDelivery(
+  text: string,
+  includeEmpty: boolean,
+): string {
+  return text !== "" || !includeEmpty ? text : EMPTY_RAG_BLOCK;
+}
+
 /** Latest user prompt and its request-local message index. */
 export interface LatestUserPrompt {
   index: number;

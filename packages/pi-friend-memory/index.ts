@@ -12,7 +12,10 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { registerHookLogging } from "./src/debug/hook-log.ts";
-import { debugLog } from "./src/debug/log.ts";
+import {
+  debugLog,
+  isDebugEnabled,
+} from "./src/debug/log.ts";
 import {
   DEFAULT_MEMORY_TOOL_PREFIX,
   defaultRagInjectionConfig,
@@ -38,6 +41,7 @@ import {
   containsRagContext,
   injectRagContext,
   latestUserPrompt,
+  ragBlockForDelivery,
 } from "./src/memory/rag-injection.ts";
 import { runDailySweep } from "./src/memory/sweep.ts";
 import type { SemanticSearchDependencies } from "./src/memory/service.ts";
@@ -247,14 +251,19 @@ export default async function registerPiFriend(
       ragSessions.set(sessionId, state);
     }
 
-    const contextText = await state.context;
+    const retrievedText = await state.context;
+    const contextText = ragBlockForDelivery(
+      retrievedText,
+      isDebugEnabled(),
+    );
     state.text = contextText;
-    if (!contextText) {
+    if (contextText === "") {
       return;
     }
 
     debugRag("injected", {
       contextChars: contextText.length,
+      emptyDebugBlock: retrievedText === "",
       position: injectionConfig.position,
     });
     return {

@@ -103,6 +103,11 @@ node count, and final context size. RAG restricts ranking to active nodes before
 applying its result limit, so ordinary documents and non-active memory files
 cannot crowd out injectable memories.
 
+When `PI_FRIEND_DEBUG_HOOKS` is enabled and retrieval selects no nodes, the
+extension still injects an empty `<pi-friend-memory></pi-friend-memory>` block.
+This makes request-context plumbing visible in traces without requiring test
+memories. Debug-disabled runs inject nothing in that case.
+
 ## Development
 
 From the monorepo root, install all development dependencies:
