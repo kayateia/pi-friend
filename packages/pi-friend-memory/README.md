@@ -218,6 +218,10 @@ Set `memory.sweep.background: true` to schedule the sweep on the next event-loop
 task instead of making agent settlement wait for its model calls. The sweep
 holds an exclusive memory-mutation lock while it runs, so interactive memory
 writes wait rather than racing with promotion, decay, or dream creation.
+That lock is shared by every memory service using the same canonical root in
+the current process, including multiple pi-web-ui conversations. Separate
+processes sharing one memory tree still require a single writer or an
+OS-level lock.
 Session shutdown aborts an unfinished background sweep before closing the
 semantic index. The default remains `false`.
 
