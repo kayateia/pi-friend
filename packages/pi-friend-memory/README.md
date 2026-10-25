@@ -53,20 +53,32 @@ memory:
     every_turns: 5
     max_candidates: 3
     # model: openrouter/google/gemini-2.5-flash
+    # prompt: |
+    #   Replacement system prompt for capture.
   sweep:
     enabled: true
     background: false
     tombstone_grace_days: 30
     min_guarded_batch_size: 10
     # model: openrouter/google/gemini-2.5-flash
+    # prompt: |
+    #   Replacement system prompt for sweep decisions.
   dreaming:
     enabled: true
     max_nodes: 4
     # model: openrouter/google/gemini-2.5-flash
+    # prompt: |
+    #   Replacement system prompt for dream selection and writing.
 ```
 
 A missing config uses the default. Malformed configuration is reported and
 does not fall back to another path. The tree is initialized on `session_start`.
+
+`auto_capture.prompt`, `sweep.prompt`, and `dreaming.prompt` replace the
+corresponding internal model's system prompt. The task framing and required
+JSON response contract remain enforced by the extension. When omitted, the
+built-in prompt is used. The complete current defaults are copied into
+`pi-friend.example.yml`.
 
 The repository includes a complete, ready-to-copy example at
 [`pi-friend.example.yml`](./pi-friend.example.yml). Install it manually with:

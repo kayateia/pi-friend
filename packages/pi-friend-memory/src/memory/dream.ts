@@ -138,6 +138,7 @@ export async function runDreamModel(
   maxNodes: number,
   reportWarning: (message: string) => void,
   signal?: AbortSignal,
+  systemPrompt: string = DREAM_SYSTEM_PROMPT,
 ): Promise<DreamDraft> {
   const model = resolveDreamModel(ctx, configuredModel, reportWarning);
   if (!model) {
@@ -147,7 +148,7 @@ export async function runDreamModel(
   const stream = ctx.modelRegistry.streamSimple(
     model,
     {
-      systemPrompt: DREAM_SYSTEM_PROMPT,
+      systemPrompt,
       messages: [
         {
           role: "user",

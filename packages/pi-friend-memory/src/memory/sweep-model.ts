@@ -128,6 +128,7 @@ export async function runSweepModel(
   canonical: ParsedMemoryNode[],
   reportWarning: (message: string) => void,
   signal?: AbortSignal,
+  systemPrompt: string = SWEEP_SYSTEM_PROMPT,
 ): Promise<SweepDecision[]> {
   const model = resolveSweepModel(ctx, configuredModel, reportWarning);
   if (!model) {
@@ -137,7 +138,7 @@ export async function runSweepModel(
   const stream = ctx.modelRegistry.streamSimple(
     model,
     {
-      systemPrompt: SWEEP_SYSTEM_PROMPT,
+      systemPrompt,
       messages: [
         {
           role: "user",

@@ -42,7 +42,7 @@ export async function runCaptureModel(
   const stream = ctx.modelRegistry.streamSimple(
     model,
     {
-      systemPrompt: CAPTURE_SYSTEM_PROMPT,
+      systemPrompt: config.prompt ?? CAPTURE_SYSTEM_PROMPT,
       messages: [
         {
           role: "user",

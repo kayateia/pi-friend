@@ -35,6 +35,8 @@ export interface AutoCaptureConfig {
   maxCandidates: number;
   /** Optional provider/model-id override for the capture model. */
   model?: string;
+  /** Optional replacement for the capture model's system prompt. */
+  prompt?: string;
 }
 
 /** Configuration for the daily consolidation pass. */
@@ -44,6 +46,8 @@ export interface SweepConfig {
   background: boolean;
   /** Optional provider/model-id override for candidate decisions. */
   model?: string;
+  /** Optional replacement for the sweep model's system prompt. */
+  prompt?: string;
   tombstoneGraceDays: number;
   /** Batches smaller than this bypass the 25% removal guard. */
   minGuardedBatchSize: number;
@@ -55,6 +59,8 @@ export interface DreamingConfig {
   maxNodes: number;
   /** Optional provider/model-id override for dream selection and writing. */
   model?: string;
+  /** Optional replacement for the dream model's system prompt. */
+  prompt?: string;
 }
 
 /** Configuration for the derived vector index. */
@@ -456,6 +462,14 @@ function parseAutoCapture(
     }
     config.model = value.model.trim();
   }
+  const prompt = parseModelPrompt(
+    value.prompt,
+    configPath,
+    "memory.auto_capture.prompt",
+  );
+  if (prompt !== undefined) {
+    config.prompt = prompt;
+  }
   return config;
 }
 
@@ -498,6 +512,14 @@ function parseSweep(value: unknown, configPath: string): SweepConfig {
       );
     }
     config.model = value.model.trim();
+  }
+  const prompt = parseModelPrompt(
+    value.prompt,
+    configPath,
+    "memory.sweep.prompt",
+  );
+  if (prompt !== undefined) {
+    config.prompt = prompt;
   }
   if (value.tombstone_grace_days !== undefined) {
     if (
@@ -573,7 +595,32 @@ function parseDreaming(value: unknown, configPath: string): DreamingConfig {
     }
     config.model = value.model.trim();
   }
+  const prompt = parseModelPrompt(
+    value.prompt,
+    configPath,
+    "memory.dreaming.prompt",
+  );
+  if (prompt !== undefined) {
+    config.prompt = prompt;
+  }
   return config;
+}
+
+/** Parses a non-empty replacement prompt for an internal model request. */
+function parseModelPrompt(
+  value: unknown,
+  configPath: string,
+  field: string,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new MemoryConfigError(
+      `${configPath}: ${field} must be a non-empty string.`,
+    );
+  }
+  return value.trim();
 }
 
 /** Narrows an unknown config value to a supported search mode. */

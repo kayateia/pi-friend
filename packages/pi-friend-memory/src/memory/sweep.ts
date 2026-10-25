@@ -141,6 +141,7 @@ async function runDailySweepLocked(
           canonical,
           options.reportWarning ?? (() => {}),
           options.signal,
+          config.prompt,
         );
       }
       options.signal?.throwIfAborted();
@@ -218,6 +219,7 @@ async function runDailySweepLocked(
                   options.dreaming.maxNodes,
                   options.reportWarning ?? (() => {}),
                   options.signal,
+                  options.dreaming.prompt,
                 )
               : (() => {
                   throw new Error("Dream model context is unavailable.");

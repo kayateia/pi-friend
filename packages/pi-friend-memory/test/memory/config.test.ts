@@ -258,6 +258,8 @@ test("auto-capture settings are parsed and validated", () => {
       "    every_turns: 2",
       "    max_candidates: 4",
       "    model: openrouter/google/gemini-2.5-flash",
+      "    prompt: |",
+      "      Custom capture prompt.",
     ].join("\n"),
     configPath,
   );
@@ -267,6 +269,7 @@ test("auto-capture settings are parsed and validated", () => {
     everyTurns: 2,
     maxCandidates: 4,
     model: "openrouter/google/gemini-2.5-flash",
+    prompt: "Custom capture prompt.",
   });
 });
 
@@ -276,6 +279,7 @@ test("invalid auto-capture settings fail closed", () => {
     "memory:\n  auto_capture:\n    every_turns: 0\n",
     "memory:\n  auto_capture:\n    max_candidates: 0\n",
     "memory:\n  auto_capture:\n    model: nope\n",
+    'memory:\n  auto_capture:\n    prompt: "  "\n',
     "memory:\n  auto_capture:\n    enabled: sometimes\n",
   ]) {
     assert.throws(
@@ -296,6 +300,8 @@ test("sweep settings are parsed and validated", () => {
       "    tombstone_grace_days: 14",
       "    min_guarded_batch_size: 12",
       "    model: openrouter/google/gemini-2.5-flash",
+      "    prompt: |",
+      "      Custom sweep prompt.",
     ].join("\n"),
     configPath,
   );
@@ -306,6 +312,7 @@ test("sweep settings are parsed and validated", () => {
     tombstoneGraceDays: 14,
     minGuardedBatchSize: 12,
     model: "openrouter/google/gemini-2.5-flash",
+    prompt: "Custom sweep prompt.",
   });
   assert.throws(
     () =>
@@ -331,6 +338,14 @@ test("sweep settings are parsed and validated", () => {
       ),
     MemoryConfigError,
   );
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        'memory:\n  sweep:\n    prompt: "  "\n',
+        configPath,
+      ),
+    MemoryConfigError,
+  );
 });
 
 test("dreaming settings are parsed and validated", () => {
@@ -342,6 +357,8 @@ test("dreaming settings are parsed and validated", () => {
       "    enabled: false",
       "    max_nodes: 3",
       "    model: openrouter/google/gemini-2.5-flash",
+      "    prompt: |",
+      "      Custom dream prompt.",
     ].join("\n"),
     configPath,
   );
@@ -350,11 +367,20 @@ test("dreaming settings are parsed and validated", () => {
     enabled: false,
     maxNodes: 3,
     model: "openrouter/google/gemini-2.5-flash",
+    prompt: "Custom dream prompt.",
   });
   assert.throws(
     () =>
       parseMemoryConfig(
         "memory:\n  dreaming:\n    max_nodes: 1\n",
+        configPath,
+      ),
+    MemoryConfigError,
+  );
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        'memory:\n  dreaming:\n    prompt: "  "\n',
         configPath,
       ),
     MemoryConfigError,
