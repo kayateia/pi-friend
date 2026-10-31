@@ -437,6 +437,22 @@ export class MemoryNodeService {
     });
   }
 
+  /** Writes planned staging decay metadata before sweep decisions are applied. */
+  async applyCandidateDecay(updates: DecayUpdate[]): Promise<void> {
+    return this.runSerialized(async () => {
+      for (const update of updates) {
+        const candidate = await this.repository.read(update.slug, "staging");
+        if (candidate === null) {
+          continue;
+        }
+        candidate.frontMatter.use_count = update.useCount;
+        candidate.frontMatter.last_used = update.lastUsed;
+        candidate.frontMatter.decay_weight = update.decayWeight;
+        await this.repository.write(candidate, "staging");
+      }
+    });
+  }
+
   /** Creates one canonical active node with schema-compliant defaults. */
   async add(input: MemoryAddInput): Promise<ParsedMemoryNode> {
     return this.runSerialized(async () => {

@@ -36,21 +36,15 @@ test("sweep response parsing validates candidate actions and targets", () => {
           target: "existing",
           reason: "same topic",
         },
-        {
-          slug: "drop-me",
-          action: "drop",
-          reason: "transient",
-        },
       ],
     }),
-    ["promote-me", "merge-me", "drop-me"],
+    ["promote-me", "merge-me"],
     ["existing"],
   );
 
   assert.deepEqual(decisions.map((decision) => decision.action), [
     "promote",
     "merge",
-    "drop",
   ]);
   const prompt = buildSweepPrompt(
     [makeCandidate("candidate")],
@@ -297,7 +291,7 @@ test("sweep archives expired tombstones and creates one dream", async () => {
   });
 });
 
-test("small batches may remove more than 25% below the guard threshold", async () => {
+test("small batches may expire more than 25% below the guard threshold", async () => {
   await withTempDir(async (agentDir) => {
     const repository = await MemoryNodeRepository.open({
       agentDir,
@@ -305,11 +299,13 @@ test("small batches may remove more than 25% below the guard threshold", async (
     });
     const service = new MemoryNodeService(repository);
     const candidate = await service.stageCandidate({
-      title: "Small Batch Drop",
+      title: "Small Batch Expiry",
       type: "fact",
-      body: "This small batch may be dropped.",
+      body: "This small batch may expire.",
       speaker: [{ name: "Aisling", confident: true }],
     });
+    candidate.node.frontMatter.decay_weight = 0.05;
+    await repository.write(candidate.node, "staging");
 
     const result = await runDailySweep(
       undefined,
@@ -322,13 +318,6 @@ test("small batches may remove more than 25% below the guard threshold", async (
       },
       {
         now: new Date("2026-10-22T05:00:00.000Z"),
-        decide: async () => [
-          {
-            slug: candidate.node.slug,
-            action: "drop",
-            reason: "small batch cleanup",
-          },
-        ],
       },
     );
 
@@ -360,6 +349,10 @@ test("the 25% guard still applies at the configured batch threshold", async () =
       body: "Second guarded candidate.",
       speaker: [{ name: "Aisling", confident: true }],
     });
+    first.node.frontMatter.decay_weight = 0.05;
+    second.node.frontMatter.decay_weight = 0.05;
+    await repository.write(first.node, "staging");
+    await repository.write(second.node, "staging");
 
     const result = await runDailySweep(
       undefined,
@@ -372,18 +365,6 @@ test("the 25% guard still applies at the configured batch threshold", async () =
       },
       {
         now: new Date("2026-10-23T05:00:00.000Z"),
-        decide: async () => [
-          {
-            slug: first.node.slug,
-            action: "drop",
-            reason: "guarded removal",
-          },
-          {
-            slug: second.node.slug,
-            action: "promote",
-            reason: "durable",
-          },
-        ],
       },
     );
 

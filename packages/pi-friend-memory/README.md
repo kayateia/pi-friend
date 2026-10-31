@@ -238,10 +238,12 @@ OS-level lock.
 Session shutdown aborts an unfinished background sweep before closing the
 semantic index. The default remains `false`.
 
-The sweep model chooses `promote`, `merge`, or `drop` for staged candidates.
-Dropped candidates are archived under `sweeps/dropped/`, not hard-deleted.
-Decay is volume-relative: access resets a node to fresh, while new canonical
-memories since its last use lower its `decay_weight`.
+The sweep model chooses `promote` or `merge` for staged candidates. Candidates
+that reach the volume-decay floor of `0.05` expire before model review and are
+archived under `sweeps/dropped/`, not hard-deleted. Decay is volume-relative:
+access resets a canonical node to fresh, while new canonical memories since a
+node's last use lower its `decay_weight`. Candidate decay uses the same curve
+and floor, counts canonical additions only, and ignores RAG-hit access resets.
 
 The 25% removal guard applies only when a sweep has at least
 `min_guarded_batch_size` candidates. Smaller batches can remove or consolidate
