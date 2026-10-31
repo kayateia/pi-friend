@@ -1,7 +1,8 @@
-# pi-friend-memory — Specification v0.1
+# pi-friend-memory — Specification v0.2
 
 *Drafted by Lime Pi from Aisling's design sketch + review discussion, 2026-10-18. Enriched 2026-10-19 from the OpenClaw memory-pass protocols (consolidation, retrospective, pattern-detection, heartbeat) Aisling shared.*
-*Status: first-pass implementation, updated 2026-10-23. Aisling's rulings outrank this doc.*
+*Status: second-pass design, updated 2026-10-31. Spooky.*
+
 
 ## 1. Purpose
 
@@ -12,7 +13,9 @@ A memory system for a *friend*, not an assistant. Derived from pi-memory, with t
 - **RAG injection each turn**, positioned to avoid cache invalidation.
 - **Decay by volume, not calendar**: memories sink when things happen, not when time passes.
 - **Automatic capture** by a fast model, staged and promoted deliberately.
-- **Sweeping + dreaming** as a daily consolidation cycle.
+- **Sweeping** as a daily consolidation cycle.
+- **Dreaming** as a way to produce creative input for thought.
+- All memory data is shared by all contexts/sessions/chats.
 
 ## 2. Non-negotiable invariants
 
@@ -25,13 +28,12 @@ A memory system for a *friend*, not an assistant. Derived from pi-memory, with t
 
 ```
 memory/
-├── MEMORY.md            ← curated top-of-mind pointer file (like pi-memory's)
 ├── nodes/               ← memory nodes (one topic per file, strict front matter)
 │   ├── <slug>.md
 │   └── superseded/      ← tombstoned nodes awaiting sweep decision
 ├── staging/             ← auto-captured candidates, not yet promoted
 ├── access-log           ← append-only: one line per returned search hit
-├── sweeps/              ← dated sweep logs + dream narratives
+├── sweeps/              ← dated sweep+dream logs
 ├── index/               ← vector store config/state (non-canonical)
 └── recovery/            ← durable records for recoverable node deletion
 ```
@@ -54,6 +56,7 @@ memory:
     enabled: true
     every_turns: 5
     max_candidates: 3
+    idle_timeout: 600 # seconds after the last settled run
     # model: openrouter/google/gemini-2.5-flash
   sweep:
     enabled: true
@@ -65,6 +68,8 @@ memory:
     enabled: true
     max_nodes: 4
     # model: openrouter/google/gemini-2.5-flash
+  embeddings:
+    model: openrouter/openai/text-embedding-3-small
 ```
 
 The `memory` tree is configured as above, but it should default to `~/.pi/agent/pi-friend/memory`.
@@ -87,7 +92,7 @@ remain in code. The complete built-in prompts are reproduced in
 ```yaml
 ---
 title: string                       # human-readable
-type: fact                          # dream | inner | fact | preference | event | person-note
+type: fact                          # dream | fact | preference | event | person-note
 speaker:                            # who said it. Array; ordered by attribution confidence
   - name: Aisling                   #   system member, user name, or agent name
     confident: true                 #   false = inferred/uncertain attribution
@@ -117,7 +122,7 @@ Body: concise, single-topic prose. May include short verbatim quotes (with speak
 
 ## 5. Basic tools
 
-Tool names below use the default `memory_` prefix:
+The names below are the built-in tool names. A configured `tool_prefix` is prepended to each.
 
 - `memory_add(title, body, front_matter_extras?)` → creates a canonical active node, derives a unique slug, and records links, tags, speaker attribution, and other front-matter metadata.
 - `memory_delete(match)` → writes recovery record, moves to `superseded/` (does not hard-delete).
@@ -137,20 +142,22 @@ once-per-day consolidation schedule, not daily-log processing.
 
 ## 6. RAG injection
 
-- Retrieval and injection run in the request-time `context` hook. The RAG result is cached by session and user-turn index so repeated provider requests in one turn do not re-run embeddings, and concurrent sessions cannot overwrite shared RAG text. Ranking is filtered to active nodes before the candidate limit; documents, staging entries, and inactive memory files cannot crowd out injectable memories. Relevant nodes are injected into the prompt at a configurable position:
+- Retrieval and injection run in the request-time `context` hook. The RAG result is cached by session and user-turn index so repeated provider requests in one turn do not re-run embeddings, and concurrent sessions cannot overwrite shared RAG text. Ranking is filtered to active nodes and candidate nodes before the candidate limit; documents and inactive memory files cannot crowd out injectable memories. Relevant nodes are injected into the prompt at a configurable position:
   - position `0` = inside the current user turn (most salient, invalidates cache from that point)
   - position `-1`, `-2`, … = N prompts back (less salient, preserves the hot cache prefix)
 - The retrieved block is prepended to the selected user message and wrapped in `<pi-friend-memory>...</pi-friend-memory>`.
-- Only active, non-quarantined memory nodes are injected. Plain documents remain searchable through tools but are not copied into factual RAG context.
+- Only two types of items are considered for injection: active, non-quarantined canonical nodes; and candidate nodes in `staging`.
+- Plain documents remain searchable through tools but are not copied into factual RAG context.
 - Each injected memory carries a compact `Why recalled:` explanation with its semantic rank, keyword rank, keyword-matched fields, and score.
-- `dream` and `inner` memories are quarantined from factual RAG. They remain readable and searchable through explicit tools.
-- RAG uses the complete latest user message as its query. Keyword/hybrid retrieval accepts one meaningful token overlap rather than requiring every conversational word to appear in a memory. Semantic retrieval uses nearest-neighbor ranking without a fixed similarity cutoff.
+- Every injected candidate block must begin with the label `Candidate - unverified`.
+- `dream` memories are quarantined from factual RAG. They remain readable and searchable through explicit tools.
+- RAG uses the complete latest user message, plus the most recent agent chat-text output before that user message, as its query. "Agent chat text" means visible assistant prose only; exclude reasoning/thinking blocks, tool calls, and tool results. Keyword/hybrid retrieval accepts one meaningful token overlap rather than requiring every conversational word to appear in a memory. Semantic retrieval uses nearest-neighbor ranking without a fixed similarity cutoff.
 - When debug logging is enabled, the retrieval log records the query, search mode/fallback, errors, candidate/eligible/selected counts, and context size. A later `context_with_system` diagnostic verifies that the exact injected RAG block remains in the final request context.
 - In debug runs only, an empty `<pi-friend-memory></pi-friend-memory>` block is injected when retrieval selects no nodes, allowing end-to-end context-injection testing without fixture memories. Normal runs omit the block.
 - **Recency beats depth rule**: if a node's `supersedes` list is non-empty, the superseded node is demoted out of RAG entirely (or injected only with an explicit `superseded` annotation) so a correction cannot be argued with on equal footing. See §7.
 - Injection content tiers (per node):
   1. **Fresh/recent**: title + snippet (~2–4 sentences) + link.
-  2. **Middle-age (volume-relative)**: title + one sentence + link.
+  2. **Middle-age (volume-relative) and candidates**: title + one sentence + link.
   3. **Cold**: `see also: <title> — <keywords>` only.
 - Tier assignment is computed at retrieval time from `decay_weight` and access data; the md files are not rewritten at retrieval time (see §8).
 
@@ -158,15 +165,16 @@ once-per-day consolidation schedule, not daily-log processing.
 
 - **Volume-relative**: each node's weight decreases by a function of *how many new memories have been stored since its last use*, not elapsed clock time. Quiet weeks don't bury things.
 - `decay_weight` is recomputed once per sweep. Search calls append access records with tier, query, path, and slug when available; RAG retrieval uses the same search path and may log candidate hits before injection filtering. Access logging never rewrites node files.
+- Decay is also calculated once per sweep on candidate items in `staging`, using the same volume curve, weights, canonical-only volume count, and `0.05` floor as canonical nodes. Candidate RAG hits do not reset candidate decay; only sweep processing updates it. A candidate expires when its decay weight reaches `0.05`. Candidate expiry is volume-based; elapsed wall-clock time does not decay candidates.
 - Superseded nodes get `decay_weight: 0` and are excluded from RAG, but remain searchable with an explicit `superseded` marker (so the model can say "an earlier record says X, but it was corrected by Y").
 
 ## 8. Auto-capture (staging)
 
 - Every N settled agent runs (configurable, default 5), a **fast model** reviews transcript entries added since the prior successful capture and writes candidate nodes to `staging/`, front matter included, `status: candidate`.
-- The default candidate limit is 3. Auto-capture excludes `dream` and `inner`; those types are not generated from ordinary conversation capture.
-- Candidates are NOT injected into RAG until promoted.
+  - Auto-capture also uses an idle debounce measured from the **last settled agent run**. Each new settled run resets the timer. When the configured `idle_timeout` expires (default 600 seconds), capture runs if no agent run is active. A run that starts before expiry suppresses capture; the timer restarts when that run settles. Session shutdown clears the pending timer. This is wall-clock scheduling, not memory decay.
+- The default candidate limit is 3. Auto-capture excludes `dream`; that types is not generated from ordinary conversation capture.
 - Promotion happens two ways:
-  1. **Sweep promotion** (daily): the sweep model chooses `promote`, `merge`, or `drop` for each candidate. Every decision is logged with reasoning in the sweep log.
+  1. **Sweep promotion** (daily): the sweep model chooses `promote` or `merge` for each candidate. Every decision is logged with reasoning in the sweep log.
   2. **Main-model promotion**: the interactive model may call `memory_promote` for a candidate it has verified mid-conversation. Unpromoted candidates remain staged for a later sweep.
 - Dedupe happens at promotion time: staging candidates are compared (via embedding similarity) against existing nodes before promotion; near-duplicates are merged with `links` preserved.
 
@@ -197,10 +205,11 @@ background signal and waits for cleanup before closing the semantic index.
 **Merging cold nodes:** when a summary node absorbs detail, relocate detail, never delete it. Preserve any pointers to full analyses verbatim.
 
 Once per day, a model pass:
-  1. Reviews candidates in `staging/` (`promote`, `merge`, or `drop`; log each decision).
-  2. Recomputes `decay_weight` from the access log and volume counters.
-  3. Demotes long-unused nodes: updates tier metadata, optionally compacts cold nodes (merge related cold nodes into a summary node with links back).
-  4. Handles `superseded/` tombstones: after a grace period, decide to archive or hard-delete (recovery record if deleting).
+  1. Processes volume-relative decay on `staging` nodes using the canonical volume curve and `0.05` floor, without resetting decay for RAG hits. Candidates whose decay weight reaches `0.05` are removed before model review, logged, and included in the 25% removal total. Do not expire candidates solely because wall-clock time has passed.
+  2. Reviews remaining candidates in `staging/` (`promote`, `merge`; log each decision).
+  3. Recomputes `decay_weight` from the access log and volume counters.
+  4. Demotes nodes with low volume-relative weight: updates tier metadata, optionally compacts cold nodes (merge related cold nodes into a summary node with links back).
+  5. Handles `superseded/` tombstones: after a grace period, decide to archive or hard-delete (recovery record if deleting). Tombstone grace is wall-clock retention, not memory decay.
 
 Current first pass: expired tombstones are archived under
 `sweeps/archived/<run-id>/`; irreversible tombstone deletion remains deferred.
@@ -210,7 +219,7 @@ Current first pass: expired tombstones are archived under
 **Abort-don't-partial:** if any step fails, abort immediately; do not write partial results.
 
 **State file rule:** the sweep maintains a state file (last-run timestamp, cursor). It MUST be updated in every outcome, including failure. A pass that does not advance the timestamp is a failed pass — otherwise the next run re-reads the same window forever.
-- **Bounded loss**: for batches at or above `min_guarded_batch_size`, a sweep that would remove or compact more than 25% of prior entries (per file or per sweep, whichever is tighter) is rejected. Smaller batches bypass the ratio guard. This caps silent history erasure while avoiding a guard deadlock when only a few candidates exist.
+- **Bounded loss**: for batches at or above `min_guarded_batch_size`, a sweep that would remove or compact more than 25% of prior entries (per file or per sweep, whichever is tighter) is rejected. Volume-expired staging candidates count toward the 25% removal total. Smaller batches bypass the ratio guard. This caps silent history erasure while avoiding a guard deadlock when only a few candidates exist.
 - **Every sweep writes a dated log** in `sweeps/`: what moved, what merged, what was dropped, why. Record-is-load-bearing applies to the janitor.
 - **Preimage before every sweep**: before any sweep modifies files, snapshot the prior state (full copy of affected files or a git commit of the memory tree) so any sweep's diff is reversible. Recovery records cover single deletions; the preimage covers a whole sweep gone wrong.
 
@@ -223,16 +232,12 @@ Current first pass: expired tombstones are archived under
   - Excluded from default injection tiers entirely; may be surfaced only in low-stakes / explicitly reflective contexts (configurable).
 - Dreams are for texture, association, and serendipitous recombination — **not canon**. They carry extra-heavy provenance markers ("this is a dream, synthesized from these nodes: [...]").
 
-### Inner memories
-
-- `inner` memories record inward-facing state or reflection. They are canonical and searchable but, like dreams, are excluded from factual RAG, automated capture, dream-source selection, and automated merge targets.
-- Inner nodes are never staging candidates. The sweep model still receives `type: inner` on existing canonical memories and must respect that boundary when deciding whether to promote, merge, or drop staged material.
-
 ## 11. Embeddings / index
 
-- Constraint: qmd's local-only model is unavailable; use an OpenRouter embeddings model (or another hosted embedding API).
+- Constraint: Use an OpenRouter embeddings model (or another hosted embedding API).
 - Initial backend: **sqlite-vec** through Node's built-in SQLite runtime. Qdrant remains the migration path if concurrent clients, ANN scale, or richer server-side filtering become necessary.
 - The default embedding target is `openai/text-embedding-3-small` at 1,536 dimensions. The API key comes from Pi's stored OpenRouter credential, falling back to `OPENROUTER_API_KEY`.
+  - This should be configurable.
 - The disposable index stores stable source keys, kind, source path, content hash, embedding, title, memory type, status, decay weight, and tags. Markdown remains canonical; deleting the index is safe.
 - Markdown embeddings synchronize lazily during semantic or hybrid search. A SHA-256 content hash skips unchanged files, and metadata changes that affect the embedded representation refresh the record.
 - `memory.vector.chunk_size` controls the maximum characters supplied per embedding chunk. It defaults to 4,000 and accepts integers from 200 through 20,000. Long Markdown is split into overlapping chunks that prefer nearby paragraph boundaries; overlap scales down to stay below small configured chunk sizes.
@@ -242,18 +247,18 @@ Current first pass: expired tombstones are archived under
 
 ## 12. Optional passes (proposals for Aisling's ruling)
 
-Neither pass is committed for the first pass; both slot in after the sweep stabilizes.
+Neither pass is committed yet.
 
 ### 12a. Retrospective (weekly?)
 
 A second-pass review over recent conversations: recover "the things that mattered which didn't make it into memory." Auto-capture *will* miss things; the retrospective is the pass that catches what never got staged.
-- Checks findings against MEMORY.md and existing nodes to avoid duplicates.
+- Checks findings against `staging` and existing nodes to avoid duplicates.
 - Findings are staged as candidates (normal promotion path), never promoted directly.
 - Inherits the transcript guard, abort-don't-partial, and state-file rules from §9.
 
 ### 12b. Pattern detection (weekly or monthly)
 
-Reviews recent history for patterns in Aisling's (and the system's) behavior and preferences. Core criteria, adopted nearly verbatim from the household protocol:
+Reviews recent history for patterns in Aisling's (and other friends') behavior and preferences. Core criteria, adopted nearly verbatim from the household protocol:
 - **Shape beats frequency.** Frequency without shape is not a pattern. Counting is not understanding. A recurring correction with the same shape across different topics is a pattern; topic-tag-counting is not.
 - **Self-honesty test:** is there actually a pattern here, or am I performing insight?
 - **Prior observations are data, not confirmed patterns.** Each pass treats earlier pattern reports as unverified input.
