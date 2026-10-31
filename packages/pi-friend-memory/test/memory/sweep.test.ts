@@ -52,15 +52,12 @@ test("sweep response parsing validates candidate actions and targets", () => {
     "merge",
     "drop",
   ]);
-  const innerCandidate = makeCandidate("inner-state", "inner");
   const prompt = buildSweepPrompt(
-    [innerCandidate],
+    [makeCandidate("candidate")],
     [makeCandidate("existing")],
   );
   assert.match(prompt, /Candidates:/);
-  assert.match(prompt, /"type": "inner"/);
-  assert.match(SWEEP_SYSTEM_PROMPT, /Inner memories/);
-  assert.match(SWEEP_SYSTEM_PROMPT, /never merge.*dream or inner/);
+  assert.match(SWEEP_SYSTEM_PROMPT, /never merge.*dream memory/);
 });
 
 test("daily sweep writes preimage, state, log, and promotes candidates", async () => {

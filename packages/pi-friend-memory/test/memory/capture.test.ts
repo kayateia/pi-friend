@@ -81,12 +81,6 @@ test("capture response parsing accepts fenced JSON and filters quarantined types
       "type": "dream",
       "body": "A dream about cups.",
       "speaker": []
-    },
-    {
-      "title": "Inner State",
-      "type": "inner",
-      "body": "A private inward observation.",
-      "speaker": []
     }
   ]
 }

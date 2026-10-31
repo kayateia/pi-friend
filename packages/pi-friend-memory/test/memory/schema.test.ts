@@ -306,7 +306,7 @@ test("location rules enforce staging and superseded semantics", () => {
       }),
     /must have status "candidate"/,
   );
-  for (const type of ["dream", "inner"] as const) {
+  for (const type of ["dream"] as const) {
     const quarantinedCandidate = parseMemoryNode(
       candidateText.replace("type: fact", `type: ${type}`),
       "warm-memory",

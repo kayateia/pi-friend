@@ -38,7 +38,7 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "Use the actual speaker names present in the transcript.",
   "Never use generic labels such as USER, ASSISTANT, or system as speaker names.",
   "If a concrete speaker name cannot be determined, omit that candidate.",
-  "Never create dream or inner nodes.",
+  "Never create dream nodes.",
 ].join("\n");
 
 /** Builds the user-facing JSON extraction prompt. */

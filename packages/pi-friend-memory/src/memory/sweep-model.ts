@@ -29,8 +29,7 @@ export const SWEEP_SYSTEM_PROMPT = [
   "Prefer drop for transient, redundant, speculative, or emotionally hollow content.",
   "Preserve concrete relational and emotional content when it is durable.",
   "Use each candidate's type when making decisions.",
-  "Inner memories record the agent's inward-facing state; do not treat them as dreams or externally verified facts.",
-  "Respect type boundaries when merging: never merge ordinary candidate content into a dream or inner memory.",
+  "Respect type boundaries when merging: never merge ordinary candidate content into a dream memory.",
   "Return only strict JSON.",
 ].join("\n");
 

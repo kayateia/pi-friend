@@ -18,7 +18,6 @@ import {
 /** Approved semantic categories for memory nodes. */
 export const MEMORY_TYPES = [
   "dream",
-  "inner",
   "fact",
   "preference",
   "event",
@@ -29,11 +28,11 @@ export const MEMORY_TYPES = [
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 
 /**
- * Returns true for synthesized or inward-facing memories that must not enter
- * factual RAG, automated capture, or dream-source selection as ordinary canon.
+ * Returns true for synthesized memories that must not enter factual RAG,
+ * automated capture, or dream-source selection as ordinary canon.
  */
 export function isQuarantinedMemoryType(type: MemoryType): boolean {
-  return type === "dream" || type === "inner";
+  return type === "dream";
 }
 
 /** Lifecycle states for memory nodes. */

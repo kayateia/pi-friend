@@ -25,7 +25,6 @@ export async function ensureMemoryLayout(paths: MemoryPaths): Promise<void> {
     await ensureDirectory(directory);
   }
 
-  await ensureFile(paths.topOfMind);
   await ensureFile(paths.accessLog);
 }
 
