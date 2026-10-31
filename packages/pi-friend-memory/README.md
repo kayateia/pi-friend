@@ -51,6 +51,7 @@ memory:
   auto_capture:
     enabled: true
     every_turns: 5
+    idle_timeout: 600
     max_candidates: 3
     # model: openrouter/google/gemini-2.5-flash
     # prompt: |
@@ -69,6 +70,8 @@ memory:
     # model: openrouter/google/gemini-2.5-flash
     # prompt: |
     #   Replacement system prompt for dream selection and writing.
+  embeddings:
+    model: openrouter/openai/text-embedding-3-small
 ```
 
 A missing config uses the default. Malformed configuration is reported and
@@ -202,6 +205,11 @@ model request reviews only the transcript entries added since the prior
 successful capture. The prompt treats conversation content as observed data,
 requires concrete speaker attribution, and allows only active memory types.
 
+Capture is also debounced from the last settled run using
+`auto_capture.idle_timeout` seconds, default 600. A new settled run resets the
+timer. Expiry triggers only while no agent run is active; shutdown cancels a
+pending timer.
+
 Candidates are written to `staging/` with `status: candidate` and are excluded
 from RAG. Exact duplicates of canonical or staged memories are skipped.
 Promotion uses the semantic index to detect near-duplicates, merging close
@@ -249,12 +257,6 @@ links, and `emotional_flavor: dreamlike`. They are permanently excluded from
 default RAG and can never be promoted as factual memories by automated
 processes.
 
-`type: inner` records inward-facing state or reflection. Inner memories are
-canonical and searchable, but follow the same quarantine rules as dreams:
-they are excluded from factual RAG, automated capture, dream sources, and
-automated merge targets. The sweep model receives each node's type and is
-instructed to preserve the boundary between inner and ordinary memory.
-
 ## Semantic search
 
 The `index/` directory includes a disposable `sqlite-vec` backend backed by
@@ -263,9 +265,10 @@ cosine search, clearing, and rebuild against a declared embedding model and
 dimension count.
 
 Semantic mode uses Pi's stored OpenRouter credential, falling back to
-`OPENROUTER_API_KEY`, and embeds with `openai/text-embedding-3-small` at 1,536
-dimensions. Markdown is synchronized lazily on semantic search; unchanged
-content hashes do not make repeat embedding calls.
+`OPENROUTER_API_KEY`. `memory.embeddings.model` defaults to
+`openrouter/openai/text-embedding-3-small` at 1,536 dimensions. Markdown is
+synchronized lazily on semantic search; unchanged content hashes do not make
+repeat embedding calls.
 
 Markdown longer than `memory.vector.chunk_size` is embedded as overlapping
 chunks of at most that many characters. The default is 4,000 and the accepted

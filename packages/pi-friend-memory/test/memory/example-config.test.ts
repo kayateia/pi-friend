@@ -29,6 +29,7 @@ test("the example configuration matches supported defaults", async () => {
   assert.equal(config.injection.position, -1);
   assert.equal(config.injection.mode, "hybrid");
   assert.equal(config.autoCapture.everyTurns, 5);
+  assert.equal(config.autoCapture.idleTimeout, 600);
   assert.equal(config.autoCapture.prompt, CAPTURE_SYSTEM_PROMPT);
   assert.equal(config.sweep.tombstoneGraceDays, 30);
   assert.equal(config.sweep.minGuardedBatchSize, 10);
@@ -37,4 +38,8 @@ test("the example configuration matches supported defaults", async () => {
   assert.equal(config.dreaming.maxNodes, 4);
   assert.equal(config.dreaming.prompt, DREAM_SYSTEM_PROMPT);
   assert.equal(config.vector.chunkSize, 4_000);
+  assert.equal(
+    config.embeddings.model,
+    "openrouter/openai/text-embedding-3-small",
+  );
 });

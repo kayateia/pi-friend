@@ -45,6 +45,7 @@ test("missing configuration uses the default memory root", async () => {
     assert.deepEqual(config.autoCapture, {
       enabled: true,
       everyTurns: 5,
+      idleTimeout: 600,
       maxCandidates: 3,
     });
     assert.deepEqual(config.sweep, {
@@ -59,6 +60,9 @@ test("missing configuration uses the default memory root", async () => {
     });
     assert.deepEqual(config.vector, {
       chunkSize: 4_000,
+    });
+    assert.deepEqual(config.embeddings, {
+      model: "openrouter/openai/text-embedding-3-small",
     });
   });
 });
@@ -256,6 +260,7 @@ test("auto-capture settings are parsed and validated", () => {
       "  auto_capture:",
       "    enabled: false",
       "    every_turns: 2",
+      "    idle_timeout: 120",
       "    max_candidates: 4",
       "    model: openrouter/google/gemini-2.5-flash",
       "    prompt: |",
@@ -267,6 +272,7 @@ test("auto-capture settings are parsed and validated", () => {
   assert.deepEqual(config.autoCapture, {
     enabled: false,
     everyTurns: 2,
+    idleTimeout: 120,
     maxCandidates: 4,
     model: "openrouter/google/gemini-2.5-flash",
     prompt: "Custom capture prompt.",
@@ -277,6 +283,7 @@ test("invalid auto-capture settings fail closed", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
   for (const source of [
     "memory:\n  auto_capture:\n    every_turns: 0\n",
+    "memory:\n  auto_capture:\n    idle_timeout: 0\n",
     "memory:\n  auto_capture:\n    max_candidates: 0\n",
     "memory:\n  auto_capture:\n    model: nope\n",
     'memory:\n  auto_capture:\n    prompt: "  "\n',
@@ -381,6 +388,26 @@ test("dreaming settings are parsed and validated", () => {
     () =>
       parseMemoryConfig(
         'memory:\n  dreaming:\n    prompt: "  "\n',
+        configPath,
+      ),
+    MemoryConfigError,
+  );
+});
+
+test("embedding model is configurable and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const config = parseMemoryConfig(
+    "memory:\n  embeddings:\n    model: openrouter/openai/text-embedding-3-large\n",
+    configPath,
+  );
+  assert.equal(
+    config.embeddings.model,
+    "openrouter/openai/text-embedding-3-large",
+  );
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        "memory:\n  embeddings:\n    model: invalid\n",
         configPath,
       ),
     MemoryConfigError,
