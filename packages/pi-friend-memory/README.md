@@ -24,7 +24,6 @@ The default tree is:
 
 ```text
 ~/.pi/agent/pi-friend/memory/
-├── MEMORY.md
 ├── nodes/
 │   └── superseded/
 ├── staging/
@@ -215,10 +214,11 @@ Capture is also debounced from the last settled run using
 timer. Expiry triggers only while no agent run is active; shutdown cancels a
 pending timer.
 
-Candidates are written to `staging/` with `status: candidate` and are excluded
-from RAG. Exact duplicates of canonical or staged memories are skipped.
-Promotion uses the semantic index to detect near-duplicates, merging close
-matches while preserving links, tags, speakers, and audit history.
+Candidates are written to `staging/` with `status: candidate` and may enter RAG
+with a `Candidate - unverified` marker. Exact duplicates of canonical or staged
+memories are skipped. Promotion uses the semantic index to detect
+near-duplicates, merging close matches while preserving links, tags, speakers,
+and audit history.
 
 ## Daily sweep and decay
 
