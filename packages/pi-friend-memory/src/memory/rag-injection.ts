@@ -29,6 +29,14 @@ export interface LatestUserPrompt {
   prompt: string;
 }
 
+/** Query text assembled from current user and preceding assistant prose. */
+export interface RagQuery {
+  userIndex: number;
+  userPrompt: string;
+  assistantText?: string;
+  query: string;
+}
+
 /**
  * Returns the latest non-empty user prompt from the visible context.
  *
@@ -49,6 +57,46 @@ export function latestUserPrompt(
     }
   }
   return undefined;
+}
+
+/**
+ * Builds the RAG query from the latest user turn and the most recent visible
+ * assistant prose before it. Thinking blocks, tool calls, and tool results are
+ * deliberately excluded.
+ */
+export function buildRagQuery(
+  messages: RagAgentMessage[],
+): RagQuery | undefined {
+  const latest = latestUserPrompt(messages);
+  if (!latest) {
+    return undefined;
+  }
+
+  let assistantText: string | undefined;
+  for (let index = latest.index - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== "assistant") {
+      continue;
+    }
+    const text = message.content
+      .flatMap((block) => (block.type === "text" ? [block.text] : []))
+      .join("\n")
+      .trim();
+    if (text !== "") {
+      assistantText = text;
+      break;
+    }
+  }
+
+  return {
+    userIndex: latest.index,
+    userPrompt: latest.prompt,
+    ...(assistantText === undefined ? {} : { assistantText }),
+    query:
+      assistantText === undefined
+        ? latest.prompt
+        : `${assistantText}\n\n${latest.prompt}`,
+  };
 }
 
 /** Returns whether a user message contains a previously injected RAG block. */

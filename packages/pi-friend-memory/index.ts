@@ -39,9 +39,9 @@ import {
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
 import {
+  buildRagQuery,
   containsRagContext,
   injectRagContext,
-  latestUserPrompt,
   ragBlockForDelivery,
 } from "./src/memory/rag-injection.ts";
 import { runDailySweep } from "./src/memory/sweep.ts";
@@ -278,26 +278,31 @@ export default async function registerPiFriend(
       return;
     }
 
-    const latest = latestUserPrompt(event.messages);
-    if (!latest) {
+    const ragQuery = buildRagQuery(event.messages);
+    if (!ragQuery) {
       return;
     }
 
     const sessionId = ctx.sessionManager.getSessionId();
     let state = ragSessions.get(sessionId);
-    if (state?.userIndex !== latest.index || state.query !== latest.prompt) {
+    if (
+      state?.userIndex !== ragQuery.userIndex ||
+      state.query !== ragQuery.query
+    ) {
       const service = memoryService;
       state = {
-        userIndex: latest.index,
-        query: latest.prompt,
+        userIndex: ragQuery.userIndex,
+        query: ragQuery.query,
         context: buildRagContext(
           service,
-          latest.prompt,
+          ragQuery.query,
           injectionConfig,
         )
           .then((rag) => {
             debugRag("retrieved", {
-              query: latest.prompt,
+              query: ragQuery.query,
+              userPromptChars: ragQuery.userPrompt.length,
+              assistantTextChars: ragQuery.assistantText?.length ?? 0,
               contextChars: rag.text.length,
               ...rag.diagnostics,
             });

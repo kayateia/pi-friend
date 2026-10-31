@@ -124,6 +124,11 @@ require every word from a conversational sentence to appear in one memory.
 Semantic candidates use nearest-neighbor ranking without a minimum similarity
 threshold, then pass the same active-node and quarantine filters.
 
+The query also includes the most recent visible assistant chat prose before the
+current user message. Thinking blocks, tool calls, and tool results are ignored.
+Staged candidates are eligible for RAG and always begin with
+`Candidate - unverified`; ordinary documents remain tool-search-only.
+
 When `PI_FRIEND_DEBUG_HOOKS` is enabled and retrieval selects no nodes, the
 extension still injects an empty `<pi-friend-memory></pi-friend-memory>` block.
 This makes request-context plumbing visible in traces without requiring test

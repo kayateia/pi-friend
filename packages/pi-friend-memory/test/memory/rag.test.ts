@@ -219,3 +219,39 @@ test("RAG ranks active nodes without ordinary documents crowding them out", asyn
     assert.equal(context.diagnostics.selectedNodeCount, 1);
   });
 });
+
+test("RAG injects staged candidates with an unverified marker", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    await repository.write(
+      {
+        ...makeNode({
+          slug: "staged-lantern",
+          title: "Staged Lantern",
+          body: "The lantern might belong beside the stairs.",
+          decayWeight: 1,
+          status: "candidate",
+        }),
+      },
+      "staging",
+    );
+    const service = new MemoryNodeService(repository);
+    const context = await buildRagContext(
+      service,
+      "lantern",
+      {
+        ...defaultRagInjectionConfig(),
+        mode: "keyword",
+        limit: 5,
+      },
+    );
+
+    assert.equal(context.count, 1);
+    assert.match(context.text, /^Candidate - unverified$/mu);
+    assert.match(context.text, /### Staged Lantern/);
+    assert.match(context.text, /staging\/staged-lantern\.md/);
+  });
+});

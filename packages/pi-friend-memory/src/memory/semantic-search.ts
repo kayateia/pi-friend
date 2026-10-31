@@ -87,7 +87,20 @@ export function searchSemanticVectors(
     if (options.kind !== undefined && file.kind !== options.kind) {
       continue;
     }
+    if (
+      options.kinds !== undefined &&
+      !options.kinds.includes(file.kind)
+    ) {
+      continue;
+    }
     if (options.status !== undefined && file.status !== options.status) {
+      continue;
+    }
+    if (
+      options.statuses !== undefined &&
+      (file.status === undefined ||
+        !options.statuses.includes(file.status))
+    ) {
       continue;
     }
 

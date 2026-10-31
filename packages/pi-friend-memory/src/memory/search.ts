@@ -7,6 +7,7 @@
  */
 
 import type { IndexedMarkdownFile } from "./indexer.ts";
+import type { MemoryFileKind } from "./paths.ts";
 import type {
   MemoryStatus,
   MemoryType,
@@ -21,7 +22,9 @@ export interface MemorySearchOptions {
   mode?: MemorySearchMode;
   type?: MemoryType;
   kind?: IndexedMarkdownFile["kind"];
+  kinds?: readonly MemoryFileKind[];
   status?: MemoryStatus;
+  statuses?: readonly MemoryStatus[];
   limit?: number;
   /** Minimum meaningful token overlap when no phrase match occurs. */
   minTokenMatches?: number;
@@ -81,7 +84,20 @@ export function searchIndexedFiles(
     if (options.kind !== undefined && file.kind !== options.kind) {
       continue;
     }
+    if (
+      options.kinds !== undefined &&
+      !options.kinds.includes(file.kind)
+    ) {
+      continue;
+    }
     if (options.status !== undefined && file.status !== options.status) {
+      continue;
+    }
+    if (
+      options.statuses !== undefined &&
+      (file.status === undefined ||
+        !options.statuses.includes(file.status))
+    ) {
       continue;
     }
 
