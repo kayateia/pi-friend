@@ -7,10 +7,11 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { parsePromptConfig, PromptConfigError } from "../src/config.ts";
 import { resolvePromptConfig } from "../src/prompt-files.ts";
 
@@ -90,4 +91,19 @@ test("missing prompt files produce a contextual error", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("the packaged prompt example parses and resolves", async () => {
+  const examplePath = fileURLToPath(
+    new URL("../pi-friend-prompt.example.yml", import.meta.url),
+  );
+  const config = parsePromptConfig(
+    await readFile(examplePath, "utf8"),
+    examplePath,
+  );
+  const resolved = await resolvePromptConfig(config);
+
+  assert.match(resolved.custom ?? "", /You are Lime/);
+  assert.match(resolved.addendum ?? "", /direct, warm, concrete/);
+  assert.equal(resolved.replacements[0]?.action, "append");
 });
