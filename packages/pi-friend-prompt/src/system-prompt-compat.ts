@@ -45,7 +45,13 @@ let apiPromise: Promise<SystemPromptApi> | undefined;
  * fails. The absolute file URL is isolated here and validated at runtime.
  */
 export function loadSystemPromptApi(): Promise<SystemPromptApi> {
-  apiPromise ??= loadUncached();
+  if (apiPromise === undefined) {
+    apiPromise = loadUncached().catch((error: unknown) => {
+      // A transient load failure must not poison every later request.
+      apiPromise = undefined;
+      throw error;
+    });
+  }
   return apiPromise;
 }
 
