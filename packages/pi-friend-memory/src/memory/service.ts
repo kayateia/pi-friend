@@ -8,11 +8,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import type {
-  MemorySpeaker,
-  MemoryType,
-  ParsedMemoryNode,
-} from "./schema.ts";
+import type { MemorySpeaker, MemoryType, ParsedMemoryNode } from "./schema.ts";
 import {
   isQuarantinedMemoryType,
   parseMemoryNode,
@@ -20,19 +16,24 @@ import {
 } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { appendAuditEntry } from "./audit.ts";
+
+/**
+ * Process-wide mutation queues keyed by the resolved memory root.
+ *
+ * pi-web-ui loads a separate extension runtime for each conversation. An
+ * instance-local queue prevents races only within one conversation; multiple
+ * conversations can still allocate the same slug or interleave sweep writes.
+ * Sharing the queue by canonical root preserves operation-level ordering across
+ * all memory services in this process.
+ */
+const mutationQueues = new Map<string, Promise<void>>();
 import type { NodeRecoveryRecord } from "./recovery.ts";
-import {
-  parseRecoveryRecord,
-  RecoveryRecordError,
-} from "./recovery.ts";
+import { parseRecoveryRecord, RecoveryRecordError } from "./recovery.ts";
 import { buildMemoryDocumentIndex } from "./indexer.ts";
 import type { IndexedMarkdownFile } from "./indexer.ts";
 import { searchHybrid } from "./hybrid-search.ts";
 import type { EmbeddingProvider } from "./embedding.ts";
-import type {
-  MemorySearchOptions,
-  MemorySearchResult,
-} from "./search.ts";
+import type { MemorySearchOptions, MemorySearchResult } from "./search.ts";
 import { searchIndexedFiles } from "./search.ts";
 import { searchSemantically } from "./semantic-search.ts";
 import type { VectorIndex } from "./vector-index.ts";
@@ -43,14 +44,8 @@ import {
   buildIndexPathFiles,
   loadImportedIndexedFiles,
 } from "./external-index.ts";
-import {
-  computeDecayUpdates,
-  type DecayUpdate,
-} from "./decay.ts";
-import type {
-  MemoryNodeArea,
-  MemoryNodeRepository,
-} from "./repository.ts";
+import { computeDecayUpdates, type DecayUpdate } from "./decay.ts";
+import type { MemoryNodeArea, MemoryNodeRepository } from "./repository.ts";
 
 /** Input accepted when creating a new canonical memory node. */
 export interface MemoryAddInput {
@@ -161,7 +156,6 @@ export class MemoryNodeService {
   private readonly now: () => Date;
   private readonly semantic: SemanticSearchDependencies | undefined;
   private readonly lockContext = new AsyncLocalStorage<boolean>();
-  private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(
     repository: MemoryNodeRepository,
@@ -193,9 +187,7 @@ export class MemoryNodeService {
    * calls. Nested service calls made by the operation are re-entrant.
    */
   async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
-    return this.runSerialized(() =>
-      this.lockContext.run(true, operation),
-    );
+    return this.runSerialized(() => this.lockContext.run(true, operation));
   }
 
   /** Archives superseded tombstones whose grace period has elapsed. */
@@ -214,8 +206,7 @@ export class MemoryNodeService {
       const threshold = now.getTime() - graceDays * 24 * 60 * 60 * 1_000;
 
       for (const node of tombstones) {
-        const timestamp =
-          node.frontMatter.edited ?? node.frontMatter.created;
+        const timestamp = node.frontMatter.edited ?? node.frontMatter.created;
         const parsed = Date.parse(timestamp);
         if (!Number.isFinite(parsed) || parsed > threshold) {
           retained += 1;
@@ -269,8 +260,7 @@ export class MemoryNodeService {
       });
       const timestamp = this.now().toISOString();
       const sourceLines = sources.map(
-        (node) =>
-          `- ${node.frontMatter.title} (nodes/${node.slug}.md)`,
+        (node) => `- ${node.frontMatter.title} (nodes/${node.slug}.md)`,
       );
       const seeAlso = sources.map((node) => {
         const keywords =
@@ -312,9 +302,7 @@ export class MemoryNodeService {
           supersedes: [],
           superseded_by: "",
           links: slugs,
-          source:
-            input.source ??
-            `dream; sources: ${slugs.join(", ")}`,
+          source: input.source ?? `dream; sources: ${slugs.join(", ")}`,
         },
       };
       await this.repository.write(dream, "canonical");
@@ -331,9 +319,7 @@ export class MemoryNodeService {
   }
 
   /** Searches all indexed Markdown files and records returned tool hits. */
-  async search(
-    options: MemorySearchOptions,
-  ): Promise<MemorySearchResult[]> {
+  async search(options: MemorySearchOptions): Promise<MemorySearchResult[]> {
     if (options.query.trim() === "") {
       throw new MemoryServiceError("Search query must not be empty.");
     }
@@ -495,10 +481,7 @@ export class MemoryNodeService {
       for (const area of ["canonical", "staging"] as const) {
         const existing = (await this.repository.list(area)).find(
           (node) =>
-            memorySignature(
-              node.frontMatter.title,
-              node.body,
-            ) === signature,
+            memorySignature(node.frontMatter.title, node.body) === signature,
         );
         if (existing) {
           return { node: existing, created: false };
@@ -603,10 +586,7 @@ export class MemoryNodeService {
   }
 
   /** Archives one dropped staging candidate under the sweep artifacts. */
-  async archiveCandidate(
-    slug: string,
-    sweepId: string,
-  ): Promise<string> {
+  async archiveCandidate(slug: string, sweepId: string): Promise<string> {
     return this.runSerialized(async () => {
       const candidate = await this.repository.read(slug, "staging");
       if (candidate === null) {
@@ -625,14 +605,13 @@ export class MemoryNodeService {
   }
 
   /** Updates editable node fields while preserving creation and usage state. */
-  async edit(
-    slug: string,
-    input: MemoryEditInput,
-  ): Promise<ParsedMemoryNode> {
+  async edit(slug: string, input: MemoryEditInput): Promise<ParsedMemoryNode> {
     return this.runSerialized(async () => {
       const node = await this.repository.read(slug);
       if (node === null) {
-        throw new MemoryServiceError(`No canonical memory found for "${slug}".`);
+        throw new MemoryServiceError(
+          `No canonical memory found for "${slug}".`,
+        );
       }
 
       const hasEdit = [
@@ -683,9 +662,7 @@ export class MemoryNodeService {
       body = appendAuditEntry(
         body,
         timestamp,
-        input.reason
-          ? `memory_edit: ${input.reason}`
-          : "memory_edit",
+        input.reason ? `memory_edit: ${input.reason}` : "memory_edit",
       );
 
       const updated: ParsedMemoryNode = {
@@ -752,7 +729,9 @@ export class MemoryNodeService {
 
       const timestamp = this.now().toISOString();
       const recoveryId = randomUUID();
-      const originalText = await this.repository.store.readNodeText(target.slug);
+      const originalText = await this.repository.store.readNodeText(
+        target.slug,
+      );
       const originalPath = `nodes/${target.slug}.md`;
       const tombstonePath = `nodes/superseded/${target.slug}.md`;
       const recoveryRecord: NodeRecoveryRecord = {
@@ -828,7 +807,10 @@ export class MemoryNodeService {
       if (canonical !== null) {
         if (canonical.body.includes(`memory_restore: recovery ${recoveryId}`)) {
           await this.removeTombstoneIfPresent(record);
-          await this.markRestored(record, canonical.frontMatter.edited ?? this.now().toISOString());
+          await this.markRestored(
+            record,
+            canonical.frontMatter.edited ?? this.now().toISOString(),
+          );
           return {
             recoveryId,
             node: canonical,
@@ -842,14 +824,10 @@ export class MemoryNodeService {
       }
 
       const timestamp = this.now().toISOString();
-      const original = parseMemoryNode(
-        record.originalText,
-        record.slug,
-        {
-          kind: "node",
-          relativePath: record.originalPath,
-        },
-      );
+      const original = parseMemoryNode(record.originalText, record.slug, {
+        kind: "node",
+        relativePath: record.originalPath,
+      });
       const restored = cloneNode(original);
       restored.frontMatter.edited = timestamp;
       restored.body = appendAuditEntry(
@@ -876,16 +854,21 @@ export class MemoryNodeService {
       return operation();
     }
 
-    const previous = this.mutationQueue;
+    const queueKey = this.repository.store.root;
+    const previous = mutationQueues.get(queueKey) ?? Promise.resolve();
     let release: () => void = () => {};
-    this.mutationQueue = new Promise<void>((resolve) => {
+    const next = new Promise<void>((resolve) => {
       release = resolve;
     });
+    mutationQueues.set(queueKey, next);
     await previous;
     try {
       return await operation();
     } finally {
       release();
+      if (mutationQueues.get(queueKey) === next) {
+        mutationQueues.delete(queueKey);
+      }
     }
   }
 
@@ -895,7 +878,9 @@ export class MemoryNodeService {
     if (requested) {
       const slug = validateSlug(requested);
       if (await this.slugExists(slug)) {
-        throw new MemoryServiceError(`A memory named "${slug}" already exists.`);
+        throw new MemoryServiceError(
+          `A memory named "${slug}" already exists.`,
+        );
       }
       return slug;
     }
@@ -907,16 +892,16 @@ export class MemoryNodeService {
 
     for (let suffix = 2; suffix < 10_000; suffix += 1) {
       const ending = `-${suffix}`;
-      const prefix = base
-        .slice(0, 120 - ending.length)
-        .replace(/-+$/g, "");
+      const prefix = base.slice(0, 120 - ending.length).replace(/-+$/g, "");
       const candidate = `${prefix}${ending}`;
       if (!(await this.slugExists(candidate))) {
         return candidate;
       }
     }
 
-    throw new MemoryServiceError(`Could not allocate a slug for "${input.title}".`);
+    throw new MemoryServiceError(
+      `Could not allocate a slug for "${input.title}".`,
+    );
   }
 
   /** Checks all lifecycle areas before considering a slug available. */
@@ -1009,10 +994,9 @@ export class MemoryNodeService {
     try {
       source = await this.repository.store.readRecoveryRecord(recoveryId);
     } catch (error) {
-      throw new MemoryServiceError(
-        `Invalid recovery ID "${recoveryId}".`,
-        { cause: error },
-      );
+      throw new MemoryServiceError(`Invalid recovery ID "${recoveryId}".`, {
+        cause: error,
+      });
     }
 
     if (source === null) {
@@ -1093,9 +1077,9 @@ function mergeCandidate(
   const candidateBody = candidate.body.trim();
   if (
     candidateBody !== "" &&
-    !merged.body.replace(/\s+/gu, " ").includes(
-      candidateBody.replace(/\s+/gu, " "),
-    )
+    !merged.body
+      .replace(/\s+/gu, " ")
+      .includes(candidateBody.replace(/\s+/gu, " "))
   ) {
     merged.body = `${merged.body.replace(/\s+$/u, "")}\n\n${candidateBody}\n`;
   }

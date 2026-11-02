@@ -90,10 +90,7 @@ test("explicit slug collisions fail instead of overwriting", async () => {
     };
 
     await service.add(input);
-    await assert.rejects(
-      () => service.add(input),
-      MemoryServiceError,
-    );
+    await assert.rejects(() => service.add(input), MemoryServiceError);
   });
 });
 
@@ -144,7 +141,10 @@ test("edit preserves creation state and appends an audit entry", async () => {
     assert.equal(edited.frontMatter.created, FIXED_TIME.toISOString());
     assert.equal(edited.frontMatter.edited, currentTime.toISOString());
     assert.equal(edited.frontMatter.use_count, created.frontMatter.use_count);
-    assert.equal(edited.frontMatter.decay_weight, created.frontMatter.decay_weight);
+    assert.equal(
+      edited.frontMatter.decay_weight,
+      created.frontMatter.decay_weight,
+    );
     assert.equal(edited.frontMatter.title, "Updated Title");
     assert.deepEqual(edited.frontMatter.tags, ["new"]);
     assert.match(edited.body, /Updated body\./);
@@ -210,10 +210,7 @@ test("delete writes recovery first, moves to superseded, and audits the tombston
     assert.equal(record.slug, original.slug);
     assert.match(record.originalText, /This fact will be deleted\./);
     assert.equal(record.originalPath, `nodes/${original.slug}.md`);
-    assert.equal(
-      record.tombstonePath,
-      `nodes/superseded/${original.slug}.md`,
-    );
+    assert.equal(record.tombstonePath, `nodes/superseded/${original.slug}.md`);
   });
 });
 
@@ -349,6 +346,41 @@ test("exclusive operations are re-entrant and block other mutations", async () =
     release.resolve();
     assert.equal(await exclusive, "inside-exclusive");
     assert.equal((await external).slug, "after-exclusive");
+  });
+});
+
+test("separate service instances sharing a root serialize mutations", async () => {
+  await withTempDir(async (agentDir) => {
+    const first = await makeService(agentDir);
+    const second = await makeService(agentDir);
+    const entered = deferred();
+    const release = deferred();
+
+    const exclusive = first.runExclusive(async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+
+    let secondFinished = false;
+    const write = second
+      .add({
+        title: "Cross Conversation",
+        type: "fact",
+        body: "All memory services for one root share ordering.",
+        speaker: [{ name: "Aisling", confident: true }],
+      })
+      .then((node) => {
+        secondFinished = true;
+        return node;
+      });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(secondFinished, false);
+
+    release.resolve();
+    await exclusive;
+    assert.equal((await write).slug, "cross-conversation");
   });
 });
 
