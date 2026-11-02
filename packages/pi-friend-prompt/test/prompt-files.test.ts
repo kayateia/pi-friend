@@ -23,18 +23,13 @@ test("prompt files resolve in declared order relative to the config", async () =
     const config = parsePromptConfig(
       [
         "prompt:",
-        "  custom:",
+        "  - section: preamble",
+        "    action: replace",
         "    text: Inline text.",
         "    files: [first.md, second.md]",
-        "  addendum:",
+        "  - section: addendum",
+        "    action: append",
         "    files: [first.md]",
-        "  sections:",
-        "    project_context:",
-        "      files: [second.md]",
-        "  replacements:",
-        "    - section: addendum",
-        "      action: append",
-        "      replacement_file: first.md",
       ].join("\n"),
       path.join(directory, "pi-friend.yml"),
     );
@@ -42,12 +37,10 @@ test("prompt files resolve in declared order relative to the config", async () =
     const resolved = await resolvePromptConfig(config);
 
     assert.equal(
-      resolved.custom,
+      resolved.changes[0]?.sourceText,
       "Inline text.\n\nFirst file.\n\nSecond file.",
     );
-    assert.equal(resolved.addendum, "First file.");
-    assert.equal(resolved.sections.project_context, "Second file.");
-    assert.equal(resolved.replacements[0]?.replacementText, "First file.\n");
+    assert.equal(resolved.changes[1]?.sourceText, "First file.");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -59,14 +52,25 @@ test("prompt files are reread for every request", async () => {
     const promptPath = path.join(directory, "persona.md");
     await writeFile(promptPath, "First version.", "utf8");
     const config = parsePromptConfig(
-      "prompt:\n  custom:\n    files: [persona.md]\n",
+      [
+        "prompt:",
+        "  - section: preamble",
+        "    action: replace",
+        "    files: [persona.md]",
+      ].join("\n"),
       path.join(directory, "pi-friend.yml"),
     );
 
-    assert.equal((await resolvePromptConfig(config)).custom, "First version.");
+    assert.equal(
+      (await resolvePromptConfig(config)).changes[0]?.sourceText,
+      "First version.",
+    );
 
     await writeFile(promptPath, "Second version.", "utf8");
-    assert.equal((await resolvePromptConfig(config)).custom, "Second version.");
+    assert.equal(
+      (await resolvePromptConfig(config)).changes[0]?.sourceText,
+      "Second version.",
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -77,7 +81,12 @@ test("missing prompt files produce a contextual error", async () => {
   try {
     const configPath = path.join(directory, "pi-friend.yml");
     const config = parsePromptConfig(
-      "prompt:\n  addendum:\n    files: [missing.md]\n",
+      [
+        "prompt:",
+        "  - section: addendum",
+        "    action: replace",
+        "    files: [missing.md]",
+      ].join("\n"),
       configPath,
     );
 
@@ -85,7 +94,7 @@ test("missing prompt files produce a contextual error", async () => {
       resolvePromptConfig(config),
       (error: unknown) =>
         error instanceof PromptConfigError &&
-        error.message.includes("prompt.addendum.files[0]") &&
+        error.message.includes("prompt[0].files[0]") &&
         error.message.includes(path.join(directory, "missing.md")),
     );
   } finally {
@@ -103,8 +112,8 @@ test("the packaged prompt example parses and resolves", async () => {
   );
   const resolved = await resolvePromptConfig(config);
 
-  assert.match(resolved.custom ?? "", /You are Lime/);
-  assert.match(resolved.addendum ?? "", /direct, warm, concrete/);
-  assert.equal(resolved.replacements[0]?.action, "prepend");
-  assert.equal(resolved.replacements[1]?.action, "append");
+  assert.ok(resolved.changes.length >= 5);
+  assert.equal(resolved.changes[0]?.section, "preamble");
+  assert.equal(resolved.changes[0]?.action, "replace");
+  assert.match(resolved.changes[0]?.sourceText ?? "", /You are Lime/);
 });

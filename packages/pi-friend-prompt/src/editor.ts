@@ -11,8 +11,8 @@ import type {
   NormalizedBuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 import type {
+  ResolvedPromptChange,
   ResolvedPromptConfig,
-  ResolvedPromptReplacement,
 } from "./prompt-files.ts";
 
 type SectionBuilder = (
@@ -26,10 +26,10 @@ export interface PromptEditResult {
 }
 
 /**
- * Applies resolved preamble, addendum, section, and replacement edits.
+ * Applies ordered prompt changes to a draft request.
  *
- * All work happens on a draft so a malformed replacement cannot leave the
- * request with a partially edited system prompt.
+ * Every change sees the output of all earlier changes, including repeated
+ * changes to the same section. A failure leaves the original options intact.
  */
 export function applyPromptConfig(
   options: NormalizedBuildSystemPromptOptions,
@@ -44,31 +44,15 @@ export function applyPromptConfig(
     ...options,
     customPrompt: undefined,
   });
-  let customNarrative = config.custom;
-  let addendumNarrative = config.addendum;
+  let customNarrative: string | undefined;
+  let addendumNarrative: string | undefined;
 
-  if (config.custom !== undefined) {
-    ensureGeneratedSections(draft, stock);
-    draft.customPrompt = config.custom;
-  }
-  if (config.addendum !== undefined) {
-    draft.appendSystemPrompt = config.addendum;
-  }
-  Object.assign(draft.sections, config.sections);
-
-  for (const replacement of config.replacements) {
-    const replacementNarrative = applyReplacement(
-      draft,
-      replacement,
-      buildSections,
-      stock,
-    );
-    if (replacementNarrative !== undefined) {
-      if (replacement.section === "preamble") {
-        customNarrative = replacementNarrative;
-      } else if (replacement.section === "addendum") {
-        addendumNarrative = replacementNarrative;
-      }
+  for (const change of config.changes) {
+    const narrative = applyChange(draft, change, buildSections, stock);
+    if (change.section === "preamble") {
+      customNarrative = narrative;
+    } else if (change.section === "addendum") {
+      addendumNarrative = narrative;
     }
   }
 
@@ -92,9 +76,7 @@ export function applyPromptConfig(
   };
 }
 
-/**
- * Backward-compatible helper for replacing only the prompt preamble.
- */
+/** Backward-compatible helper for replacing only the prompt preamble. */
 export function applyCustomPrompt(
   options: NormalizedBuildSystemPromptOptions,
   customPrompt: string,
@@ -107,93 +89,105 @@ export function applyCustomPrompt(
   return applyPromptConfig(
     options,
     {
-      custom: narrative,
-      sections: {},
-      replacements: [],
+      changes: [
+        {
+          section: "preamble",
+          action: "replace",
+          files: [],
+          sourceText: narrative,
+          flags: "",
+        },
+      ],
     },
     buildSections,
   ).changed;
 }
 
-/** Applies one replacement rule to the current rendered section text. */
-function applyReplacement(
+/** Applies one change and returns the resulting preamble or addendum text. */
+function applyChange(
   draft: NormalizedBuildSystemPromptOptions,
-  replacement: ResolvedPromptReplacement,
+  change: ResolvedPromptChange,
   buildSections: SectionBuilder,
   stock: Record<string, string>,
 ): string | undefined {
   const sections = buildSections(draft);
-  const current = readSection(sections, replacement.section);
+  let current = readSection(sections, change.section);
   if (current === undefined) {
-    throw new Error(
-      `Prompt replacement target "${replacement.section}" does not exist.`,
-    );
+    current = initialMissingSection(change);
+    if (current === undefined) {
+      throw new Error(
+        `Prompt section "${change.section}" does not exist. ` +
+          "Use a whole-section replace first to create it.",
+      );
+    }
   }
 
-  const next = replaceSectionText(current, replacement);
-  if (replacement.section === "preamble") {
+  const next = changeText(current, change);
+  if (change.section === "preamble") {
     if (next.trim() === "") {
-      throw new Error("Prompt replacement produced an empty preamble.");
+      throw new Error("Prompt change produced an empty preamble.");
     }
-    ensureGeneratedSections(draft, stock);
+    preserveGeneratedSections(draft, stock);
     draft.customPrompt = next;
     buildSections(draft);
     return next;
-  } else if (replacement.section === "addendum") {
+  }
+  if (change.section === "addendum") {
     draft.appendSystemPrompt = next;
     buildSections(draft);
     return next;
-  } else {
-    if (next.trim() === "") {
-      throw new Error(
-        `Prompt replacement produced an empty "${replacement.section}" section.`,
-      );
-    }
-    draft.sections[replacement.section] = next;
   }
-
-  // Validate the complete edited prompt before the caller commits the draft.
+  if (next.trim() === "") {
+    throw new Error(
+      `Prompt change produced an empty "${change.section}" section.`,
+    );
+  }
+  draft.sections[change.section] = next;
   buildSections(draft);
   return undefined;
 }
 
-/**
- * Applies replacement text to a whole section or each regex match.
- *
- * Regex replacements use JavaScript replacement syntax. Prepend and append
- * preserve each match while placing the new text before or after it.
- */
-function replaceSectionText(
-  current: string,
-  replacement: ResolvedPromptReplacement,
-): string {
-  if (replacement.pattern === undefined) {
-    return combineText(current, replacement.replacementText, replacement.action);
+/** Returns the starting text for a section that is not currently rendered. */
+function initialMissingSection(
+  change: ResolvedPromptChange,
+): string | undefined {
+  if (change.section === "addendum") {
+    return "";
   }
-
-  const expression = new RegExp(replacement.pattern, replacement.flags);
-  const replacementTemplate =
-    replacement.action === "replace"
-      ? replacement.replacementText
-      : replacement.action === "prepend"
-        ? `${replacement.replacementText}$&`
-        : `$&${replacement.replacementText}`;
-  return current.replace(expression, replacementTemplate);
+  if (change.action === "replace" && change.pattern === undefined) {
+    return "";
+  }
+  return undefined;
 }
 
-/** Combines text with a whole section without interpreting replacement tokens. */
-function combineText(
-  current: string,
-  replacement: string,
-  action: ResolvedPromptReplacement["action"],
-): string {
-  if (action === "prepend") {
-    return `${replacement}${current}`;
+/**
+ * Applies source text to a whole section or each regular-expression match.
+ *
+ * Whole-section prepend and append insert a blank line between prose blocks.
+ * Pattern operations use JavaScript replacement syntax directly.
+ */
+function changeText(current: string, change: ResolvedPromptChange): string {
+  if (change.pattern === undefined) {
+    if (change.action === "replace") {
+      return change.sourceText;
+    }
+    if (current === "") {
+      return change.sourceText;
+    }
+    if (change.action === "prepend") {
+      return `${change.sourceText}\n\n${current}`;
+    }
+    return `${current}\n\n${change.sourceText}`;
   }
-  if (action === "append") {
-    return `${current}${replacement}`;
-  }
-  return replacement;
+
+  const expression = new RegExp(change.pattern, change.flags);
+  const replacement =
+    change.action === "replace"
+      ? change.sourceText
+      : change.action === "prepend"
+        ? `${change.sourceText}$&`
+        : `$&${change.sourceText}`;
+  return current.replace(expression, replacement);
 }
 
 /** Reads an unwrapped section by its logical prompt name. */
@@ -212,7 +206,7 @@ function readSection(
  * Keeps generated tool, rule, and documentation sections when a custom
  * preamble would otherwise cause Pi to omit them.
  */
-function ensureGeneratedSections(
+function preserveGeneratedSections(
   draft: NormalizedBuildSystemPromptOptions,
   stock: Record<string, string>,
 ): void {

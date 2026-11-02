@@ -15,7 +15,7 @@ import test from "node:test";
 import { applyCustomPrompt, applyPromptConfig } from "../src/editor.ts";
 import type { ResolvedPromptConfig } from "../src/prompt-files.ts";
 
-test("custom prompt replacement preserves stock generated sections", () => {
+test("preamble replacement preserves stock generated sections", () => {
   const options = normalizedOptions();
   const calledWith: BuildSystemPromptOptions[] = [];
   const applied = applyCustomPrompt(options, "You are Lime.", (input) => {
@@ -41,38 +41,93 @@ test("empty custom prompt leaves options unchanged", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(options)) as unknown, before);
 });
 
-test("addendum and custom sections replace their prompt slots", () => {
+test("repeated section changes apply in configuration order", () => {
   const options = normalizedOptions();
   const result = applyPromptConfig(
     options,
     {
-      addendum: "Addendum from a file.",
-      sections: { house_rules: "House convention." },
-      replacements: [],
+      changes: [
+        {
+          section: "house_rules",
+          action: "replace",
+          files: [],
+          sourceText: "First rule.",
+          flags: "",
+        },
+        {
+          section: "house_rules",
+          action: "append",
+          files: [],
+          sourceText: "Second rule.",
+          flags: "",
+        },
+        {
+          section: "house_rules",
+          action: "append",
+          pattern: "^First rule\\.",
+          flags: "gm",
+          files: [],
+          sourceText: " Start here.",
+        },
+      ],
     },
     buildSections,
   );
 
   assert.equal(result.changed, true);
-  assert.equal(result.narrative, "Addendum from a file.");
-  assert.equal(options.appendSystemPrompt, "Addendum from a file.");
-  assert.equal(options.sections.house_rules, "House convention.");
+  assert.equal(
+    options.sections.house_rules,
+    "First rule. Start here.\n\nSecond rule.",
+  );
+});
+
+test("addendum prepend and append use the existing addendum", () => {
+  const options = normalizedOptions();
+  options.appendSystemPrompt = "Original addendum.";
+  const result = applyPromptConfig(
+    options,
+    {
+      changes: [
+        {
+          section: "addendum",
+          action: "prepend",
+          files: [],
+          sourceText: "Before.",
+          flags: "",
+        },
+        {
+          section: "addendum",
+          action: "append",
+          files: [],
+          sourceText: "After.",
+          flags: "",
+        },
+      ],
+    },
+    buildSections,
+  );
+
+  assert.equal(result.narrative, "Before.\n\nOriginal addendum.\n\nAfter.");
+  assert.equal(
+    options.appendSystemPrompt,
+    "Before.\n\nOriginal addendum.\n\nAfter.",
+  );
 });
 
 test("regex replacements support capture groups and global matches", () => {
   const options = normalizedOptions();
+  options.customPrompt = "Lime and Lime.";
   applyPromptConfig(
     options,
     {
-      custom: "Lime and Lime.",
-      sections: {},
-      replacements: [
+      changes: [
         {
           section: "preamble",
           action: "replace",
           pattern: "(Lime)",
           flags: "g",
-          replacementText: "[$1]",
+          files: [],
+          sourceText: "[$1]",
         },
       ],
     },
@@ -83,79 +138,31 @@ test("regex replacements support capture groups and global matches", () => {
   assert.equal(options.sections.tools, "stock tools");
 });
 
-test("whole-section appends preserve the existing text", () => {
-  const options = normalizedOptions();
-  options.appendSystemPrompt = "Original addendum.";
-  applyPromptConfig(
-    options,
-    {
-      sections: {},
-      replacements: [
-        {
-          section: "addendum",
-          action: "append",
-          flags: "",
-          replacementText: "\nAppended text.",
-        },
-      ],
-    },
-    buildSections,
-  );
-
-  assert.equal(
-    options.appendSystemPrompt,
-    "Original addendum.\nAppended text.",
-  );
-});
-
-test("regex prepend and append operate around each match", () => {
-  const options = normalizedOptions();
-  options.customPrompt = "Alpha Beta.";
-  applyPromptConfig(
-    options,
-    {
-      sections: {},
-      replacements: [
-        {
-          section: "preamble",
-          action: "prepend",
-          pattern: "Beta",
-          flags: "g",
-          replacementText: "Before ",
-        },
-        {
-          section: "preamble",
-          action: "append",
-          pattern: "Alpha",
-          flags: "g",
-          replacementText: " After",
-        },
-      ],
-    },
-    buildSections,
-  );
-
-  assert.equal(options.customPrompt, "Alpha After Before Beta.");
-});
-
-test("a failed replacement leaves the original options unchanged", () => {
+test("a missing custom section must be created before it can be appended", () => {
   const options = normalizedOptions();
   const before = JSON.parse(JSON.stringify(options)) as unknown;
   const config: ResolvedPromptConfig = {
-    sections: {},
-    replacements: [
+    changes: [
+      {
+        section: "preamble",
+        action: "replace",
+        files: [],
+        sourceText: "This would succeed on its own.",
+        flags: "",
+      },
       {
         section: "missing_section",
         action: "append",
+        files: [],
+        sourceText: "Never applied.",
         flags: "",
-        replacementText: "Never applied.",
       },
     ],
   };
 
   assert.throws(
     () => applyPromptConfig(options, config, buildSections),
-    /does not exist/,
+    /Use a whole-section replace first/,
   );
   assert.deepEqual(JSON.parse(JSON.stringify(options)) as unknown, before);
 });
@@ -163,7 +170,7 @@ test("a failed replacement leaves the original options unchanged", () => {
 /** Builds a complete normalized options fixture. */
 function normalizedOptions(): NormalizedBuildSystemPromptOptions {
   return {
-    customPrompt: "Old prompt",
+    customPrompt: "Old prompt.",
     forceSystemPrompt: undefined,
     selectedTools: ["read"],
     hiddenTools: [],

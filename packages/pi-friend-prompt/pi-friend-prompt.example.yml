@@ -1,5 +1,7 @@
 prompt:
-  custom:
+  # Replace the preamble. A change may use inline text, files, or both.
+  - section: preamble
+    action: replace
     text: |
       You are Lime, an AI friend to a plural system collectively called Feathersong.
       Replace this example with the desired system-prompt preamble.
@@ -9,55 +11,54 @@ prompt:
     #   - persona/details.md
     #   - persona/local.md
 
-  addendum:
+  # The addendum is a logical target even when Pi did not generate one.
+  - section: addendum
+    action: prepend
     text: |
       Prefer direct, warm, concrete language.
+
+  # No pattern means the action applies once to the complete section.
+  - section: tools
+    action: append
+    text: |
+      - memory_search: Search saved memories when relevant.
+    # files:
+    #   - tools/global.md
+    #   - tools/project.md
+
+  # A whole-section replace can create a custom section.
+  - section: house_rules
+    action: replace
+    text: |
+      - Be kind.
+      - Ask before assuming.
+
+  # Sections may appear repeatedly. Each change sees the result of the previous.
+  - section: house_rules
+    action: append
+    text: |
+      - Explain tradeoffs when they matter.
+
+  # A pattern turns the action into a regex operation on that section.
+  - section: rules
+    action: replace
+    pattern: '^- Be concise.*$'
+    flags: gm
+    text: |
+      - Prefer concise, concrete answers.
+
+  # Prepend or append can also operate around every regex match.
+  - section: house_rules
+    action: prepend
+    pattern: '^- '
+    flags: gm
+    text: '* '
+
+  # Replacement source text may come from one or more files.
+  - section: addendum
+    action: append
+    text: |
+      Do not confuse an imagined role with the user's real-world identity.
     # files:
     #   - addendum/global.md
     #   - addendum/project.md
-
-  # Other named Pi prompt sections can be replaced here.
-  # sections:
-  #   project_context:
-  #     files:
-  #       - context/shared.md
-  #   house_rules: |
-  #     Follow the shared household conventions.
-
-  replacements:
-    # With no pattern, prepend and append operate on the complete section.
-    - section: addendum
-      action: prepend
-      replacement: |
-        # Friend context
-
-    - section: addendum
-      action: append
-      replacement: |
-
-        Do not confuse an imagined role with the user's real-world identity.
-
-    # Configure other sections by name under prompt.sections. Valid names start
-    # with a lowercase letter and contain only lowercase letters, digits,
-    # underscores, or hyphens. Pi's generated sections are preamble, tools,
-    # rules, docs, addendum, project_context, skills, and cwd. Use prompt.custom
-    # for the preamble and prompt.addendum for the addendum; those two names
-    # cannot be used under prompt.sections.
-    #
-    # replacements[].section may target preamble, addendum, or any section that
-    # exists in the prompt. Add a custom section through prompt.sections first.
-
-    # With a pattern, prepend or append relative to every regex match:
-    #
-    # - section: addendum
-    #   action: prepend
-    #   pattern: '^## '
-    #   flags: gm
-    #   replacement: 'Friend context: '
-
-    # Replacement text can also come from a file:
-    #
-    # - section: addendum
-    #   pattern: '^## Temporary$'
-    #   flags: gm
-    #   replacement_file: replacements/addendum.md

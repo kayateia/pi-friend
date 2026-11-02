@@ -53,7 +53,12 @@ test("prompt build failures warn and retry on every request", async () => {
 
     await writeFile(
       configPath,
-      "prompt:\n  custom: Recovered prompt.\n",
+      [
+        "prompt:",
+        "  - section: preamble",
+        "    action: replace",
+        "    text: Recovered prompt.",
+      ].join("\n"),
       "utf8",
     );
     const recoveredEvent = createEvent();
