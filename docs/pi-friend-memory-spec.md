@@ -146,8 +146,9 @@ catalog and therefore also omits missing files. Changes to the YAML path list
 take effect when the session reloads.
 
 Memory configuration is independent from the prompt extension's
-`pi-friend.yml`. Configurations created before this split placed the `memory`
-section in that shared file and must move it into `pi-friend-memory.yml`.
+`pi-friend-prompt.yml`. Configurations created before this split placed both
+sections in the shared `pi-friend.yml` and must move them into their dedicated
+configuration files.
 
 There is no daily-log tool or `daily/` subtree. Existing directories or
 Markdown files named `daily/` are left untouched and, if present, are treated as

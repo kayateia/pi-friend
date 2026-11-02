@@ -40,21 +40,35 @@ test("actual Pi prompt builder applies addendum and section rewrites", async () 
   applyPromptConfig(
     options,
     {
-      addendum: "Configured addendum.",
-      sections: { house_rules: "House rules." },
-      replacements: [
+      changes: [
+        {
+          section: "addendum",
+          action: "replace",
+          flags: "",
+          files: [],
+          sourceText: "Configured addendum.",
+        },
+        {
+          section: "house_rules",
+          action: "replace",
+          flags: "",
+          files: [],
+          sourceText: "House rules.",
+        },
         {
           section: "addendum",
           action: "append",
           flags: "",
-          replacementText: "\nExtra addendum.",
+          files: [],
+          sourceText: "Extra addendum.",
         },
         {
           section: "rules",
           action: "replace",
           pattern: "^- Be concise.*$",
           flags: "gm",
-          replacementText: "- Stay concise",
+          files: [],
+          sourceText: "- Stay concise",
         },
       ],
     },

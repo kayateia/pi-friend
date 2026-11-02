@@ -81,9 +81,9 @@ A missing config uses the default. Malformed configuration is reported and
 does not fall back to another path. The tree is initialized on `session_start`.
 
 The memory extension reads `pi-friend-memory.yml` independently from the prompt
-extension's `pi-friend.yml`. Existing users of the former combined file should
-move the `memory` section into `pi-friend-memory.yml`; leave the `prompt`
-section in `pi-friend.yml` if the prompt extension is also installed.
+extension's `pi-friend-prompt.yml`. Existing users of the former combined file
+should move the `memory` section into `pi-friend-memory.yml` and the `prompt`
+section into `pi-friend-prompt.yml`.
 
 `memory.index_paths` lists Markdown files and directory trees that should be
 watched and included in search. Leading `~` is expanded, relative paths resolve

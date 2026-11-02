@@ -24,7 +24,7 @@ type TestHandler = (event: unknown, context: unknown) => unknown;
 test("prompt build failures warn and retry on every request", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-run-"));
   const configDirectory = path.join(directory, "pi-friend");
-  const configPath = path.join(configDirectory, "pi-friend.yml");
+  const configPath = path.join(configDirectory, "pi-friend-prompt.yml");
   const previousAgentDirectory = process.env.PI_CODING_AGENT_DIR;
   await mkdir(configDirectory, { recursive: true });
   await writeFile(configPath, "prompt: invalid\n", "utf8");
@@ -53,7 +53,12 @@ test("prompt build failures warn and retry on every request", async () => {
 
     await writeFile(
       configPath,
-      "prompt:\n  custom: Recovered prompt.\n",
+      [
+        "prompt:",
+        "  - section: preamble",
+        "    action: replace",
+        "    text: Recovered prompt.",
+      ].join("\n"),
       "utf8",
     );
     const recoveredEvent = createEvent();

@@ -11,32 +11,23 @@ import * as path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parse } from "yaml";
 
-/** Inline and file-backed text for one system-prompt slot. */
-export interface PromptSource {
+/** How source text is combined with a prompt section. */
+export type PromptAction = "replace" | "prepend" | "append";
+
+/** One ordered change to a system-prompt section. */
+export interface PromptChange {
+  section: string;
+  action: PromptAction;
   text?: string;
   files: string[];
-}
-
-/** How replacement text is combined with its target. */
-export type PromptReplacementAction = "replace" | "prepend" | "append";
-
-/** One request-time edit to an existing system-prompt section. */
-export interface PromptReplacement {
-  section: string;
-  action: PromptReplacementAction;
   pattern?: string;
   flags: string;
-  replacement?: string;
-  replacementFile?: string;
 }
 
 /** Prompt settings extracted from the shared pi-friend YAML file. */
 export interface PromptConfig {
   configPath: string;
-  custom?: PromptSource;
-  addendum?: PromptSource;
-  sections: Record<string, PromptSource>;
-  replacements: PromptReplacement[];
+  changes: PromptChange[];
 }
 
 /** Inputs for alternate Pi agent directories or explicit config paths. */
@@ -53,14 +44,14 @@ export class PromptConfigError extends Error {
   }
 }
 
-/** Returns the shared pi-friend configuration path. */
-export function getSharedConfigPath(
+/** Returns the dedicated pi-friend-prompt configuration path. */
+export function getPromptConfigPath(
   agentDir: string = getAgentDir(),
 ): string {
-  return path.join(agentDir, "pi-friend", "pi-friend.yml");
+  return path.join(agentDir, "pi-friend", "pi-friend-prompt.yml");
 }
 
-/** Parses the `prompt` section while ignoring other extension sections. */
+/** Parses the ordered `prompt` changes while ignoring other sections. */
 export function parsePromptConfig(
   source: string,
   configPath: string,
@@ -85,39 +76,17 @@ export function parsePromptConfig(
   if (prompt === undefined) {
     return emptyPromptConfig(configPath);
   }
-  if (!isRecord(prompt)) {
-    throw new PromptConfigError(`${configPath}: prompt must be a YAML object.`);
+  if (!Array.isArray(prompt)) {
+    throw new PromptConfigError(
+      `${configPath}: prompt must be a YAML list of changes.`,
+    );
   }
-  for (const key of Object.keys(prompt)) {
-    if (
-      key !== "custom" &&
-      key !== "addendum" &&
-      key !== "sections" &&
-      key !== "replacements"
-    ) {
-      throw new PromptConfigError(
-        `${configPath}: unknown prompt field "${key}".`,
-      );
-    }
-  }
-
-  const custom = parseOptionalSource(
-    prompt.custom,
-    `${configPath}: prompt.custom`,
-  );
-  const addendum = parseOptionalSource(
-    prompt.addendum,
-    `${configPath}: prompt.addendum`,
-  );
-  const sections = parseSections(prompt.sections, configPath);
-  const replacements = parseReplacements(prompt.replacements, configPath);
 
   return {
     configPath,
-    ...(custom === undefined ? {} : { custom }),
-    ...(addendum === undefined ? {} : { addendum }),
-    sections,
-    replacements,
+    changes: prompt.map((entry, index) =>
+      parseChange(entry, `${configPath}: prompt[${index}]`),
+    ),
   };
 }
 
@@ -126,7 +95,7 @@ export async function loadPromptConfig(
   options: PromptConfigOptions = {},
 ): Promise<PromptConfig> {
   const configPath =
-    options.configPath ?? getSharedConfigPath(options.agentDir);
+    options.configPath ?? getPromptConfigPath(options.agentDir);
 
   let source: string;
   try {
@@ -145,138 +114,19 @@ export async function loadPromptConfig(
 
 /** Returns true when the configuration can change the system prompt. */
 export function hasPromptEdits(config: PromptConfig): boolean {
-  return (
-    config.custom !== undefined ||
-    config.addendum !== undefined ||
-    Object.keys(config.sections).length > 0 ||
-    config.replacements.length > 0
-  );
+  return config.changes.length > 0;
 }
 
 /** Creates the no-op prompt configuration shape. */
 function emptyPromptConfig(configPath: string): PromptConfig {
   return {
     configPath,
-    sections: {},
-    replacements: [],
+    changes: [],
   };
 }
 
-/** Parses a scalar or object prompt source. */
-function parseOptionalSource(
-  value: unknown,
-  location: string,
-): PromptSource | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value === "string") {
-    const text = value.trim();
-    return text === "" ? undefined : { text, files: [] };
-  }
-  if (!isRecord(value)) {
-    throw new PromptConfigError(
-      `${location} must be a string or an object with text and files.`,
-    );
-  }
-  for (const key of Object.keys(value)) {
-    if (key !== "text" && key !== "files") {
-      throw new PromptConfigError(`${location}: unknown field "${key}".`);
-    }
-  }
-
-  let text: string | undefined;
-  if (value.text !== undefined) {
-    if (typeof value.text !== "string") {
-      throw new PromptConfigError(`${location}.text must be a string.`);
-    }
-    text = value.text.trim();
-    if (text === "") {
-      text = undefined;
-    }
-  }
-
-  const files = parseFileList(value.files, `${location}.files`);
-  if (text === undefined && files.length === 0) {
-    return undefined;
-  }
-  return {
-    ...(text === undefined ? {} : { text }),
-    files,
-  };
-}
-
-/** Parses an ordered list of prompt source files. */
-function parseFileList(value: unknown, location: string): string[] {
-  if (value === undefined) {
-    return [];
-  }
-  if (!Array.isArray(value)) {
-    throw new PromptConfigError(`${location} must be a YAML list.`);
-  }
-  return value.map((entry, index) => {
-    if (typeof entry !== "string" || entry.trim() === "") {
-      throw new PromptConfigError(
-        `${location}[${index}] must be a non-empty string.`,
-      );
-    }
-    return entry.trim();
-  });
-}
-
-/** Parses replacements for generated and custom prompt sections. */
-function parseSections(
-  value: unknown,
-  configPath: string,
-): Record<string, PromptSource> {
-  if (value === undefined) {
-    return {};
-  }
-  if (!isRecord(value)) {
-    throw new PromptConfigError(
-      `${configPath}: prompt.sections must be a YAML object.`,
-    );
-  }
-
-  const sections: Record<string, PromptSource> = {};
-  for (const [name, entry] of Object.entries(value)) {
-    if (!isSectionName(name) || name === "preamble" || name === "addendum") {
-      throw new PromptConfigError(
-        `${configPath}: invalid prompt.sections name "${name}".`,
-      );
-    }
-    const parsed = parseOptionalSource(
-      entry,
-      `${configPath}: prompt.sections.${name}`,
-    );
-    if (parsed !== undefined) {
-      sections[name] = parsed;
-    }
-  }
-  return sections;
-}
-
-/** Parses ordered prompt replacement rules. */
-function parseReplacements(
-  value: unknown,
-  configPath: string,
-): PromptReplacement[] {
-  if (value === undefined) {
-    return [];
-  }
-  if (!Array.isArray(value)) {
-    throw new PromptConfigError(
-      `${configPath}: prompt.replacements must be a YAML list.`,
-    );
-  }
-
-  return value.map((entry, index) =>
-    parseReplacement(entry, `${configPath}: prompt.replacements[${index}]`),
-  );
-}
-
-/** Parses and validates one prompt replacement rule. */
-function parseReplacement(value: unknown, location: string): PromptReplacement {
+/** Parses and validates one ordered prompt change. */
+function parseChange(value: unknown, location: string): PromptChange {
   if (!isRecord(value)) {
     throw new PromptConfigError(`${location} must be a YAML object.`);
   }
@@ -284,10 +134,10 @@ function parseReplacement(value: unknown, location: string): PromptReplacement {
     if (
       key !== "section" &&
       key !== "action" &&
+      key !== "text" &&
+      key !== "files" &&
       key !== "pattern" &&
-      key !== "flags" &&
-      key !== "replacement" &&
-      key !== "replacement_file"
+      key !== "flags"
     ) {
       throw new PromptConfigError(`${location}: unknown field "${key}".`);
     }
@@ -305,6 +155,19 @@ function parseReplacement(value: unknown, location: string): PromptReplacement {
   }
 
   const action = parseAction(value.action, `${location}.action`);
+  if (value.text !== undefined && typeof value.text !== "string") {
+    throw new PromptConfigError(`${location}.text must be a string.`);
+  }
+  const files = parseFileList(value.files, `${location}.files`);
+  if (
+    (value.text === undefined || value.text.trim() === "") &&
+    files.length === 0
+  ) {
+    throw new PromptConfigError(
+      `${location} requires non-empty text or at least one file.`,
+    );
+  }
+
   let pattern: string | undefined;
   if (value.pattern !== undefined) {
     pattern = requireNonEmptyString(value.pattern, `${location}.pattern`);
@@ -319,55 +182,21 @@ function parseReplacement(value: unknown, location: string): PromptReplacement {
       });
     }
   } else if (value.flags !== undefined) {
-    throw new PromptConfigError(
-      `${location}.flags requires a pattern.`,
-    );
+    throw new PromptConfigError(`${location}.flags requires a pattern.`);
   }
-
-  if (
-    value.replacement !== undefined &&
-    value.replacement_file !== undefined
-  ) {
-    throw new PromptConfigError(
-      `${location} must use either replacement or replacement_file, not both.`,
-    );
-  }
-  if (value.replacement === undefined && value.replacement_file === undefined) {
-    throw new PromptConfigError(
-      `${location} requires replacement or replacement_file.`,
-    );
-  }
-  if (value.replacement !== undefined && typeof value.replacement !== "string") {
-    throw new PromptConfigError(`${location}.replacement must be a string.`);
-  }
-  const replacementFile =
-    value.replacement_file === undefined
-      ? undefined
-      : requireNonEmptyString(
-          value.replacement_file,
-          `${location}.replacement_file`,
-        );
 
   return {
     section,
     action,
+    ...(typeof value.text === "string" ? { text: value.text } : {}),
+    files,
     ...(pattern === undefined ? {} : { pattern }),
-    flags: pattern === undefined ? "" : normalizeReplacementFlags(value.flags),
-    ...(typeof value.replacement === "string"
-      ? { replacement: value.replacement }
-      : {}),
-    ...(replacementFile === undefined ? {} : { replacementFile }),
+    flags: pattern === undefined ? "" : normalizeFlags(value.flags),
   };
 }
 
-/** Parses the action used to combine replacement text with a section. */
-function parseAction(
-  value: unknown,
-  location: string,
-): PromptReplacementAction {
-  if (value === undefined) {
-    return "replace";
-  }
+/** Parses the required section operation. */
+function parseAction(value: unknown, location: string): PromptAction {
   if (value === "replace" || value === "prepend" || value === "append") {
     return value;
   }
@@ -376,8 +205,26 @@ function parseAction(
   );
 }
 
+/** Parses an ordered list of source files. */
+function parseFileList(value: unknown, location: string): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new PromptConfigError(`${location} must be a YAML list.`);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new PromptConfigError(
+        `${location}[${index}] must be a non-empty string.`,
+      );
+    }
+    return entry.trim();
+  });
+}
+
 /** Applies the default global flag when no explicit flags were supplied. */
-function normalizeReplacementFlags(value: unknown): string {
+function normalizeFlags(value: unknown): string {
   return typeof value === "string" ? value : "g";
 }
 

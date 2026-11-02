@@ -2,160 +2,211 @@
 
 Configurable edits to Pi's generated system prompt.
 
-The extension can replace the prompt preamble, replace or extend Pi's
-`addendum`, edit other structured prompt sections, load text from files, and
-rewrite section text with regular expressions. Configuration and files are
-reread for every request, so changes do not require restarting Pi.
+The extension applies an ordered list of changes to prompt sections. A change
+can replace, prepend, or append text, optionally using a regular expression,
+and can load its source text from files. Configuration and files are reread for
+every request, so changes do not require restarting Pi.
 
 ## Configuration
 
-This package reads the shared configuration file:
+This package reads its dedicated configuration file:
 
 ```text
-~/.pi/agent/pi-friend/pi-friend.yml
+~/.pi/agent/pi-friend/pi-friend-prompt.yml
 ```
 
-It reads only the top-level `prompt` section. The original scalar form remains
-supported:
+The prompt extension no longer reads the `prompt` section from
+`pi-friend.yml`. The dedicated file contains the top-level `prompt` list:
 
 ```yaml
 prompt:
-  custom: |
-    You are Lime, an AI friend to a plural system collectively called Feathersong.
-```
-
-The `memory` section is ignored by this extension. A missing `prompt` section
-leaves Pi's system prompt unchanged.
-
-## Prompt sections
-
-`custom` replaces the preamble. `addendum` replaces Pi's append-system-prompt
-section. Other Pi sections, including `tools`, `rules`, `docs`,
-`project_context`, and `skills`, can be replaced through `sections`.
-
-Each slot accepts a string or an object containing inline `text` and an ordered
-list of `files`:
-
-```yaml
-prompt:
-  custom:
+  - section: preamble
+    action: replace
     text: |
       You are Lime, an AI friend.
-    files:
-      - persona/details.md
-      - persona/local.md
 
-  addendum:
-    files:
-      - addendum/global.md
-      - addendum/project.md
-
-  sections:
-    project_context:
-      files:
-        - context/shared.md
-    house_rules: |
-      Follow the shared household conventions.
+  - section: addendum
+    action: prepend
+    text: |
+      Prefer direct, warm, concrete language.
 ```
 
-Inline text comes first, followed by files in declaration order. Components are
-trimmed and joined with a blank line. Relative file paths are resolved beside
-`pi-friend.yml`; absolute paths and paths beginning with `~/` are also
-supported.
+A missing `prompt` key or an empty list leaves Pi's system prompt unchanged.
 
-When the preamble is replaced, Pi would normally omit its generated `tools`,
-`rules`, and `docs` sections. The extension restores those sections from the
-current request options unless the configuration explicitly replaces them.
+## Change fields
 
-Section keys use Pi's section-name format: a lowercase letter followed by
-lowercase letters, digits, underscores, or hyphens. In other words, they must
-match `^[a-z][a-z0-9_-]*$`.
+Every list entry describes one change:
 
-The configuration slots map to these replacement names:
-
-| Configuration | Replacement target | Meaning |
+| Field | Required | Meaning |
 | --- | --- | --- |
-| `prompt.custom` | `preamble` | The main system-prompt preamble |
-| `prompt.addendum` | `addendum` | Pi's append-system-prompt section |
-| `prompt.sections.<name>` | `<name>` | Another generated or custom section |
+| `section` | Yes | Prompt section to edit |
+| `action` | Yes | `replace`, `prepend`, or `append` |
+| `text` | At least one of `text`/`files` | Inline source text |
+| `files` | At least one of `text`/`files` | Ordered prompt source files |
+| `pattern` | No | Regular expression selecting part of the section |
+| `flags` | With `pattern` | JavaScript regular-expression flags |
 
-Pi currently generates `tools`, `rules`, `docs`, `project_context`, `skills`,
-and `cwd` sections. Those names can be used under `prompt.sections` to replace
-their generated content. Other valid names create additional XML-wrapped prompt
-sections, and other extensions may also contribute section names that can be
-replaced.
+`text` and `files` may be used together. Inline text comes first, followed by
+files in declaration order. Components are joined with a blank line. Relative
+paths resolve beside `pi-friend-prompt.yml`; absolute paths and paths beginning
+with `~/` are also supported.
 
-`preamble` and `addendum` are reserved for `prompt.custom` and
-`prompt.addendum`; do not put them under `prompt.sections`. Valid custom names
-include `house_rules`, `work-context`, and `memory_notes`. Invalid names include
+An explicit action is required. A change with neither meaningful text nor a
+file is rejected.
+
+## Section names
+
+All changes use the same `section` field. The available names are:
+
+- `preamble`, Pi's main system-prompt preamble.
+- `addendum`, Pi's append-system-prompt section.
+- Pi's generated `tools`, `rules`, `docs`, `project_context`, `skills`, and
+  `cwd` sections.
+- Additional sections contributed by other extensions.
+- New custom sections.
+
+Named sections must match `^[a-z][a-z0-9_-]*$`. Valid examples include
+`house_rules`, `work-context`, and `memory_notes`. Invalid examples include
 `HouseRules`, `2fa_rules`, and `house rules`.
 
-The `section` of a replacement rule can be `preamble`, `addendum`, or any valid
-section that exists in the generated prompt. A replacement cannot target an
-arbitrary section name that does not exist yet; define it under
-`prompt.sections` first.
-
-## Rewriting existing text
-
-The `replacements` list can replace, prepend to, or append to existing prompt
-text. Replacement text can be inline or loaded from a file:
+A whole-section `replace` can create a custom section:
 
 ```yaml
 prompt:
-  replacements:
-    # Prepend once to the complete addendum.
-    - section: addendum
-      action: prepend
-      replacement: |
-        Configured context:
-
-    # Append once to the complete addendum.
-    - section: addendum
-      action: append
-      replacement_file: addendum/extra.md
-
-    # Prepend the heading before the first match.
-    - section: preamble
-      action: prepend
-      pattern: '^'
-      replacement: '# Friend context'
-
-    # Append to every matching rule line.
-    - section: rules
-      action: append
-      pattern: '^- Be concise.*$'
-      flags: gm
-      replacement: ' Prefer concrete answers.'
-
-    # Replace every matching addendum heading.
-    - section: addendum
-      pattern: '^## Temporary$'
-      flags: gm
-      replacement: '## Current context'
+  - section: house_rules
+    action: replace
+    text: |
+      - Be kind.
 ```
 
-Without `pattern`, the action applies once to the whole section:
+`preamble` and `addendum` are always available as logical targets, even when Pi
+did not previously render an addendum. A named section must exist before a
+whole-section prepend or append, or before a pattern-based operation can edit
+it. Creating it with `replace` first makes it available to later changes.
 
-- `replace` replaces the complete section. This is the default.
-- `prepend` places the new text before the complete section.
-- `append` places the new text after the complete section.
+## Ordered changes
 
-With `pattern`, the action applies to regular-expression matches:
+The list is an ordered pipeline. A section may appear more than once, and every
+change sees the output of all preceding changes:
+
+```yaml
+prompt:
+  - section: house_rules
+    action: replace
+    text: |
+      - Be kind.
+
+  - section: house_rules
+    action: append
+    text: |
+      - Ask before assuming.
+
+  - section: house_rules
+    action: append
+    pattern: '^- Ask.*$'
+    flags: gm
+    text: ' Include the reason when useful.'
+```
+
+The first change creates the section, the second appends a new prose block, and
+the third edits the result of both.
+
+## Actions
+
+Without `pattern`, an action applies once to the complete section:
+
+- `replace` replaces the section contents. It creates a missing custom section.
+- `prepend` inserts the source text before the section, separated by a blank
+  line.
+- `append` inserts the source text after the section, separated by a blank
+  line.
+
+With `pattern`, an action applies to regular-expression matches:
 
 - `replace` substitutes every match, subject to the regex flags.
-- `prepend` places the new text before each match.
-- `append` places the new text after each match.
+- `prepend` inserts the source text before each match.
+- `append` inserts the source text after each match.
 
-Regex flags default to `g`. An explicit `flags` value replaces that default, so
-omit `g` to edit only the first match. Patterns and flags use JavaScript regular
-expression syntax. Replacement text uses JavaScript substitution syntax, such
-as `$1` for capture groups and `$&` for the matched text. Whole-section actions
-use the replacement text literally.
+```yaml
+prompt:
+  - section: addendum
+    action: append
+    files:
+      - addendum/extra.md
 
-Rules are applied in configuration order, and later rules see the result of
-earlier rules. Replacements target unwrapped section contents rather than the
-generated `<section>...</section>` tags. A replacement fails if its target
-section does not exist.
+  - section: rules
+    action: replace
+    pattern: '^- Be concise.*$'
+    flags: gm
+    text: |
+      - Prefer concise, concrete answers.
+
+  - section: project_context
+    action: prepend
+    pattern: '^## '
+    flags: gm
+    text: 'Project note: '
+```
+
+Replacement text from `text` and files uses JavaScript substitution syntax when
+a pattern is present, including `$1` for capture groups and `$&` for the
+matched text. Whole-section actions use the source text literally.
+
+`flags` is valid only with `pattern` and defaults to `g`. An explicit value
+replaces that default, so omit `g` to edit only the first match.
+
+Pattern-based operations target unwrapped section contents rather than the
+generated `<section>...</section>` tags.
+
+## Migration from the previous format
+
+The previous specialized `custom`, `addendum`, `sections`, and `replacements`
+keys are no longer accepted. Convert them to ordered changes:
+
+| Previous configuration | New change |
+| --- | --- |
+| `prompt.custom` | `section: preamble`, `action: replace` |
+| `prompt.addendum` | `section: addendum`, `action: replace` |
+| `prompt.sections.house_rules` | `section: house_rules`, `action: replace` |
+| `prompt.replacements[]` | Keep the action and pattern; use `text`/`files` |
+
+For example:
+
+```yaml
+# Previous form
+prompt:
+  custom: |
+    You are Lime.
+  addendum:
+    files: [addendum.md]
+  sections:
+    house_rules: Be kind.
+```
+
+becomes:
+
+```yaml
+prompt:
+  - section: preamble
+    action: replace
+    text: |
+      You are Lime.
+
+  - section: addendum
+    action: replace
+    files: [addendum.md]
+
+  - section: house_rules
+    action: replace
+    text: Be kind.
+```
+
+Previous `replacement` fields map to `text`, and `replacement_file` maps to a
+one-item `files` list. Multiple files are now supported for every change.
+
+Move the resulting `prompt` list from `pi-friend.yml` into the new
+`pi-friend-prompt.yml` file. The memory extension uses its own
+`pi-friend-memory.yml` file.
 
 ## Failure handling
 
@@ -164,9 +215,8 @@ If parsing, file loading, regex rewriting, or prompt construction fails, the
 extension leaves that request's original prompt unchanged and reports a warning.
 It tries again on every later request, including after the problem is fixed.
 
-This means missing files, malformed YAML, invalid regexes, and misspelled
-section names are visible every time they affect a request instead of only once
-per Pi process.
+Because changes are applied atomically, failure in a later change also rolls
+back earlier changes from that request.
 
 ## Host compatibility
 

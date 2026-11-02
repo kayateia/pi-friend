@@ -12,138 +12,119 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import test from "node:test";
 import {
-  getSharedConfigPath,
+  getPromptConfigPath,
   hasPromptEdits,
   loadPromptConfig,
   parsePromptConfig,
   PromptConfigError,
 } from "../src/config.ts";
 
-test("prompt config preserves the scalar custom prompt form", () => {
+test("prompt config parses an ordered list with repeated sections", () => {
   const config = parsePromptConfig(
     [
       "memory:",
       "  root: ~/memory",
       "prompt:",
-      "  custom: |",
-      "    You are Lime.",
-    ].join("\n"),
-    "/tmp/pi-friend.yml",
-  );
-
-  assert.deepEqual(config.custom, {
-    text: "You are Lime.",
-    files: [],
-  });
-  assert.equal(hasPromptEdits(config), true);
-});
-
-test("prompt config parses file-backed slots and replacement rules", () => {
-  const config = parsePromptConfig(
-    [
-      "prompt:",
-      "  custom:",
+      "  - section: preamble",
+      "    action: replace",
       "    text: Configured narrative.",
       "    files:",
       "      - persona/core.md",
       "      - persona/local.md",
-      "  addendum:",
-      "    files:",
-      "      - addendum.md",
-      "  sections:",
-      "    house_rules: Shared conventions.",
-      "    project_context:",
-      "      files: [context.md]",
-      "  replacements:",
-      "    - section: addendum",
-      "      action: append",
-      "      replacement_file: extra.md",
-      "    - section: rules",
-      "      pattern: '^- Be concise.*$'",
-      "      flags: gm",
-      "      replacement: '- Stay focused'",
+      "  - section: addendum",
+      "    action: prepend",
+      "    files: [addendum.md]",
+      "  - section: addendum",
+      "    action: append",
+      "    text: Extra addendum.",
+      "  - section: rules",
+      "    action: replace",
+      "    pattern: '^- Be concise.*$'",
+      "    flags: gm",
+      "    text: '- Stay focused'",
     ].join("\n"),
-    "/tmp/pi-friend.yml",
+    "/tmp/pi-friend-prompt.yml",
   );
 
-  assert.deepEqual(config.custom, {
-    text: "Configured narrative.",
-    files: ["persona/core.md", "persona/local.md"],
-  });
-  assert.deepEqual(config.addendum, {
-    files: ["addendum.md"],
-  });
-  assert.deepEqual(config.sections.house_rules, {
-    text: "Shared conventions.",
-    files: [],
-  });
-  assert.deepEqual(config.sections.project_context, {
-    files: ["context.md"],
-  });
-  assert.deepEqual(config.replacements, [
+  assert.deepEqual(config.changes, [
+    {
+      section: "preamble",
+      action: "replace",
+      text: "Configured narrative.",
+      files: ["persona/core.md", "persona/local.md"],
+      flags: "",
+    },
+    {
+      section: "addendum",
+      action: "prepend",
+      files: ["addendum.md"],
+      flags: "",
+    },
     {
       section: "addendum",
       action: "append",
+      text: "Extra addendum.",
+      files: [],
       flags: "",
-      replacementFile: "extra.md",
     },
     {
       section: "rules",
       action: "replace",
       pattern: "^- Be concise.*$",
       flags: "gm",
-      replacement: "- Stay focused",
+      text: "- Stay focused",
+      files: [],
     },
   ]);
+  assert.equal(hasPromptEdits(config), true);
 });
 
-test("missing and empty prompt sections are no-ops", () => {
+test("missing and empty prompt lists are no-ops", () => {
   for (const source of [
     "memory:\n  root: ~/memory\n",
-    "prompt:\n  custom: ''\n",
-    "prompt:\n  custom:\n    files: []\n",
+    "prompt: []\n",
   ]) {
     const config = parsePromptConfig(source, "/tmp/config.yml");
-    assert.equal(config.custom, undefined);
+    assert.deepEqual(config.changes, []);
     assert.equal(hasPromptEdits(config), false);
   }
 });
 
-test("replacement action defaults to replace and flags default to global", () => {
+test("regex flags default to global", () => {
   const config = parsePromptConfig(
     [
       "prompt:",
-      "  replacements:",
-      "    - section: addendum",
-      "      pattern: friend",
-      "      replacement: companion",
+      "  - section: addendum",
+      "    action: replace",
+      "    pattern: friend",
+      "    text: companion",
     ].join("\n"),
-    "/tmp/pi-friend.yml",
+    "/tmp/pi-friend-prompt.yml",
   );
 
-  assert.deepEqual(config.replacements[0], {
+  assert.deepEqual(config.changes[0], {
     section: "addendum",
     action: "replace",
     pattern: "friend",
     flags: "g",
-    replacement: "companion",
+    text: "companion",
+    files: [],
   });
 });
 
-test("malformed prompt sections fail closed", () => {
+test("malformed prompt changes fail closed", () => {
   for (const source of [
     "prompt: text\n",
-    "prompt:\n  custom: 42\n",
-    "prompt:\n  unknown: value\n",
-    "prompt:\n  custom:\n    files: persona.md\n",
-    "prompt:\n  sections:\n    Preamble: value\n",
-    "prompt:\n  sections:\n    addendum: value\n",
-    "prompt:\n  replacements: value\n",
-    "prompt:\n  replacements:\n    - section: addendum\n",
-    "prompt:\n  replacements:\n    - section: addendum\n      action: surround\n      replacement: value\n",
-    "prompt:\n  replacements:\n    - section: addendum\n      flags: g\n      replacement: value\n",
-    "prompt:\n  replacements:\n    - section: addendum\n      pattern: '['\n      replacement: value\n",
-    "prompt:\n  replacements:\n    - section: addendum\n      replacement: value\n      replacement_file: value.md\n",
+    "prompt:\n  custom: old form\n",
+    "prompt:\n  - section: preamble\n    action: replace\n",
+    "prompt:\n  - section: Preamble\n    action: replace\n    text: value\n",
+    "prompt:\n  - section: preamble\n    text: value\n",
+    "prompt:\n  - section: preamble\n    action: substitution\n    text: value\n",
+    "prompt:\n  - section: preamble\n    action: replace\n    from: value\n    text: value\n",
+    "prompt:\n  - section: preamble\n    action: replace\n    files: persona.md\n",
+    "prompt:\n  - section: preamble\n    action: replace\n    files: []\n",
+    "prompt:\n  - section: preamble\n    action: replace\n    flags: g\n    text: value\n",
+    "prompt:\n  - section: preamble\n    action: replace\n    pattern: '['\n    text: value\n",
   ]) {
     assert.throws(
       () => parsePromptConfig(source, "/tmp/config.yml"),
@@ -152,19 +133,51 @@ test("malformed prompt sections fail closed", () => {
   }
 });
 
-test("prompt config loads from the shared Pi agent path", async () => {
+test("prompt config loads from the dedicated Pi agent path", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-config-"));
   try {
-    const configPath = getSharedConfigPath(directory);
+    const configPath = getPromptConfigPath(directory);
+    assert.equal(
+      configPath,
+      path.join(directory, "pi-friend", "pi-friend-prompt.yml"),
+    );
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
-      "prompt:\n  custom: Configured narrative.\n",
+      [
+        "prompt:",
+        "  - section: preamble",
+        "    action: replace",
+        "    text: Configured narrative.",
+      ].join("\n"),
       "utf8",
     );
 
     const config = await loadPromptConfig({ agentDir: directory });
-    assert.equal(config.custom?.text, "Configured narrative.");
+    assert.equal(config.changes[0]?.text, "Configured narrative.");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("prompt config ignores prompt data in the shared pi-friend file", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-config-"));
+  try {
+    const sharedDirectory = path.join(directory, "pi-friend");
+    await mkdir(sharedDirectory, { recursive: true });
+    await writeFile(
+      path.join(sharedDirectory, "pi-friend.yml"),
+      [
+        "prompt:",
+        "  - section: preamble",
+        "    action: replace",
+        "    text: Old shared prompt.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const config = await loadPromptConfig({ agentDir: directory });
+    assert.deepEqual(config.changes, []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
