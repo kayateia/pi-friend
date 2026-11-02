@@ -12,6 +12,7 @@ export class AutoCaptureScheduler {
   private readonly idleTimeoutMs: number;
   private readonly isIdle: () => boolean;
   private readonly capture: () => Promise<void>;
+  private readonly reportError: (label: string, error: unknown) => void;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private settledRuns = 0;
   private inFlight = false;
@@ -22,11 +23,13 @@ export class AutoCaptureScheduler {
     idleTimeoutMs: number;
     isIdle: () => boolean;
     capture: () => Promise<void>;
+    reportError?: (label: string, error: unknown) => void;
   }) {
     this.everyTurns = options.everyTurns;
     this.idleTimeoutMs = options.idleTimeoutMs;
     this.isIdle = options.isIdle;
     this.capture = options.capture;
+    this.reportError = options.reportError ?? (() => undefined);
   }
 
   /**
@@ -63,7 +66,9 @@ export class AutoCaptureScheduler {
         return;
       }
       this.settledRuns = 0;
-      void this.runCapture();
+      void this.runCapture().catch((error: unknown) => {
+        this.reportError("auto-capture scheduler", error);
+      });
     }, this.idleTimeoutMs);
   }
 

@@ -307,6 +307,26 @@ The Markdown tree remains canonical. Deleting `index/vectors.sqlite` is always
 safe because the index can be rebuilt from source files. Hybrid mode combines
 keyword and semantic candidates using reciprocal-rank fusion.
 
+## Diagnostics and errors
+
+Initialization failures and recoverable background failures are always appended
+to the diagnostic log with their full cause chain and stack trace. This happens
+even when lifecycle debug logging is disabled. Repeated identical failures are
+deduplicated for one minute.
+
+The default log file is:
+
+```text
+~/.pi/agent/pi-friend/debug.log
+```
+
+Override it with `PI_FRIEND_DEBUG_LOG=/path/to/debug.log`. Model-facing tool
+results and normal runtime output are not written to this file.
+
+Users see the message chain for initialization and background warnings without
+the stack details. Full stacks, nested `cause` failures, and lower-level
+sqlite-vec diagnostics remain in the log file.
+
 ## Inspect lifecycle hooks
 
 Set `PI_FRIEND_DEBUG_HOOKS=1` when starting Pi to append each structural
@@ -316,14 +336,7 @@ lifecycle event to a debug file:
 PI_FRIEND_DEBUG_HOOKS=1 pi --extension ./index.ts
 ```
 
-The default file is:
-
-```text
-~/.pi/agent/pi-friend/debug.log
-```
-
-Override it with `PI_FRIEND_DEBUG_LOG=/path/to/debug.log`. Debug output never
-writes to stdout or the TUI.
+Lifecycle debug output never writes to stdout or the TUI.
 
 The logger includes session, agent, turn, prompt, provider, tool, input, model,
 and UI boundaries. It intentionally omits token-level streaming updates.

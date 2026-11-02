@@ -92,6 +92,28 @@ test("decay is volume-relative rather than wall-clock based", () => {
   );
 });
 
+test("malformed access-log records are reported without aborting decay", () => {
+  const node = makeNode(
+    "remembered",
+    "2026-01-01T00:00:00Z",
+    "2026-01-01T00:00:00Z",
+  );
+  const reported: Array<{ label: string; error: unknown }> = [];
+
+  computeDecayUpdates(
+    [node],
+    '{"timestamp":"not-a-date"}\nnot-json',
+    { reportError: (label, error) => reported.push({ label, error }) },
+  );
+
+  assert.deepEqual(
+    reported.map((entry) => entry.label),
+    ["access log parse", "access log parse"],
+  );
+  assert.match(String(reported[0]?.error), /line 1/u);
+  assert.match(String(reported[1]?.error), /line 2/u);
+});
+
 test("candidate decay uses canonical volume, ignores access, and expires at floor", () => {
   const candidate = makeNode(
     "candidate",

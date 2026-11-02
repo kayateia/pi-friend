@@ -25,6 +25,7 @@ import {
   selectDreamShortlist,
   type DreamDraft,
 } from "./dream.ts";
+import { formatErrorChain } from "../debug/log.ts";
 
 interface SweepState {
   version: 1;
@@ -69,6 +70,7 @@ export interface RunDailySweepOptions {
     signal?: AbortSignal,
   ) => Promise<DreamDraft>;
   reportWarning?: (message: string) => void;
+  reportError?: (label: string, error: unknown) => void;
 }
 
 /**
@@ -100,7 +102,7 @@ async function runDailySweepLocked(
 ): Promise<SweepResult> {
   options.signal?.throwIfAborted();
   const now = options.now ?? new Date();
-  const previous = await readSweepState(service);
+  const previous = await readSweepState(service, options.reportError);
   if (
     options.force !== true &&
     previous.lastSuccessfulAt !== undefined &&
@@ -238,8 +240,10 @@ async function runDailySweepLocked(
           dreamSlug = dream.slug;
         }
       } catch (error) {
-        dreamError =
-          error instanceof Error ? error.message : String(error);
+        if (!options.signal?.aborted) {
+          options.reportError?.("sweep dream", error);
+        }
+        dreamError = formatErrorChain(error);
       }
     }
 
@@ -275,7 +279,10 @@ async function runDailySweepLocked(
       ...(dreamError === undefined ? {} : { dreamError }),
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    if (!options.signal?.aborted) {
+      options.reportError?.("daily sweep", error);
+    }
+    const message = formatErrorChain(error);
     await appendSweepLog(service, runId, attemptedAt, {
       decisions,
       promoted,
@@ -287,7 +294,9 @@ async function runDailySweepLocked(
       dreamSlug,
       dreamError,
       error: message,
-    }).catch(() => {});
+    }).catch((appendError) => {
+      options.reportError?.("sweep failure log", appendError);
+    });
     await writeSweepState(service, {
       version: 1,
       lastAttemptAt: attemptedAt,
@@ -295,7 +304,9 @@ async function runDailySweepLocked(
       lastError: message,
       lastRunId: runId,
       preimage,
-    }).catch(() => {});
+    }).catch((stateError) => {
+      options.reportError?.("sweep failure state", stateError);
+    });
     return {
       ran: true,
       runId,
@@ -403,6 +414,7 @@ async function appendSweepLog(
 /** Reads sweep state, returning undefined for missing or malformed state. */
 async function readSweepState(
   service: MemoryNodeService,
+  reportError?: (label: string, error: unknown) => void,
 ): Promise<Partial<SweepState>> {
   const source = await service.store.readTextFileIfExists(
     "sweeps/state.json",
@@ -411,10 +423,20 @@ async function readSweepState(
   let value: unknown;
   try {
     value = JSON.parse(source);
-  } catch {
+  } catch (error) {
+    reportError?.(
+      "sweep state parse",
+      new Error("Sweeps/state.json is not valid JSON.", { cause: error }),
+    );
     return {};
   }
-  if (!isRecord(value)) return {};
+  if (!isRecord(value)) {
+    reportError?.(
+      "sweep state parse",
+      new Error("Sweeps/state.json must contain a JSON object."),
+    );
+    return {};
+  }
   return {
     ...(typeof value.lastSuccessfulAt === "string"
       ? { lastSuccessfulAt: value.lastSuccessfulAt }

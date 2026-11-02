@@ -147,6 +147,7 @@ test("sweep failure still advances state and writes a failure log", async () => 
       speaker: [{ name: "Aisling", confident: true }],
     });
 
+    const reported: Array<{ label: string; error: unknown }> = [];
     const result = await runDailySweep(
       undefined,
       service,
@@ -161,9 +162,12 @@ test("sweep failure still advances state and writes a failure log", async () => 
         decide: async () => {
           throw new Error("model unavailable");
         },
+        reportError: (label, error) => reported.push({ label, error }),
       },
     );
-    assert.equal(result.error, "model unavailable");
+    assert.equal(result.error, "Error: model unavailable");
+    assert.equal(reported[0]?.label, "daily sweep");
+    assert.match(String(reported[0]?.error), /model unavailable/u);
     assert.ok(await service.read(candidate.node.slug, "staging"));
     const state = JSON.parse(
       await readFile(
@@ -175,7 +179,7 @@ test("sweep failure still advances state and writes a failure log", async () => 
       lastError: string;
     };
     assert.equal(state.lastAttemptAt, "2026-10-21T05:00:00.000Z");
-    assert.equal(state.lastError, "model unavailable");
+    assert.equal(state.lastError, "Error: model unavailable");
   });
 });
 

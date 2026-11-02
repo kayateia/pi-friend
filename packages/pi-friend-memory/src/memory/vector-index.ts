@@ -10,6 +10,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import * as path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import * as sqliteVec from "sqlite-vec";
+import { logError } from "../debug/log.ts";
 import type { MemoryFileKind } from "./paths.ts";
 import type {
   MemoryStatus,
@@ -329,8 +330,9 @@ export class SqliteVectorIndex implements VectorIndex {
     } catch (error) {
       try {
         this.database.exec("ROLLBACK");
-      } catch {
-        // Preserve the original operation error.
+      } catch (rollbackError) {
+        // Preserve the original operation error while recording rollback failure.
+        logError("vector index rollback", rollbackError);
       }
       throw error;
     }
