@@ -81,14 +81,19 @@ export interface EmbeddingsConfig {
 /** Default prefix for model-facing memory tool names. */
 export const DEFAULT_MEMORY_TOOL_PREFIX = "";
 
+/** Filename used for the memory extension's configuration. */
+export const MEMORY_CONFIG_FILENAME = "pi-friend-memory.yml";
+
 /** Resolved memory configuration used by the storage layer. */
 export interface MemoryConfig {
-  /** Absolute path to the user's pi-friend.yml file. */
+  /** Absolute path to the user's pi-friend-memory.yml file. */
   configPath: string;
   /** Prefix prepended to every registered memory tool name. */
   toolPrefix: string;
   /** Absolute path to the canonical memory tree. */
   root: string;
+  /** Resolved files and directory trees watched and included in search. */
+  indexPaths: string[];
   injection: RagInjectionConfig;
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
@@ -216,6 +221,7 @@ export function parseMemoryConfig(
       configPath,
       toolPrefix: DEFAULT_MEMORY_TOOL_PREFIX,
       root: defaultRoot,
+      indexPaths: [],
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
@@ -252,6 +258,12 @@ export function parseMemoryConfig(
     configPath,
     toolPrefix: parseToolPrefix(memoryConfig.tool_prefix, configPath),
     root,
+    indexPaths: parseIndexPaths(
+      memoryConfig.index_paths,
+      configPath,
+      configDir,
+      homeDir,
+    ),
     injection: parseRagInjection(memoryConfig.injection, configPath),
     autoCapture: parseAutoCapture(memoryConfig.auto_capture, configPath),
     sweep: parseSweep(memoryConfig.sweep, configPath),
@@ -271,7 +283,7 @@ export async function loadMemoryConfig(
   const agentDir = options.agentDir ?? getAgentDir();
   const homeDir = options.homeDir ?? homedir();
   const configDir = getFriendConfigDir(agentDir);
-  const configPath = path.join(configDir, "pi-friend.yml");
+  const configPath = path.join(configDir, MEMORY_CONFIG_FILENAME);
 
   let source: string;
   try {
@@ -282,6 +294,7 @@ export async function loadMemoryConfig(
         configPath,
         toolPrefix: DEFAULT_MEMORY_TOOL_PREFIX,
         root: path.join(configDir, "memory"),
+        indexPaths: [],
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
@@ -314,6 +327,49 @@ function parseToolPrefix(value: unknown, configPath: string): string {
     );
   }
   return value;
+}
+
+/**
+ * Parses the external Markdown paths watched by the memory index.
+ *
+ * Paths are resolved exactly once at configuration load so every watcher and
+ * reconciliation uses the same identity. Relative paths are anchored to the
+ * directory containing pi-friend-memory.yml, matching memory.root.
+ */
+function parseIndexPaths(
+  value: unknown,
+  configPath: string,
+  configDir: string,
+  homeDir: string,
+): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.index_paths must be a YAML array of path strings.`,
+    );
+  }
+
+  const resolved: string[] = [];
+  const seen = new Set<string>();
+  for (const [index, item] of value.entries()) {
+    if (typeof item !== "string" || item.trim() === "") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.index_paths[${index}] must be a non-empty string.`,
+      );
+    }
+
+    const expanded = expandHomePath(item.trim(), homeDir);
+    const absolute = path.isAbsolute(expanded)
+      ? path.normalize(expanded)
+      : path.resolve(configDir, expanded);
+    if (!seen.has(absolute)) {
+      seen.add(absolute);
+      resolved.push(absolute);
+    }
+  }
+  return resolved;
 }
 
 /** Parses optional vector-index settings while applying safe defaults. */

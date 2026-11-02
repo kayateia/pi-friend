@@ -14,10 +14,7 @@ import {
   buildDocumentIndexEntry,
   type IndexedMarkdownFile,
 } from "./indexer.ts";
-import type {
-  VectorEntryMetadata,
-  VectorIndex,
-} from "./vector-index.ts";
+import type { VectorEntryMetadata } from "./vector-index.ts";
 
 const IMPORTED_VECTOR_KEY_PREFIX = "external:";
 const MAX_IMPORTED_FILES = 10_000;
@@ -29,11 +26,11 @@ export interface IndexPathFiles {
   files: IndexedMarkdownFile[];
 }
 
-/** Error raised when a bulk-index path cannot be used safely. */
-export class MemoryIndexPathError extends Error {
+/** Error raised when an external-index path cannot be used safely. */
+export class ExternalIndexPathError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
-    this.name = "MemoryIndexPathError";
+    this.name = "ExternalIndexPathError";
   }
 }
 
@@ -50,11 +47,13 @@ export async function buildIndexPathFiles(
     cwd: string;
     memoryRoot: string;
     homeDir?: string;
+    /** Allows a configured directory to contain no Markdown files yet. */
+    allowEmpty?: boolean;
   },
 ): Promise<IndexPathFiles> {
   const requested = inputPath.trim();
   if (requested === "") {
-    throw new MemoryIndexPathError("Index path must not be empty.");
+    throw new ExternalIndexPathError("Index path must not be empty.");
   }
 
   const expanded = expandHomePath(requested, options.homeDir ?? homedir());
@@ -63,7 +62,7 @@ export async function buildIndexPathFiles(
   try {
     sourcePath = await realpath(candidate);
   } catch (error) {
-    throw new MemoryIndexPathError(
+    throw new ExternalIndexPathError(
       `Could not resolve index path "${inputPath}".`,
       { cause: error },
     );
@@ -73,7 +72,7 @@ export async function buildIndexPathFiles(
   const markdownPaths: string[] = [];
   if (sourceStat.isFile()) {
     if (!isMarkdownPath(sourcePath)) {
-      throw new MemoryIndexPathError(
+      throw new ExternalIndexPathError(
         `Index path must be a Markdown file or directory: ${sourcePath}`,
       );
     }
@@ -81,13 +80,13 @@ export async function buildIndexPathFiles(
   } else if (sourceStat.isDirectory()) {
     await collectMarkdownFiles(sourcePath, markdownPaths);
   } else {
-    throw new MemoryIndexPathError(
+    throw new ExternalIndexPathError(
       `Index path is not a regular file or directory: ${sourcePath}`,
     );
   }
 
-  if (markdownPaths.length === 0) {
-    throw new MemoryIndexPathError(
+  if (markdownPaths.length === 0 && options.allowEmpty !== true) {
+    throw new ExternalIndexPathError(
       `No Markdown files were found under ${sourcePath}.`,
     );
   }
@@ -98,43 +97,6 @@ export async function buildIndexPathFiles(
     files.push(await buildIndexedFile(markdownPath, root));
   }
   return { sourcePath, files };
-}
-
-/**
- * Reloads external sources represented in the vector index.
- *
- * Missing files are omitted; a later full synchronization prunes their stale
- * vectors. Other filesystem errors remain visible rather than silently
- * degrading search.
- */
-export async function loadImportedIndexedFiles(
-  index: VectorIndex,
-  memoryRoot: string,
-): Promise<IndexedMarkdownFile[]> {
-  const files: IndexedMarkdownFile[] = [];
-  const seenPaths = new Set<string>();
-  for (const entry of index.listEntries()) {
-    if (
-      !isImportedVectorEntry(entry) ||
-      seenPaths.has(entry.sourcePath)
-    ) {
-      continue;
-    }
-    seenPaths.add(entry.sourcePath);
-
-    try {
-      const file = await buildIndexedFile(entry.sourcePath, memoryRoot);
-      if (file.vectorKey !== undefined) {
-        files.push(file);
-      }
-    } catch (error) {
-      if (isMissingPathError(error)) {
-        continue;
-      }
-      throw error;
-    }
-  }
-  return files;
 }
 
 /** Returns true when an index entry belongs to an external Markdown file. */
@@ -169,7 +131,7 @@ async function collectMarkdownFiles(
 
     files.push(entryPath);
     if (files.length > MAX_IMPORTED_FILES) {
-      throw new MemoryIndexPathError(
+      throw new ExternalIndexPathError(
         `Index path contains more than ${MAX_IMPORTED_FILES} Markdown files.`,
       );
     }
@@ -225,12 +187,4 @@ function relativePathWithin(
 /** Returns whether a filename has a Markdown extension. */
 function isMarkdownPath(value: string): boolean {
   return value.toLowerCase().endsWith(".md");
-}
-
-/** Recognizes absent source files without hiding permission failures. */
-function isMissingPathError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("code" in error)) {
-    return false;
-  }
-  return error.code === "ENOENT" || error.code === "ENOTDIR";
 }

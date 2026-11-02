@@ -27,7 +27,7 @@ test("missing configuration uses the default memory root", async () => {
 
     assert.equal(
       config.configPath,
-      path.join(directory, "pi-friend", "pi-friend.yml"),
+      path.join(directory, "pi-friend", "pi-friend-memory.yml"),
     );
     assert.equal(
       config.root,
@@ -35,6 +35,7 @@ test("missing configuration uses the default memory root", async () => {
     );
     assert.equal(config.toolPrefix, "");
     assert.equal(config.toolPrefix, DEFAULT_MEMORY_TOOL_PREFIX);
+    assert.deepEqual(config.indexPaths, []);
     assert.deepEqual(config.injection, {
       enabled: true,
       position: -1,
@@ -69,7 +70,7 @@ test("missing configuration uses the default memory root", async () => {
 
 test("configured root expands a leading tilde", () => {
   const configDir = path.join(path.sep, "tmp", "agent", "pi-friend");
-  const configPath = path.join(configDir, "pi-friend.yml");
+  const configPath = path.join(configDir, "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     "memory:\n  root: ~/workspace/memory\n",
     configPath,
@@ -79,8 +80,45 @@ test("configured root expands a leading tilde", () => {
   assert.equal(config.root, path.join(path.sep, "home", "friend", "workspace", "memory"));
 });
 
+test("external index paths expand, resolve, and de-duplicate", () => {
+  const configDir = path.join(path.sep, "tmp", "agent", "pi-friend");
+  const configPath = path.join(configDir, "pi-friend-memory.yml");
+  const home = path.join(path.sep, "home", "friend");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  index_paths:",
+      "    - ~/notes",
+      "    - ../shared-notes",
+      "    - ~/notes",
+      `    - ${path.join(home, "notes")}`,
+    ].join("\n"),
+    configPath,
+    home,
+  );
+
+  assert.deepEqual(config.indexPaths, [
+    path.join(home, "notes"),
+    path.join(path.sep, "tmp", "agent", "shared-notes"),
+  ]);
+});
+
+test("invalid external index paths fail closed", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  for (const source of [
+    "memory:\n  index_paths: ~/notes\n",
+    "memory:\n  index_paths:\n    - 42\n",
+    'memory:\n  index_paths:\n    - "  "\n',
+  ]) {
+    assert.throws(
+      () => parseMemoryConfig(source, configPath),
+      MemoryConfigError,
+    );
+  }
+});
+
 test("tool prefix is configurable and validated", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     "memory:\n  tool_prefix: pf_\n",
     configPath,
@@ -105,7 +143,7 @@ test("tool prefix is configurable and validated", () => {
 });
 
 test("vector chunk size is configurable and validated", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     "memory:\n  vector:\n    chunk_size: 1200\n",
     configPath,
@@ -126,7 +164,7 @@ test("vector chunk size is configurable and validated", () => {
 });
 
 test("prompt configuration is ignored by the memory parser", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     [
       "memory:",
@@ -146,7 +184,7 @@ test("prompt configuration is ignored by the memory parser", () => {
 
 test("relative configured roots resolve from the config directory", () => {
   const configDir = path.join(path.sep, "tmp", "agent", "pi-friend");
-  const configPath = path.join(configDir, "pi-friend.yml");
+  const configPath = path.join(configDir, "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     "memory:\n  root: local-memory\n",
     configPath,
@@ -160,7 +198,7 @@ test("malformed YAML fails closed", () => {
     () =>
       parseMemoryConfig(
         "memory: [not closed\n",
-        path.join(path.sep, "tmp", "pi-friend.yml"),
+        path.join(path.sep, "tmp", "pi-friend-memory.yml"),
       ),
     MemoryConfigError,
   );
@@ -171,7 +209,7 @@ test("a non-string root fails closed", () => {
     () =>
       parseMemoryConfig(
         "memory:\n  root: 42\n",
-        path.join(path.sep, "tmp", "pi-friend.yml"),
+        path.join(path.sep, "tmp", "pi-friend-memory.yml"),
       ),
     /memory\.root must be a non-empty string/,
   );
@@ -182,7 +220,7 @@ test("the loader reads a custom root from disk", async () => {
     const configDir = path.join(directory, "pi-friend");
     await mkdir(configDir, { recursive: true });
     await writeFile(
-      path.join(configDir, "pi-friend.yml"),
+      path.join(configDir, "pi-friend-memory.yml"),
       "memory:\n  root: ~/custom-memory\n",
       "utf8",
     );
@@ -196,8 +234,31 @@ test("the loader reads a custom root from disk", async () => {
   });
 });
 
+test("the loader does not fall back to the legacy shared config", async () => {
+  await withTempDir(async (directory) => {
+    const configDir = path.join(directory, "pi-friend");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      path.join(configDir, "pi-friend.yml"),
+      "memory:\n  root: ~/legacy-memory\n",
+      "utf8",
+    );
+
+    const config = await loadMemoryConfig({
+      agentDir: directory,
+      homeDir: directory,
+    });
+
+    assert.equal(
+      config.configPath,
+      path.join(configDir, "pi-friend-memory.yml"),
+    );
+    assert.equal(config.root, path.join(configDir, "memory"));
+  });
+});
+
 test("injection settings are parsed and validated", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     [
       "memory:",
@@ -221,7 +282,7 @@ test("injection settings are parsed and validated", () => {
 });
 
 test("invalid injection settings fail closed", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   for (const source of [
     "memory:\n  injection:\n    position: 1\n",
     "memory:\n  injection:\n    mode: unknown\n",
@@ -237,7 +298,7 @@ test("invalid injection settings fail closed", () => {
 });
 
 test("the removed daily injection section is ignored", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     [
       "memory:",
@@ -253,7 +314,7 @@ test("the removed daily injection section is ignored", () => {
 });
 
 test("auto-capture settings are parsed and validated", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     [
       "memory:",
@@ -280,7 +341,7 @@ test("auto-capture settings are parsed and validated", () => {
 });
 
 test("invalid auto-capture settings fail closed", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   for (const source of [
     "memory:\n  auto_capture:\n    every_turns: 0\n",
     "memory:\n  auto_capture:\n    idle_timeout: 0\n",
@@ -297,7 +358,7 @@ test("invalid auto-capture settings fail closed", () => {
 });
 
 test("sweep settings are parsed and validated", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     [
       "memory:",
@@ -356,7 +417,7 @@ test("sweep settings are parsed and validated", () => {
 });
 
 test("dreaming settings are parsed and validated", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     [
       "memory:",
@@ -395,7 +456,7 @@ test("dreaming settings are parsed and validated", () => {
 });
 
 test("embedding model is configurable and validated", () => {
-  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
     "memory:\n  embeddings:\n    model: openrouter/openai/text-embedding-3-large\n",
     configPath,

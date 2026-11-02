@@ -105,5 +105,6 @@ test("the packaged prompt example parses and resolves", async () => {
 
   assert.match(resolved.custom ?? "", /You are Lime/);
   assert.match(resolved.addendum ?? "", /direct, warm, concrete/);
-  assert.equal(resolved.replacements[0]?.action, "append");
+  assert.equal(resolved.replacements[0]?.action, "prepend");
+  assert.equal(resolved.replacements[1]?.action, "append");
 });

@@ -33,12 +33,16 @@ The default tree is:
 └── recovery/
 ```
 
-Override the root in `~/.pi/agent/pi-friend/pi-friend.yml`:
+Override the root in `~/.pi/agent/pi-friend/pi-friend-memory.yml`:
 
 ```yaml
 memory:
   root: ~/workspace/memory
   tool_prefix: ""
+  # Markdown files and directories watched and included in memory search.
+  index_paths: []
+  #  - ~/Documents/notes
+  #  - ~/journal
   vector:
     chunk_size: 4000
   injection:
@@ -76,18 +80,30 @@ memory:
 A missing config uses the default. Malformed configuration is reported and
 does not fall back to another path. The tree is initialized on `session_start`.
 
+The memory extension reads `pi-friend-memory.yml` independently from the prompt
+extension's `pi-friend.yml`. Existing users of the former combined file should
+move the `memory` section into `pi-friend-memory.yml`; leave the `prompt`
+section in `pi-friend.yml` if the prompt extension is also installed.
+
+`memory.index_paths` lists Markdown files and directory trees that should be
+watched and included in search. Leading `~` is expanded, relative paths resolve
+from the `pi-friend` config directory, and overlapping paths are indexed once.
+The list is reconciled on session start and after filesystem changes while Pi is
+running. Files deleted or removed from the list have their stale vectors
+removed. Configuration list changes take effect on the next session or reload.
+
 `auto_capture.prompt`, `sweep.prompt`, and `dreaming.prompt` replace the
 corresponding internal model's system prompt. The task framing and required
 JSON response contract remain enforced by the extension. When omitted, the
 built-in prompt is used. The complete current defaults are copied into
-`pi-friend.example.yml`.
+`pi-friend-memory.example.yml`.
 
 The repository includes a complete, ready-to-copy example at
-[`pi-friend.example.yml`](./pi-friend.example.yml). Install it manually with:
+[`pi-friend-memory.example.yml`](./pi-friend-memory.example.yml). Install it manually with:
 
 ```sh
 mkdir -p ~/.pi/agent/pi-friend
-cp pi-friend.example.yml ~/.pi/agent/pi-friend/pi-friend.yml
+cp pi-friend-memory.example.yml ~/.pi/agent/pi-friend/pi-friend-memory.yml
 ```
 
 Injection defaults to enabled at position `-1`, meaning the memory block is
@@ -175,7 +191,7 @@ Pi reads the extension entry point from the `pi.extensions` field in
 
 ## Memory tools
 
-- `memory.tool_prefix` in `pi-friend.yml` is prepended to every memory tool
+- `memory.tool_prefix` in `pi-friend-memory.yml` is prepended to every memory tool
   name. The default is empty, so tools are named `memory_add`,
   `memory_search`, and so on. For example, `tool_prefix: pf_` exposes
   `pf_memory_add` and allows two memory extensions to load side by side.
@@ -195,9 +211,6 @@ Pi reads the extension entry point from the `pi.extensions` field in
   storage.
 - `memory_search` supports ranked keyword search and semantic search across
   nodes, staging candidates, and plain Markdown documents.
-- `memory_index_path` additively embeds a Markdown file or directory tree.
-  Imported files retain their source path, file modification time, first-heading
-  title, and `imported` provenance. Content hashes make repeat runs idempotent.
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.
@@ -283,9 +296,12 @@ range is 200–20,000. Chunks prefer nearby paragraph boundaries. Search
 deduplicates chunks back to one result per source document and previews the
 matching chunk.
 
-Use `memory_index_path` to index a Markdown corpus outside the configured
-memory root. Directory walks include nested `.md` files, ignore hidden paths
-and symlinks, and preserve all vector records outside the supplied path.
+Add a Markdown corpus outside the configured memory root to
+`memory.index_paths`. Directory walks include nested `.md` files and ignore
+hidden paths and symlinks. The complete configured set is reconciled on startup
+and after changes. Imported files retain their source path, file modification
+time, first-heading title, and `imported` provenance. Deletions and paths
+removed from configuration are pruned from the vector index automatically.
 
 The Markdown tree remains canonical. Deleting `index/vectors.sqlite` is always
 safe because the index can be rebuilt from source files. Hybrid mode combines

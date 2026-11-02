@@ -13,14 +13,21 @@ agent capabilities.
 The shared design document remains at
 [`docs/pi-friend-memory-spec.md`](./docs/pi-friend-memory-spec.md).
 
-Both extensions read the same configuration file:
+The memory extension reads:
+
+```text
+~/.pi/agent/pi-friend/pi-friend-memory.yml
+```
+
+The prompt extension continues to read:
 
 ```text
 ~/.pi/agent/pi-friend/pi-friend.yml
 ```
 
-Each extension owns its own top-level section. See
-[`pi-friend.example.yml`](./pi-friend.example.yml) for a combined example.
+See [`pi-friend-memory.example.yml`](./pi-friend-memory.example.yml) and
+[`pi-friend-prompt.example.yml`](./packages/pi-friend-prompt/pi-friend-prompt.example.yml)
+for the package examples.
 
 ## Development
 
