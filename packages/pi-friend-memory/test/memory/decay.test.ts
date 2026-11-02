@@ -8,7 +8,10 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computeDecayUpdates } from "../../src/memory/decay.ts";
+import {
+  computeDecayUpdates,
+  planCandidateDecay,
+} from "../../src/memory/decay.ts";
 import type { ParsedMemoryNode } from "../../src/memory/schema.ts";
 
 /** Builds one canonical node fixture. */
@@ -87,4 +90,35 @@ test("decay is volume-relative rather than wall-clock based", () => {
     updates.some((update) => update.slug === "new-0"),
     true,
   );
+});
+
+test("candidate decay uses canonical volume, ignores access, and expires at floor", () => {
+  const candidate = makeNode(
+    "candidate",
+    "2026-01-01T00:00:00Z",
+    "2026-01-01T00:00:00Z",
+  );
+  candidate.frontMatter.status = "candidate";
+  candidate.frontMatter.decay_weight = 1;
+  const canonical = [
+    ...Array.from({ length: 20 }, (_, index) =>
+      makeNode(
+        `canonical-${index}`,
+        `2026-01-${String(index + 2).padStart(2, "0")}T00:00:00Z`,
+      ),
+    ),
+    makeNode(
+      "expired",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:00:00Z",
+    ),
+  ];
+  canonical.at(-1)!.frontMatter.decay_weight = 0.05;
+
+  const plan = planCandidateDecay([candidate, canonical.at(-1)!], canonical);
+  assert.equal(
+    plan.updates.find((update) => update.slug === "candidate")?.decayWeight,
+    0.3333,
+  );
+  assert.deepEqual(plan.expiredSlugs, ["expired"]);
 });

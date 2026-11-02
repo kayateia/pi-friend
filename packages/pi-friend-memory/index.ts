@@ -31,6 +31,7 @@ import {
 } from "./src/memory/config.ts";
 import { serializeCaptureTranscript } from "./src/memory/capture.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
+import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
 import {
   OpenRouterEmbeddingProvider,
   resolveOpenRouterApiKey,
@@ -38,9 +39,9 @@ import {
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
 import {
+  buildRagQuery,
   containsRagContext,
   injectRagContext,
-  latestUserPrompt,
   ragBlockForDelivery,
 } from "./src/memory/rag-injection.ts";
 import { runDailySweep } from "./src/memory/sweep.ts";
@@ -73,9 +74,8 @@ export default async function registerPiFriend(
   const ragSessions = new Map<string, RagSessionState>();
   let injectionConfig = defaultRagInjectionConfig();
   let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
-  let settledRuns = 0;
   let captureCursor: string | undefined;
-  let captureInFlight = false;
+  let captureScheduler: AutoCaptureScheduler | undefined;
   let sweepConfig: SweepConfig = defaultSweepConfig();
   let dreamingConfig: DreamingConfig = defaultDreamingConfig();
   let sweepInFlight = false;
@@ -96,6 +96,57 @@ export default async function registerPiFriend(
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
   registerMemoryTools(pi, () => memoryService, toolPrefix);
+
+  /** Runs one transcript capture and advances the cursor on success. */
+  const executeCapture = async (
+    ctx: ExtensionContext,
+    service: MemoryNodeService,
+    config: AutoCaptureConfig,
+  ): Promise<void> => {
+    try {
+      const branch = ctx.sessionManager.getBranch();
+      const cursorIndex = captureCursor
+        ? branch.findIndex((entry) => entry.id === captureCursor)
+        : -1;
+      const entries = branch.slice(cursorIndex + 1);
+      const transcript = serializeCaptureTranscript(entries);
+      if (transcript.trim() === "") {
+        return;
+      }
+
+      const drafts = await runCaptureModel(
+        ctx,
+        config,
+        transcript,
+        (message) => reportCaptureWarning(ctx, message),
+      );
+      for (const draft of drafts) {
+        await service.stageCandidate({
+          title: draft.title,
+          type: draft.type,
+          body: draft.body,
+          speaker: draft.speaker,
+          agents: draft.agents,
+          emotionalFlavor: draft.emotionalFlavor,
+          tags: draft.tags,
+          links: draft.links,
+          source:
+            draft.source ??
+            `session:${ctx.sessionManager.getSessionId()}`,
+        });
+      }
+
+      const finalEntry = branch[branch.length - 1];
+      if (finalEntry) {
+        captureCursor = finalEntry.id;
+      }
+      debugRag("capture", {
+        candidates: drafts.length,
+      });
+    } catch (error) {
+      debugRag("capture-failed", { error: describeError(error) });
+    }
+  };
 
   /** Runs one sweep and reports its outcome without throwing to Pi hooks. */
   const executeSweep = async (
@@ -177,6 +228,15 @@ export default async function registerPiFriend(
         undefined,
         semanticSearch,
       );
+      const service = memoryService;
+      const config = autoCaptureConfig;
+      captureScheduler?.shutdown();
+      captureScheduler = new AutoCaptureScheduler({
+        everyTurns: config.everyTurns,
+        idleTimeoutMs: config.idleTimeout * 1_000,
+        isIdle: () => ctx.isIdle(),
+        capture: () => executeCapture(ctx, service, config),
+      });
     } catch (error) {
       const message = `pi-friend memory initialization failed: ${describeError(error)}`;
       if (ctx.hasUI) {
@@ -197,13 +257,13 @@ export default async function registerPiFriend(
     await backgroundSweep;
     sweepAbortController = undefined;
     memoryService = undefined;
+    captureScheduler?.shutdown();
+    captureScheduler = undefined;
     ragSessions.clear();
     semanticSearch?.index.close();
     semanticSearch = undefined;
     autoCaptureConfig = defaultAutoCaptureConfig();
-    settledRuns = 0;
     captureCursor = undefined;
-    captureInFlight = false;
     sweepConfig = defaultSweepConfig();
     dreamingConfig = defaultDreamingConfig();
     sweepInFlight = false;
@@ -218,26 +278,31 @@ export default async function registerPiFriend(
       return;
     }
 
-    const latest = latestUserPrompt(event.messages);
-    if (!latest) {
+    const ragQuery = buildRagQuery(event.messages);
+    if (!ragQuery) {
       return;
     }
 
     const sessionId = ctx.sessionManager.getSessionId();
     let state = ragSessions.get(sessionId);
-    if (state?.userIndex !== latest.index || state.query !== latest.prompt) {
+    if (
+      state?.userIndex !== ragQuery.userIndex ||
+      state.query !== ragQuery.query
+    ) {
       const service = memoryService;
       state = {
-        userIndex: latest.index,
-        query: latest.prompt,
+        userIndex: ragQuery.userIndex,
+        query: ragQuery.query,
         context: buildRagContext(
           service,
-          latest.prompt,
+          ragQuery.query,
           injectionConfig,
         )
           .then((rag) => {
             debugRag("retrieved", {
-              query: latest.prompt,
+              query: ragQuery.query,
+              userPromptChars: ragQuery.userPrompt.length,
+              assistantTextChars: ragQuery.assistantText?.length ?? 0,
               contextChars: rag.text.length,
               ...rag.diagnostics,
             });
@@ -297,66 +362,13 @@ export default async function registerPiFriend(
     ragSessions.delete(ctx.sessionManager.getSessionId());
     if (
       event.aborted ||
-      captureInFlight ||
       !memoryService ||
-      !autoCaptureConfig.enabled
+      !autoCaptureConfig.enabled ||
+      !captureScheduler
     ) {
       return;
     }
-
-    settledRuns += 1;
-    if (settledRuns < autoCaptureConfig.everyTurns) {
-      return;
-    }
-    settledRuns = 0;
-    captureInFlight = true;
-
-    try {
-      const branch = ctx.sessionManager.getBranch();
-      const cursorIndex = captureCursor
-        ? branch.findIndex((entry) => entry.id === captureCursor)
-        : -1;
-      const entries = branch.slice(cursorIndex + 1);
-      const transcript = serializeCaptureTranscript(entries);
-      if (transcript.trim() === "") {
-        return;
-      }
-
-      const service = memoryService;
-      const drafts = await runCaptureModel(
-        ctx,
-        autoCaptureConfig,
-        transcript,
-        (message) => reportCaptureWarning(ctx, message),
-      );
-      for (const draft of drafts) {
-        await service.stageCandidate({
-          title: draft.title,
-          type: draft.type,
-          body: draft.body,
-          speaker: draft.speaker,
-          agents: draft.agents,
-          emotionalFlavor: draft.emotionalFlavor,
-          tags: draft.tags,
-          links: draft.links,
-          source:
-            draft.source ??
-            `session:${ctx.sessionManager.getSessionId()}`,
-        });
-      }
-
-      const finalEntry = branch[branch.length - 1];
-      if (finalEntry) {
-        captureCursor = finalEntry.id;
-      }
-      debugRag("capture", {
-        candidates: drafts.length,
-      });
-    } catch (error) {
-      debugRag("capture-failed", { error: describeError(error) });
-    } finally {
-      captureInFlight = false;
-    }
+    await captureScheduler.onSettled();
   });
 
   pi.on("agent_settled", (event, ctx) => {
@@ -410,7 +422,11 @@ function createSemanticSearch(
   }
 
   try {
-    const provider = new OpenRouterEmbeddingProvider({ apiKey });
+    const configuredModel = repository.store.config.embeddings.model;
+    const model = configuredModel.startsWith("openrouter/")
+      ? configuredModel.slice("openrouter/".length)
+      : configuredModel;
+    const provider = new OpenRouterEmbeddingProvider({ apiKey, model });
     const index = SqliteVectorIndex.open({
       databasePath: path.join(repository.store.paths.index, "vectors.sqlite"),
       model: provider.model,

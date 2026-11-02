@@ -15,6 +15,7 @@ import type {
 } from "./config.ts";
 import type { MemoryNodeService } from "./service.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
+import { planCandidateDecay } from "./decay.ts";
 import {
   runSweepModel,
   type SweepDecision,
@@ -121,8 +122,13 @@ async function runDailySweepLocked(
   let dreamError: string | undefined;
 
   try {
-    const candidates = await service.listStagingCandidates();
+    const allCandidates = await service.listStagingCandidates();
     const canonical = await service.listCanonicalNodes();
+    const candidateDecay = planCandidateDecay(allCandidates, canonical);
+    const expiredSet = new Set(candidateDecay.expiredSlugs);
+    const candidates = allCandidates.filter(
+      (candidate) => !expiredSet.has(candidate.slug),
+    );
     if (candidates.length > 0) {
       if (options.decide) {
         decisions = await options.decide(
@@ -147,38 +153,38 @@ async function runDailySweepLocked(
       options.signal?.throwIfAborted();
     }
 
-    const destructiveActions = decisions.filter(
-      (decision) => decision.action === "drop",
-    ).length;
+    const destructiveActions = candidateDecay.expiredSlugs.length;
     const ratioGuardApplies =
-      candidates.length >= config.minGuardedBatchSize;
+      allCandidates.length >= config.minGuardedBatchSize;
     if (
       ratioGuardApplies &&
-      destructiveActions > Math.floor(candidates.length * 0.25)
+      destructiveActions > Math.floor(allCandidates.length * 0.25)
     ) {
       throw new Error(
-        `Sweep would remove more than 25% of ${candidates.length} staged candidates; the guard applies at ${config.minGuardedBatchSize} or more.`,
+        `Sweep would remove more than 25% of ${allCandidates.length} staged candidates; the guard applies at ${config.minGuardedBatchSize} or more.`,
       );
     }
 
     preimage = await createPreimage(service, runId);
     options.signal?.throwIfAborted();
 
+    await service.applyCandidateDecay(candidateDecay.updates);
+    for (const slug of candidateDecay.expiredSlugs) {
+      options.signal?.throwIfAborted();
+      await service.archiveCandidate(slug, runId);
+      dropped += 1;
+    }
+
     for (const decision of decisions) {
       options.signal?.throwIfAborted();
-      if (decision.action === "drop") {
-        await service.archiveCandidate(decision.slug, runId);
-        dropped += 1;
+      const result = await service.promoteCandidate(
+        decision.slug,
+        decision.action === "merge" ? decision.target : undefined,
+      );
+      if (result.merged) {
+        merged += 1;
       } else {
-        const result = await service.promoteCandidate(
-          decision.slug,
-          decision.action === "merge" ? decision.target : undefined,
-        );
-        if (result.merged) {
-          merged += 1;
-        } else {
-          promoted += 1;
-        }
+        promoted += 1;
       }
     }
 

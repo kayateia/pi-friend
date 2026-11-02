@@ -16,6 +16,12 @@ export interface DecayUpdate {
   decayWeight: number;
 }
 
+/** Planned candidate decay and expiration before any files are mutated. */
+export interface CandidateDecayPlan {
+  updates: DecayUpdate[];
+  expiredSlugs: string[];
+}
+
 /** Computes decay changes without modifying node files. */
 export function computeDecayUpdates(
   nodes: ParsedMemoryNode[],
@@ -48,13 +54,7 @@ export function computeDecayUpdates(
     ) {
       decayWeight = 0;
     } else {
-      const newMemoriesSinceUse = nodes.filter(
-        (candidate) =>
-          Date.parse(candidate.frontMatter.created) > Date.parse(lastUsed),
-      ).length;
-      decayWeight = roundWeight(
-        Math.max(0.05, 1 / (1 + newMemoriesSinceUse / 10)),
-      );
+      decayWeight = volumeDecayWeight(nodes, lastUsed);
     }
 
     const useCount = Math.max(node.frontMatter.use_count, accessCount);
@@ -73,6 +73,43 @@ export function computeDecayUpdates(
   }
 
   return updates;
+}
+
+/**
+ * Plans staging decay using canonical additions as the only volume source.
+ *
+ * Candidate access records intentionally do not reset decay. A candidate at
+ * the shared 0.05 floor is expired and returned for removal.
+ */
+export function planCandidateDecay(
+  candidates: ParsedMemoryNode[],
+  canonicalNodes: ParsedMemoryNode[],
+): CandidateDecayPlan {
+  const updates: DecayUpdate[] = [];
+  const expiredSlugs: string[] = [];
+
+  for (const candidate of candidates) {
+    const decayWeight = Math.min(
+      candidate.frontMatter.decay_weight,
+      volumeDecayWeight(
+        canonicalNodes,
+        candidate.frontMatter.last_used,
+      ),
+    );
+    if (decayWeight <= 0.05) {
+      expiredSlugs.push(candidate.slug);
+    }
+    if (decayWeight !== candidate.frontMatter.decay_weight) {
+      updates.push({
+        slug: candidate.slug,
+        useCount: candidate.frontMatter.use_count,
+        lastUsed: candidate.frontMatter.last_used,
+        decayWeight,
+      });
+    }
+  }
+
+  return { updates, expiredSlugs };
 }
 
 interface ParsedAccessEntry {
@@ -113,6 +150,20 @@ function parseAccessLog(source: string): ParsedAccessEntry[] {
 /** Rounds decay weights to avoid insignificant file churn. */
 function roundWeight(value: number): number {
   return Math.round(value * 10_000) / 10_000;
+}
+
+/** Applies the shared volume curve with the canonical 0.05 floor. */
+function volumeDecayWeight(
+  canonicalNodes: ParsedMemoryNode[],
+  lastUsed: string,
+): number {
+  const newMemoriesSinceUse = canonicalNodes.filter(
+    (candidate) =>
+      Date.parse(candidate.frontMatter.created) > Date.parse(lastUsed),
+  ).length;
+  return roundWeight(
+    Math.max(0.05, 1 / (1 + newMemoriesSinceUse / 10)),
+  );
 }
 
 /** Narrows unknown JSON values to string-keyed records. */

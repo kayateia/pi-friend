@@ -16,6 +16,7 @@ import {
   MAX_CONFIG_CHUNK_SIZE,
   MIN_CONFIG_CHUNK_SIZE,
 } from "./chunker.ts";
+import { DEFAULT_EMBEDDING_MODEL } from "./embedding.ts";
 import type { MemorySearchMode } from "./search.ts";
 
 /** Configuration for automatic memory retrieval and prompt injection. */
@@ -32,6 +33,8 @@ export interface RagInjectionConfig {
 export interface AutoCaptureConfig {
   enabled: boolean;
   everyTurns: number;
+  /** Seconds of post-settlement idle time before capture runs. */
+  idleTimeout: number;
   maxCandidates: number;
   /** Optional provider/model-id override for the capture model. */
   model?: string;
@@ -69,6 +72,12 @@ export interface VectorConfig {
   chunkSize: number;
 }
 
+/** Configuration for the semantic embedding provider. */
+export interface EmbeddingsConfig {
+  /** Provider-qualified model identifier, such as openrouter/<model-id>. */
+  model: string;
+}
+
 /** Default prefix for model-facing memory tool names. */
 export const DEFAULT_MEMORY_TOOL_PREFIX = "";
 
@@ -85,6 +94,7 @@ export interface MemoryConfig {
   sweep: SweepConfig;
   dreaming: DreamingConfig;
   vector: VectorConfig;
+  embeddings: EmbeddingsConfig;
 }
 
 /** Inputs that can be overridden by tests or alternate Pi environments. */
@@ -119,6 +129,7 @@ export function defaultAutoCaptureConfig(): AutoCaptureConfig {
   return {
     enabled: true,
     everyTurns: 5,
+    idleTimeout: 600,
     maxCandidates: 3,
   };
 }
@@ -145,6 +156,13 @@ export function defaultDreamingConfig(): DreamingConfig {
 export function defaultVectorConfig(): VectorConfig {
   return {
     chunkSize: DEFAULT_CHUNK_SIZE,
+  };
+}
+
+/** Returns the default semantic embedding policy. */
+export function defaultEmbeddingsConfig(): EmbeddingsConfig {
+  return {
+    model: `openrouter/${DEFAULT_EMBEDDING_MODEL}`,
   };
 }
 
@@ -203,6 +221,7 @@ export function parseMemoryConfig(
       sweep: defaultSweepConfig(),
       dreaming: defaultDreamingConfig(),
       vector: defaultVectorConfig(),
+      embeddings: defaultEmbeddingsConfig(),
     };
   }
 
@@ -238,6 +257,7 @@ export function parseMemoryConfig(
     sweep: parseSweep(memoryConfig.sweep, configPath),
     dreaming: parseDreaming(memoryConfig.dreaming, configPath),
     vector: parseVector(memoryConfig.vector, configPath),
+    embeddings: parseEmbeddings(memoryConfig.embeddings, configPath),
   };
 }
 
@@ -267,6 +287,7 @@ export async function loadMemoryConfig(
         sweep: defaultSweepConfig(),
         dreaming: defaultDreamingConfig(),
         vector: defaultVectorConfig(),
+        embeddings: defaultEmbeddingsConfig(),
       };
     }
 
@@ -434,6 +455,19 @@ function parseAutoCapture(
       );
     }
     config.everyTurns = value.every_turns;
+  }
+  if (value.idle_timeout !== undefined) {
+    if (
+      typeof value.idle_timeout !== "number" ||
+      !Number.isInteger(value.idle_timeout) ||
+      value.idle_timeout < 1 ||
+      value.idle_timeout > 86_400
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.auto_capture.idle_timeout must be an integer number of seconds from 1 to 86400.`,
+      );
+    }
+    config.idleTimeout = value.idle_timeout;
   }
   if (value.max_candidates !== undefined) {
     if (
@@ -621,6 +655,37 @@ function parseModelPrompt(
     );
   }
   return value.trim();
+}
+
+/** Parses the optional semantic embedding configuration. */
+function parseEmbeddings(
+  value: unknown,
+  configPath: string,
+): EmbeddingsConfig {
+  const config = defaultEmbeddingsConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.embeddings must be a YAML object.`,
+    );
+  }
+  if (value.model !== undefined) {
+    if (
+      typeof value.model !== "string" ||
+      value.model.trim() === "" ||
+      !value.model.includes("/") ||
+      value.model.trim().startsWith("/") ||
+      value.model.trim().endsWith("/")
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.embeddings.model must be a provider/model-id string.`,
+      );
+    }
+    config.model = value.model.trim();
+  }
+  return config;
 }
 
 /** Narrows an unknown config value to a supported search mode. */

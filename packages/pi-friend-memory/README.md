@@ -24,7 +24,6 @@ The default tree is:
 
 ```text
 ~/.pi/agent/pi-friend/memory/
-├── MEMORY.md
 ├── nodes/
 │   └── superseded/
 ├── staging/
@@ -51,6 +50,7 @@ memory:
   auto_capture:
     enabled: true
     every_turns: 5
+    idle_timeout: 600
     max_candidates: 3
     # model: openrouter/google/gemini-2.5-flash
     # prompt: |
@@ -69,6 +69,8 @@ memory:
     # model: openrouter/google/gemini-2.5-flash
     # prompt: |
     #   Replacement system prompt for dream selection and writing.
+  embeddings:
+    model: openrouter/openai/text-embedding-3-small
 ```
 
 A missing config uses the default. Malformed configuration is reported and
@@ -120,6 +122,11 @@ meaningful keyword/token overlap with an active node is sufficient; it does not
 require every word from a conversational sentence to appear in one memory.
 Semantic candidates use nearest-neighbor ranking without a minimum similarity
 threshold, then pass the same active-node and quarantine filters.
+
+The query also includes the most recent visible assistant chat prose before the
+current user message. Thinking blocks, tool calls, and tool results are ignored.
+Staged candidates are eligible for RAG and always begin with
+`Candidate - unverified`; ordinary documents remain tool-search-only.
 
 When `PI_FRIEND_DEBUG_HOOKS` is enabled and retrieval selects no nodes, the
 extension still injects an empty `<pi-friend-memory></pi-friend-memory>` block.
@@ -202,10 +209,16 @@ model request reviews only the transcript entries added since the prior
 successful capture. The prompt treats conversation content as observed data,
 requires concrete speaker attribution, and allows only active memory types.
 
-Candidates are written to `staging/` with `status: candidate` and are excluded
-from RAG. Exact duplicates of canonical or staged memories are skipped.
-Promotion uses the semantic index to detect near-duplicates, merging close
-matches while preserving links, tags, speakers, and audit history.
+Capture is also debounced from the last settled run using
+`auto_capture.idle_timeout` seconds, default 600. A new settled run resets the
+timer. Expiry triggers only while no agent run is active; shutdown cancels a
+pending timer.
+
+Candidates are written to `staging/` with `status: candidate` and may enter RAG
+with a `Candidate - unverified` marker. Exact duplicates of canonical or staged
+memories are skipped. Promotion uses the semantic index to detect
+near-duplicates, merging close matches while preserving links, tags, speakers,
+and audit history.
 
 ## Daily sweep and decay
 
@@ -225,10 +238,12 @@ OS-level lock.
 Session shutdown aborts an unfinished background sweep before closing the
 semantic index. The default remains `false`.
 
-The sweep model chooses `promote`, `merge`, or `drop` for staged candidates.
-Dropped candidates are archived under `sweeps/dropped/`, not hard-deleted.
-Decay is volume-relative: access resets a node to fresh, while new canonical
-memories since its last use lower its `decay_weight`.
+The sweep model chooses `promote` or `merge` for staged candidates. Candidates
+that reach the volume-decay floor of `0.05` expire before model review and are
+archived under `sweeps/dropped/`, not hard-deleted. Decay is volume-relative:
+access resets a canonical node to fresh, while new canonical memories since a
+node's last use lower its `decay_weight`. Candidate decay uses the same curve
+and floor, counts canonical additions only, and ignores RAG-hit access resets.
 
 The 25% removal guard applies only when a sweep has at least
 `min_guarded_batch_size` candidates. Smaller batches can remove or consolidate
@@ -249,12 +264,6 @@ links, and `emotional_flavor: dreamlike`. They are permanently excluded from
 default RAG and can never be promoted as factual memories by automated
 processes.
 
-`type: inner` records inward-facing state or reflection. Inner memories are
-canonical and searchable, but follow the same quarantine rules as dreams:
-they are excluded from factual RAG, automated capture, dream sources, and
-automated merge targets. The sweep model receives each node's type and is
-instructed to preserve the boundary between inner and ordinary memory.
-
 ## Semantic search
 
 The `index/` directory includes a disposable `sqlite-vec` backend backed by
@@ -263,9 +272,10 @@ cosine search, clearing, and rebuild against a declared embedding model and
 dimension count.
 
 Semantic mode uses Pi's stored OpenRouter credential, falling back to
-`OPENROUTER_API_KEY`, and embeds with `openai/text-embedding-3-small` at 1,536
-dimensions. Markdown is synchronized lazily on semantic search; unchanged
-content hashes do not make repeat embedding calls.
+`OPENROUTER_API_KEY`. `memory.embeddings.model` defaults to
+`openrouter/openai/text-embedding-3-small` at 1,536 dimensions. Markdown is
+synchronized lazily on semantic search; unchanged content hashes do not make
+repeat embedding calls.
 
 Markdown longer than `memory.vector.chunk_size` is embedded as overlapping
 chunks of at most that many characters. The default is 4,000 and the accepted

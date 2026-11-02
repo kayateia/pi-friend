@@ -22,11 +22,12 @@ test("layout creation is idempotent and preserves existing content", async () =>
     );
 
     await ensureMemoryLayout(paths);
-    await writeFile(paths.topOfMind, "# Existing memory\n", "utf8");
+    const existingPath = path.join(paths.root, "existing.md");
+    await writeFile(existingPath, "# Existing memory\n", "utf8");
     await ensureMemoryLayout(paths);
 
     assert.equal(
-      await readFile(paths.topOfMind, "utf8"),
+      await readFile(existingPath, "utf8"),
       "# Existing memory\n",
     );
 

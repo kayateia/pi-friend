@@ -11,6 +11,7 @@ import type { UserMessage } from "@earendil-works/pi-ai";
 import test from "node:test";
 import {
   EMPTY_RAG_BLOCK,
+  buildRagQuery,
   containsRagContext,
   injectRagContext,
   latestUserPrompt,
@@ -79,6 +80,60 @@ test("latest user prompt supports text and mixed-content messages", () => {
 
   assert.deepEqual(prompt, { index: 1, prompt: "latest" });
   assert.equal(latestUserPrompt([]), undefined);
+});
+
+test("RAG query includes only visible assistant prose before the latest user", () => {
+  const messages: RagAgentMessage[] = [
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "hidden reasoning" },
+        { type: "text", text: "The previous visible answer." },
+        {
+          type: "toolCall",
+          id: "tool-1",
+          name: "bash",
+          arguments: { command: "ignored" },
+        },
+      ],
+      api: "openai-completions",
+      provider: "openai",
+      model: "test",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0,
+        },
+      },
+      stopReason: "stop",
+      timestamp: 1,
+    },
+    {
+      role: "toolResult",
+      toolCallId: "tool-1",
+      toolName: "bash",
+      content: [{ type: "text", text: "ignored tool output" }],
+      isError: false,
+      timestamp: 2,
+    },
+    { role: "user", content: "Tell me about that.", timestamp: 3 },
+  ];
+
+  const query = buildRagQuery(messages);
+  assert.deepEqual(query, {
+    userIndex: 2,
+    userPrompt: "Tell me about that.",
+    assistantText: "The previous visible answer.",
+    query: "The previous visible answer.\n\nTell me about that.",
+  });
 });
 
 test("RAG delivery checks detect the injected block in user messages", () => {

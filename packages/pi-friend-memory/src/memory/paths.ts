@@ -13,7 +13,6 @@ import * as path from "node:path";
 export interface MemoryPaths {
   configPath: string;
   root: string;
-  topOfMind: string;
   nodes: string;
   supersededNodes: string;
   staging: string;
@@ -41,7 +40,6 @@ export function createMemoryPaths(root: string, configPath: string): MemoryPaths
   return {
     configPath,
     root: resolvedRoot,
-    topOfMind: path.join(resolvedRoot, "MEMORY.md"),
     nodes: path.join(resolvedRoot, "nodes"),
     supersededNodes: path.join(resolvedRoot, "nodes", "superseded"),
     staging: path.join(resolvedRoot, "staging"),

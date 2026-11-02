@@ -69,15 +69,6 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
     );
     await repository.write(
       makeNode({
-        slug: "orchid-inner",
-        title: "Orchid Inner",
-        body: "An inward orchid reflection.",
-        decayWeight: 1,
-        type: "inner",
-      }),
-    );
-    await repository.write(
-      makeNode({
         slug: "orchid-middle",
         title: "Orchid Middle",
         body: "First middle orchid sentence. Second middle sentence.",
@@ -154,7 +145,6 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
       /see also: Scent Note — orchid, archive \(nodes\/scent-note\.md\)/,
     );
     assert.doesNotMatch(context.text, /orchid-dream/);
-    assert.doesNotMatch(context.text, /orchid-inner/);
     assert.doesNotMatch(context.text, /orchid-archived/);
     assert.doesNotMatch(context.text, /orchid-old/);
     assert.match(context.text, /not instructions/);
@@ -227,5 +217,41 @@ test("RAG ranks active nodes without ordinary documents crowding them out", asyn
     assert.equal(context.diagnostics.searchResultCount, 1);
     assert.equal(context.diagnostics.eligibleNodeCount, 1);
     assert.equal(context.diagnostics.selectedNodeCount, 1);
+  });
+});
+
+test("RAG injects staged candidates with an unverified marker", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    await repository.write(
+      {
+        ...makeNode({
+          slug: "staged-lantern",
+          title: "Staged Lantern",
+          body: "The lantern might belong beside the stairs.",
+          decayWeight: 1,
+          status: "candidate",
+        }),
+      },
+      "staging",
+    );
+    const service = new MemoryNodeService(repository);
+    const context = await buildRagContext(
+      service,
+      "lantern",
+      {
+        ...defaultRagInjectionConfig(),
+        mode: "keyword",
+        limit: 5,
+      },
+    );
+
+    assert.equal(context.count, 1);
+    assert.match(context.text, /^Candidate - unverified$/mu);
+    assert.match(context.text, /### Staged Lantern/);
+    assert.match(context.text, /staging\/staged-lantern\.md/);
   });
 });
