@@ -18,7 +18,7 @@ test("layout creation is idempotent and preserves existing content", async () =>
   await withTempDir(async (directory) => {
     const paths = createMemoryPaths(
       path.join(directory, "memory"),
-      path.join(directory, "pi-friend.yml"),
+      path.join(directory, "pi-friend-memory.yml"),
     );
 
     await ensureMemoryLayout(paths);
@@ -51,7 +51,7 @@ test("layout refuses a symlinked nested directory", async () => {
   await withTempDir(async (directory) => {
     const paths = createMemoryPaths(
       path.join(directory, "memory"),
-      path.join(directory, "pi-friend.yml"),
+      path.join(directory, "pi-friend-memory.yml"),
     );
     const { mkdir, symlink } = await import("node:fs/promises");
     const outside = path.join(directory, "outside");

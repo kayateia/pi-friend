@@ -25,7 +25,7 @@
     "index.ts",
     "src",
     "README.md",
-    "pi-friend.example.yml"
+    "pi-friend-memory.example.yml"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

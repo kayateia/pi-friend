@@ -38,7 +38,8 @@ memory/
 └── recovery/            ← durable records for recoverable node deletion
 ```
 
-The root config for pi-friend is `~/.pi/agent/pi-friend/pi-friend.yml` with this format:
+The memory config is `~/.pi/agent/pi-friend/pi-friend-memory.yml` with this
+format:
 
 ```yaml
 memory:
@@ -86,7 +87,7 @@ Each automated model section supports an optional `prompt` string that replaces
 its system prompt: `memory.auto_capture.prompt`, `memory.sweep.prompt`, and
 `memory.dreaming.prompt`. User-message task framing and JSON output validation
 remain in code. The complete built-in prompts are reproduced in
-`pi-friend.example.yml`.
+`pi-friend-memory.example.yml`.
 
 ## 4. Node schema (strict front matter)
 
@@ -137,12 +138,16 @@ The names below are the built-in tool names. A configured `tool_prefix` is prepe
 
 External Markdown files and directory trees are configured through
 `memory.index_paths` rather than a model-facing tool. A leading `~` is expanded,
-relative paths resolve from the directory containing `pi-friend.yml`, and
+relative paths resolve from the directory containing `pi-friend-memory.yml`, and
 overlapping paths are indexed once. The list is reconciled when a session
 starts and while Pi runs through a filesystem watcher. Deleting or renaming a
 source removes its stale vector chunks; keyword search reads the current source
 catalog and therefore also omits missing files. Changes to the YAML path list
 take effect when the session reloads.
+
+Memory configuration is independent from the prompt extension's
+`pi-friend.yml`. Configurations created before this split placed the `memory`
+section in that shared file and must move it into `pi-friend-memory.yml`.
 
 There is no daily-log tool or `daily/` subtree. Existing directories or
 Markdown files named `daily/` are left untouched and, if present, are treated as

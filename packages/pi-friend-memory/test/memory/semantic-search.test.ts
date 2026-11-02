@@ -104,7 +104,7 @@ test("semantic chunk search returns one result with the matching chunk", async (
     const configDir = path.join(agentDir, "pi-friend");
     await mkdir(configDir, { recursive: true });
     await writeFile(
-      path.join(configDir, "pi-friend.yml"),
+      path.join(configDir, "pi-friend-memory.yml"),
       "memory:\n  vector:\n    chunk_size: 200\n",
       "utf8",
     );
