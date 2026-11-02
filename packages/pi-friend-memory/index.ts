@@ -36,6 +36,7 @@ import {
   OpenRouterEmbeddingProvider,
   resolveOpenRouterApiKey,
 } from "./src/memory/embedding.ts";
+import { ExternalIndexManager } from "./src/memory/external-index-manager.ts";
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
 import {
@@ -71,6 +72,7 @@ export default async function registerPiFriend(
   // The memory service is session-scoped and shared by all memory tools.
   let memoryService: MemoryNodeService | undefined;
   let semanticSearch: SemanticSearchDependencies | undefined;
+  let externalIndexManager: ExternalIndexManager | undefined;
   const ragSessions = new Map<string, RagSessionState>();
   let injectionConfig = defaultRagInjectionConfig();
   let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
@@ -211,23 +213,36 @@ export default async function registerPiFriend(
   pi.on("session_start", async (_event, ctx) => {
     ragSessions.delete(ctx.sessionManager.getSessionId());
     try {
+      await externalIndexManager?.stop();
+      externalIndexManager = undefined;
+
       const repository = await MemoryNodeRepository.open();
       injectionConfig = repository.store.config.injection;
       autoCaptureConfig = repository.store.config.autoCapture;
       sweepConfig = repository.store.config.sweep;
       dreamingConfig = repository.store.config.dreaming;
-      semanticSearch = createSemanticSearch(repository, (message) => {
+      const reportWarning = (message: string): void => {
         if (ctx.hasUI) {
           ctx.ui.notify(message, "warning");
         } else {
           console.error(message);
         }
+      };
+      semanticSearch = createSemanticSearch(repository, reportWarning);
+      externalIndexManager = new ExternalIndexManager({
+        indexPaths: repository.store.config.indexPaths,
+        memoryRoot: repository.store.root,
+        semantic: semanticSearch,
+        chunkSize: repository.store.config.vector.chunkSize,
+        reportWarning,
       });
       memoryService = new MemoryNodeService(
         repository,
         undefined,
         semanticSearch,
+        externalIndexManager,
       );
+      await externalIndexManager.start();
       const service = memoryService;
       const config = autoCaptureConfig;
       captureScheduler?.shutdown();
@@ -255,6 +270,8 @@ export default async function registerPiFriend(
     }
     sweepAbortController?.abort();
     await backgroundSweep;
+    await externalIndexManager?.stop();
+    externalIndexManager = undefined;
     sweepAbortController = undefined;
     memoryService = undefined;
     captureScheduler?.shutdown();

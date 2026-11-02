@@ -52,7 +52,7 @@ export interface ExternalIndexManagerOptions {
 export interface ExternalIndexSource {
   /** Current configured files, refreshed on startup and filesystem changes. */
   getFiles(): readonly IndexedMarkdownFile[];
-  /** Processes pending filesystem invalidations and returns current files. */
+  /** Waits for any reconciliation already requested by the watcher. */
   refresh(): Promise<void>;
 }
 
@@ -110,18 +110,30 @@ export class ExternalIndexManager implements ExternalIndexSource {
     this.started = true;
     this.stopped = false;
     this.startWatcher();
-    await this.refresh();
+    await this.rescan();
   }
 
   /**
-   * Reconciles pending source changes serially and returns after all invalidations
-   * observed before or during the current pass have been processed.
+   * Waits for any pending watcher-triggered reconciliation to finish.
+   *
+   * This lets searches observe changes without forcing another complete scan
+   * when no filesystem invalidation is pending.
    */
   async refresh(): Promise<void> {
+    if (this.debounceTimer !== undefined) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = undefined;
+      await this.rescan();
+      return;
+    }
+    await this.reconciliation;
+  }
+
+  /** Explicitly rescans every configured path and updates the vector index. */
+  async rescan(): Promise<void> {
     if (this.stopped) {
       return;
     }
-
     this.dirty = true;
     if (this.reconciliation === undefined) {
       const running = this.drainReconciliations();
@@ -281,7 +293,7 @@ export class ExternalIndexManager implements ExternalIndexSource {
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined;
-      void this.refresh();
+      void this.rescan();
     }, this.debounceMs);
   }
 

@@ -7,16 +7,21 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import type { EmbeddingProvider } from "../../src/memory/embedding.ts";
+import { ExternalIndexManager } from "../../src/memory/external-index-manager.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
 import { SqliteVectorIndex } from "../../src/memory/vector-index.ts";
 import { withTempDir } from "../helpers.ts";
 
-/** Embedding provider that makes the imported marigold text easy to retrieve. */
+/** Embedding provider that makes imported marigold text easy to retrieve. */
 class ImportTestProvider implements EmbeddingProvider {
   readonly model = "test/import";
   readonly dimensions = 2;
@@ -32,7 +37,7 @@ class ImportTestProvider implements EmbeddingProvider {
   }
 }
 
-test("bulk indexing imports plain Markdown idempotently and finds it semantically", async () => {
+test("configured Markdown is searchable semantically with import metadata", async () => {
   await withTempDir(async (agentDir) => {
     const oldCorpus = path.join(agentDir, "old-memory");
     const oldNote = path.join(oldCorpus, "notes", "2026-09-01.md");
@@ -59,25 +64,23 @@ test("bulk indexing imports plain Markdown idempotently and finds it semanticall
       model: provider.model,
       dimensions: provider.dimensions,
     });
+    const manager = new ExternalIndexManager({
+      indexPaths: [oldCorpus],
+      memoryRoot: repository.store.root,
+      semantic: { provider, index },
+      chunkSize: repository.store.config.vector.chunkSize,
+      reportWarning: () => undefined,
+      usePolling: true,
+    });
     const service = new MemoryNodeService(
       repository,
       () => new Date("2026-10-22T12:00:00.000Z"),
       { provider, index },
+      manager,
     );
 
     try {
-      const first = await service.indexPath(oldCorpus, { cwd: agentDir });
-      assert.equal(first.total, 1);
-      assert.equal(first.chunks, 1);
-      assert.equal(first.embedded, 1);
-      assert.equal(first.skipped, 0);
-      assert.equal(first.files[0]?.path, canonicalOldNote);
-      assert.equal(first.files[0]?.title, "September Garden Log");
-      assert.match(first.files[0]?.modifiedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
-      assert.equal(
-        first.files[0]?.provenance,
-        `imported; source: ${canonicalOldNote}`,
-      );
+      await manager.start();
       assert.equal(index.count(), 1);
 
       const results = await service.search({
@@ -92,39 +95,27 @@ test("bulk indexing imports plain Markdown idempotently and finds it semanticall
       );
       assert.match(results[0]?.snippet ?? "", /marigold by the east window/);
 
-      const second = await service.indexPath(oldCorpus, { cwd: agentDir });
-      assert.equal(second.total, 1);
-      assert.equal(second.embedded, 0);
-      assert.equal(second.skipped, 1);
-      assert.equal(index.count(), 1);
+      const callsBeforeSearch = provider.inputBatches.length;
+      await service.search({
+        query: "marigold frost",
+        mode: "semantic",
+      });
+      assert.equal(provider.inputBatches.length, callsBeforeSearch + 1);
     } finally {
+      await manager.stop();
       index.close();
     }
   });
 });
 
-test("chunked external files reload as one searchable document", async () => {
+test("configured Markdown remains searchable by keyword without embeddings", async () => {
   await withTempDir(async (agentDir) => {
-    const configDir = path.join(agentDir, "pi-friend");
-    await mkdir(configDir, { recursive: true });
-    await writeFile(
-      path.join(configDir, "pi-friend.yml"),
-      "memory:\n  vector:\n    chunk_size: 200\n",
-      "utf8",
-    );
-
-    const corpus = path.join(agentDir, "long-corpus");
-    const note = path.join(corpus, "garden.md");
+    const corpus = path.join(agentDir, "keyword-source");
+    const note = path.join(corpus, "workshop.md");
     await mkdir(corpus, { recursive: true });
     await writeFile(
       note,
-      [
-        "# Long Garden Log",
-        "",
-        `Cold notes. ${"soil ".repeat(80)}`,
-        "A marigold glows beside the gate.",
-        `More cold notes. ${"rain ".repeat(80)}`,
-      ].join("\n\n"),
+      "# Workshop Notes\n\nReplace the soldering iron tip.\n",
       "utf8",
     );
 
@@ -132,32 +123,31 @@ test("chunked external files reload as one searchable document", async () => {
       agentDir,
       homeDir: agentDir,
     });
-    const provider = new ImportTestProvider();
-    const index = SqliteVectorIndex.open({
-      databasePath: ":memory:",
-      model: provider.model,
-      dimensions: provider.dimensions,
+    const manager = new ExternalIndexManager({
+      indexPaths: [corpus],
+      memoryRoot: repository.store.root,
+      chunkSize: repository.store.config.vector.chunkSize,
+      reportWarning: () => undefined,
+      usePolling: true,
     });
-    const service = new MemoryNodeService(repository, undefined, {
-      provider,
-      index,
-    });
+    const service = new MemoryNodeService(
+      repository,
+      undefined,
+      undefined,
+      manager,
+    );
 
     try {
-      const imported = await service.indexPath(corpus, { cwd: agentDir });
-      assert.equal(imported.total, 1);
-      assert.ok(imported.chunks > 1);
-      assert.equal(index.count(), imported.chunks);
-
+      await manager.start();
       const results = await service.search({
-        query: "marigold",
-        mode: "semantic",
+        query: "soldering iron",
+        mode: "keyword",
       });
       assert.equal(results.length, 1);
-      assert.equal(results[0]?.relativePath, await realpath(note));
-      assert.match(results[0]?.snippet ?? "", /marigold glows/);
+      assert.equal(results[0]?.title, "Workshop Notes");
+      assert.match(results[0]?.snippet ?? "", /soldering iron/u);
     } finally {
-      index.close();
+      await manager.stop();
     }
   });
 });

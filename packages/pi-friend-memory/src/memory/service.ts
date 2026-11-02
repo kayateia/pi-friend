@@ -40,10 +40,8 @@ import type { VectorIndex } from "./vector-index.ts";
 import { buildEmbeddingText } from "./vector-sync.ts";
 import { synchronizeVectorIndex } from "./vector-sync.ts";
 import { searchSemanticVectors } from "./semantic-search.ts";
-import {
-  buildIndexPathFiles,
-  loadImportedIndexedFiles,
-} from "./external-index.ts";
+import { buildIndexPathFiles } from "./external-index.ts";
+import type { ExternalIndexSource } from "./external-index-manager.ts";
 import { computeDecayUpdates, type DecayUpdate } from "./decay.ts";
 import type { MemoryNodeArea, MemoryNodeRepository } from "./repository.ts";
 
@@ -155,16 +153,19 @@ export class MemoryNodeService {
   private readonly repository: MemoryNodeRepository;
   private readonly now: () => Date;
   private readonly semantic: SemanticSearchDependencies | undefined;
+  private readonly externalIndex: ExternalIndexSource | undefined;
   private readonly lockContext = new AsyncLocalStorage<boolean>();
 
   constructor(
     repository: MemoryNodeRepository,
     now: () => Date = () => new Date(),
     semantic: SemanticSearchDependencies | undefined = undefined,
+    externalIndex: ExternalIndexSource | undefined = undefined,
   ) {
     this.repository = repository;
     this.now = now;
     this.semantic = semantic;
+    this.externalIndex = externalIndex;
   }
 
   /** Storage handle used by sweep artifact/state management. */
@@ -992,14 +993,19 @@ export class MemoryNodeService {
   /** Builds the in-memory search corpus from memory files and imports. */
   private async buildSearchIndex(): Promise<IndexedMarkdownFile[]> {
     const memoryFiles = await buildMemoryDocumentIndex(this.repository.store);
-    if (!this.semantic) {
-      return memoryFiles;
+    await this.externalIndex?.refresh();
+    const filesByPath = new Map<string, IndexedMarkdownFile>();
+    for (const file of memoryFiles) {
+      filesByPath.set(file.absolutePath, file);
     }
-    const importedFiles = await loadImportedIndexedFiles(
-      this.semantic.index,
-      this.repository.store.root,
+    for (const file of this.externalIndex?.getFiles() ?? []) {
+      if (!filesByPath.has(file.absolutePath)) {
+        filesByPath.set(file.absolutePath, file);
+      }
+    }
+    return [...filesByPath.values()].sort((left, right) =>
+      left.relativePath.localeCompare(right.relativePath),
     );
-    return [...memoryFiles, ...importedFiles];
   }
 
   /** Reads and validates one recovery record. */

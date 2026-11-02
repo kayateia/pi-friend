@@ -33,6 +33,9 @@ export type VectorPrunePredicate = (
   entry: VectorEntryMetadata,
 ) => boolean;
 
+/** Serializes synchronization passes that share one process-local index. */
+const synchronizationQueues = new WeakMap<VectorIndex, Promise<void>>();
+
 /**
  * Synchronizes indexed Markdown into the vector store.
  *
@@ -40,6 +43,32 @@ export type VectorPrunePredicate = (
  * leaves the previous derived index intact.
  */
 export async function synchronizeVectorIndex(
+  files: IndexedMarkdownFile[],
+  provider: EmbeddingProvider,
+  index: VectorIndex,
+  options: {
+    force?: boolean;
+    signal?: AbortSignal;
+    /** Preserve entries outside this synchronization set when false. */
+    pruneMissing?: boolean;
+    /**
+     * Limits stale-entry removal to matching records.
+     *
+     * The default applies to the entire index. External-source reconciliation
+     * uses this to remove stale imports without touching memory-tree vectors.
+     */
+    prune?: VectorPrunePredicate;
+    /** Maximum characters supplied to the embedding model per chunk. */
+    chunkSize?: number;
+  } = {},
+): Promise<VectorSyncResult> {
+  return withSynchronizationLock(index, () =>
+    synchronizeVectorIndexUnlocked(files, provider, index, options),
+  );
+}
+
+/** Runs one synchronization pass while the caller owns the index queue. */
+async function synchronizeVectorIndexUnlocked(
   files: IndexedMarkdownFile[],
   provider: EmbeddingProvider,
   index: VectorIndex,
@@ -152,6 +181,34 @@ export async function synchronizeVectorIndex(
     skipped: desired.length - changed.length,
     removed: staleKeys.length,
   };
+}
+
+/**
+ * Runs one index operation after earlier process-local passes have completed.
+ *
+ * Separate Pi conversations can share a root and index. This queue prevents a
+ * watcher refresh from interleaving its read-embed-write sequence with search
+ * or sweep synchronization in the same process.
+ */
+async function withSynchronizationLock<T>(
+  index: VectorIndex,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = synchronizationQueues.get(index);
+  let release = (): void => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  synchronizationQueues.set(index, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (synchronizationQueues.get(index) === current) {
+      synchronizationQueues.delete(index);
+    }
+  }
 }
 
 /** Builds the exact searchable text supplied to the embedding model. */

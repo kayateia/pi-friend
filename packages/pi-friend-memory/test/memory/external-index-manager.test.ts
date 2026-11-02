@@ -96,7 +96,7 @@ test("external manager reconciles initial paths and removes stale vectors", asyn
       );
 
       await rm(first);
-      await manager.refresh();
+      await manager.rescan();
       assert.deepEqual(
         manager.getFiles().map((file) => file.absolutePath),
         [await realpath(second)],
