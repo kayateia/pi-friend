@@ -35,6 +35,7 @@ test("missing configuration uses the default memory root", async () => {
     );
     assert.equal(config.toolPrefix, "");
     assert.equal(config.toolPrefix, DEFAULT_MEMORY_TOOL_PREFIX);
+    assert.deepEqual(config.indexPaths, []);
     assert.deepEqual(config.injection, {
       enabled: true,
       position: -1,
@@ -77,6 +78,43 @@ test("configured root expands a leading tilde", () => {
   );
 
   assert.equal(config.root, path.join(path.sep, "home", "friend", "workspace", "memory"));
+});
+
+test("external index paths expand, resolve, and de-duplicate", () => {
+  const configDir = path.join(path.sep, "tmp", "agent", "pi-friend");
+  const configPath = path.join(configDir, "pi-friend.yml");
+  const home = path.join(path.sep, "home", "friend");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  index_paths:",
+      "    - ~/notes",
+      "    - ../shared-notes",
+      "    - ~/notes",
+      `    - ${path.join(home, "notes")}`,
+    ].join("\n"),
+    configPath,
+    home,
+  );
+
+  assert.deepEqual(config.indexPaths, [
+    path.join(home, "notes"),
+    path.join(path.sep, "tmp", "agent", "shared-notes"),
+  ]);
+});
+
+test("invalid external index paths fail closed", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend.yml");
+  for (const source of [
+    "memory:\n  index_paths: ~/notes\n",
+    "memory:\n  index_paths:\n    - 42\n",
+    'memory:\n  index_paths:\n    - "  "\n',
+  ]) {
+    assert.throws(
+      () => parseMemoryConfig(source, configPath),
+      MemoryConfigError,
+    );
+  }
 });
 
 test("tool prefix is configurable and validated", () => {
