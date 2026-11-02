@@ -44,6 +44,7 @@ The root config for pi-friend is `~/.pi/agent/pi-friend/pi-friend.yml` with this
 memory:
   root: ~/workspace/memory
   tool_prefix: ""
+  index_paths: []
   vector:
     chunk_size: 4000
   injection:
@@ -131,9 +132,17 @@ The names below are the built-in tool names. A configured `tool_prefix` is prepe
 - `memory_read(slug, area?)` → reads a complete serialized node from canonical, staging, or superseded storage.
 - `memory_promote(candidateSlug)` → promotes one staging candidate. Near-duplicates are merged into an existing canonical node with links and attribution preserved.
 - `memory_search(query, mode, type?, limit?)` → `keyword`, `semantic`, or `hybrid` search over nodes, staging candidates, ordinary documents, and imported Markdown. Results include typed metadata, a match-centered or document-preview snippet, ranks, matched fields, and score.
-- `memory_index_path(path)` → additively indexes a Markdown file or directory tree. External files use stable absolute source paths, file mtime, first-heading title, and `imported` provenance. Content hashes make repeated indexing idempotent, and importing a subset never removes unrelated vector records.
 
 **Search must find documents, not just nodes.** Front matter is required only for `nodes/` and `staging/`.
+
+External Markdown files and directory trees are configured through
+`memory.index_paths` rather than a model-facing tool. A leading `~` is expanded,
+relative paths resolve from the directory containing `pi-friend.yml`, and
+overlapping paths are indexed once. The list is reconciled when a session
+starts and while Pi runs through a filesystem watcher. Deleting or renaming a
+source removes its stale vector chunks; keyword search reads the current source
+catalog and therefore also omits missing files. Changes to the YAML path list
+take effect when the session reloads.
 
 There is no daily-log tool or `daily/` subtree. Existing directories or
 Markdown files named `daily/` are left untouched and, if present, are treated as
@@ -242,7 +251,15 @@ Current first pass: expired tombstones are archived under
 - Markdown embeddings synchronize lazily during semantic or hybrid search. A SHA-256 content hash skips unchanged files, and metadata changes that affect the embedded representation refresh the record.
 - `memory.vector.chunk_size` controls the maximum characters supplied per embedding chunk. It defaults to 4,000 and accepts integers from 200 through 20,000. Long Markdown is split into overlapping chunks that prefer nearby paragraph boundaries; overlap scales down to stay below small configured chunk sizes.
 - Multiple vector hits from one source collapse to one search result. The result snippet comes from the best-matching chunk rather than the start of the whole document.
-- `memory_index_path` adds external Markdown without pruning unrelated vectors. Imported files are rebuilt from their source paths when search loads the corpus; repeated imports avoid duplicate records and unchanged embeddings.
+- `memory.index_paths` is the source of truth for external Markdown. Configured
+  files use stable absolute source paths, file mtime, first-heading titles, and
+  `imported` provenance. A debounced watcher rescans the complete configured set
+  after filesystem changes, while content hashes avoid repeat embeddings.
+  Reconciliation removes stale `external:` vectors for deleted files, renamed
+  paths, and paths removed from configuration without touching memory-tree
+  vectors. The catalog is available to keyword search even when semantic
+  embeddings are unavailable, and deleting `index/vectors.sqlite` is safe
+  because configured sources can rebuild it.
 - Hybrid retrieval fuses keyword and semantic candidates with reciprocal-rank fusion. Semantic and hybrid failures fall back to keyword retrieval for RAG injection.
 
 ## 12. Optional passes (proposals for Aisling's ruling)

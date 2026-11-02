@@ -1,5 +1,9 @@
 memory:
   root: ~/.pi/agent/pi-friend/memory
+  # Markdown files and directories watched and included in memory search.
+  index_paths: []
+  #  - ~/Documents/notes
+  #  - ~/journal
 
   injection:
     enabled: true

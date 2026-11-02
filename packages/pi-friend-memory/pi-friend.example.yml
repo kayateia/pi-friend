@@ -1,6 +1,10 @@
 memory:
   root: ~/.pi/agent/pi-friend/memory
   tool_prefix: ""
+  # Markdown files and directories watched and included in memory search.
+  index_paths: []
+  #  - ~/Documents/notes
+  #  - ~/journal
 
   vector:
     chunk_size: 4000

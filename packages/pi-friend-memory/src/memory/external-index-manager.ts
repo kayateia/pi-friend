@@ -14,8 +14,8 @@ import {
 import type { EmbeddingProvider } from "./embedding.ts";
 import {
   buildIndexPathFiles,
+  ExternalIndexPathError,
   isImportedVectorEntry,
-  MemoryIndexPathError,
 } from "./external-index.ts";
 import type { IndexedMarkdownFile } from "./indexer.ts";
 import type { VectorIndex } from "./vector-index.ts";
@@ -208,7 +208,7 @@ export class ExternalIndexManager implements ExternalIndexSource {
           filesByPath.set(file.absolutePath, file);
         }
       } catch (error) {
-        if (!(error instanceof MemoryIndexPathError)) {
+        if (!(error instanceof ExternalIndexPathError)) {
           throw error;
         }
         this.reportWarning(

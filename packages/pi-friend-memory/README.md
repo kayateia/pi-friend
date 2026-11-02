@@ -39,6 +39,10 @@ Override the root in `~/.pi/agent/pi-friend/pi-friend.yml`:
 memory:
   root: ~/workspace/memory
   tool_prefix: ""
+  # Markdown files and directories watched and included in memory search.
+  index_paths: []
+  #  - ~/Documents/notes
+  #  - ~/journal
   vector:
     chunk_size: 4000
   injection:
@@ -75,6 +79,13 @@ memory:
 
 A missing config uses the default. Malformed configuration is reported and
 does not fall back to another path. The tree is initialized on `session_start`.
+
+`memory.index_paths` lists Markdown files and directory trees that should be
+watched and included in search. Leading `~` is expanded, relative paths resolve
+from the `pi-friend` config directory, and overlapping paths are indexed once.
+The list is reconciled on session start and after filesystem changes while Pi is
+running. Files deleted or removed from the list have their stale vectors
+removed. Configuration list changes take effect on the next session or reload.
 
 `auto_capture.prompt`, `sweep.prompt`, and `dreaming.prompt` replace the
 corresponding internal model's system prompt. The task framing and required
@@ -195,9 +206,6 @@ Pi reads the extension entry point from the `pi.extensions` field in
   storage.
 - `memory_search` supports ranked keyword search and semantic search across
   nodes, staging candidates, and plain Markdown documents.
-- `memory_index_path` additively embeds a Markdown file or directory tree.
-  Imported files retain their source path, file modification time, first-heading
-  title, and `imported` provenance. Content hashes make repeat runs idempotent.
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.
@@ -283,9 +291,12 @@ range is 200–20,000. Chunks prefer nearby paragraph boundaries. Search
 deduplicates chunks back to one result per source document and previews the
 matching chunk.
 
-Use `memory_index_path` to index a Markdown corpus outside the configured
-memory root. Directory walks include nested `.md` files, ignore hidden paths
-and symlinks, and preserve all vector records outside the supplied path.
+Add a Markdown corpus outside the configured memory root to
+`memory.index_paths`. Directory walks include nested `.md` files and ignore
+hidden paths and symlinks. The complete configured set is reconciled on startup
+and after changes. Imported files retain their source path, file modification
+time, first-heading title, and `imported` provenance. Deletions and paths
+removed from configuration are pruned from the vector index automatically.
 
 The Markdown tree remains canonical. Deleting `index/vectors.sqlite` is always
 safe because the index can be rebuilt from source files. Hybrid mode combines

@@ -40,7 +40,6 @@ import type { VectorIndex } from "./vector-index.ts";
 import { buildEmbeddingText } from "./vector-sync.ts";
 import { synchronizeVectorIndex } from "./vector-sync.ts";
 import { searchSemanticVectors } from "./semantic-search.ts";
-import { buildIndexPathFiles } from "./external-index.ts";
 import type { ExternalIndexSource } from "./external-index-manager.ts";
 import { computeDecayUpdates, type DecayUpdate } from "./decay.ts";
 import type { MemoryNodeArea, MemoryNodeRepository } from "./repository.ts";
@@ -107,26 +106,6 @@ export interface MemoryDreamInput {
   nodeSlugs: string[];
   agents?: string[];
   source?: string;
-}
-
-/** Metadata returned for one Markdown file processed by bulk indexing. */
-export interface MemoryIndexPathFile {
-  path: string;
-  title?: string;
-  modifiedAt: string;
-  provenance: string;
-}
-
-/** Result of one additive Markdown bulk-index pass. */
-export interface MemoryIndexPathResult {
-  sourcePath: string;
-  /** Number of source Markdown files processed. */
-  total: number;
-  /** Number of vector chunks represented by those files. */
-  chunks: number;
-  embedded: number;
-  skipped: number;
-  files: MemoryIndexPathFile[];
 }
 
 /** Optional semantic-search dependencies, available only when configured. */
@@ -368,52 +347,6 @@ export class MemoryNodeService {
     }
 
     return results;
-  }
-
-  /**
-   * Additively embeds a Markdown file or directory tree.
-   *
-   * Existing vector records outside the supplied path are preserved. Content
-   * hashes make repeated imports cheap and prevent duplicate records.
-   */
-  async indexPath(
-    inputPath: string,
-    options: { cwd: string },
-  ): Promise<MemoryIndexPathResult> {
-    return this.runSerialized(async () => {
-      if (!this.semantic) {
-        throw new MemoryServiceError(
-          "Bulk indexing is unavailable because no embedding provider is configured.",
-        );
-      }
-
-      const prepared = await buildIndexPathFiles(inputPath, {
-        cwd: options.cwd,
-        memoryRoot: this.repository.store.root,
-      });
-      const synchronized = await synchronizeVectorIndex(
-        prepared.files,
-        this.semantic.provider,
-        this.semantic.index,
-        {
-          pruneMissing: false,
-          chunkSize: this.store.config.vector.chunkSize,
-        },
-      );
-      return {
-        sourcePath: prepared.sourcePath,
-        total: prepared.files.length,
-        chunks: synchronized.total,
-        embedded: synchronized.embedded,
-        skipped: synchronized.skipped,
-        files: prepared.files.map((file) => ({
-          path: file.relativePath,
-          ...(file.title === undefined ? {} : { title: file.title }),
-          modifiedAt: file.modifiedAt ?? "",
-          provenance: file.provenance ?? "imported",
-        })),
-      };
-    });
   }
 
   /** Recomputes volume-relative decay metadata for canonical nodes. */
