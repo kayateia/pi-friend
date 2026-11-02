@@ -16,7 +16,7 @@ The shared design document remains at
 The memory extension reads:
 
 ```text
-~/.pi/agent/pi-friend/pi-friend.yml
+~/.pi/agent/pi-friend/pi-friend-memory.yml
 ```
 
 The prompt extension reads:
@@ -25,7 +25,7 @@ The prompt extension reads:
 ~/.pi/agent/pi-friend/pi-friend-prompt.yml
 ```
 
-See [`pi-friend.example.yml`](./pi-friend.example.yml) for the memory
+See [`pi-friend-memory.example.yml`](./pi-friend-memory.example.yml) for the memory
 configuration and
 [`pi-friend-prompt.example.yml`](./packages/pi-friend-prompt/pi-friend-prompt.example.yml)
 for the prompt configuration.

@@ -205,8 +205,8 @@ Previous `replacement` fields map to `text`, and `replacement_file` maps to a
 one-item `files` list. Multiple files are now supported for every change.
 
 Move the resulting `prompt` list from `pi-friend.yml` into the new
-`pi-friend-prompt.yml` file. The memory extension continues to use
-`pi-friend.yml`.
+`pi-friend-prompt.yml` file. The memory extension uses its own
+`pi-friend-memory.yml` file.
 
 ## Failure handling
 

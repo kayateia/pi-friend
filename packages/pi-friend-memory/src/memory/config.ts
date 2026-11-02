@@ -81,9 +81,12 @@ export interface EmbeddingsConfig {
 /** Default prefix for model-facing memory tool names. */
 export const DEFAULT_MEMORY_TOOL_PREFIX = "";
 
+/** Filename used for the memory extension's configuration. */
+export const MEMORY_CONFIG_FILENAME = "pi-friend-memory.yml";
+
 /** Resolved memory configuration used by the storage layer. */
 export interface MemoryConfig {
-  /** Absolute path to the user's pi-friend.yml file. */
+  /** Absolute path to the user's pi-friend-memory.yml file. */
   configPath: string;
   /** Prefix prepended to every registered memory tool name. */
   toolPrefix: string;
@@ -280,7 +283,7 @@ export async function loadMemoryConfig(
   const agentDir = options.agentDir ?? getAgentDir();
   const homeDir = options.homeDir ?? homedir();
   const configDir = getFriendConfigDir(agentDir);
-  const configPath = path.join(configDir, "pi-friend.yml");
+  const configPath = path.join(configDir, MEMORY_CONFIG_FILENAME);
 
   let source: string;
   try {
@@ -331,7 +334,7 @@ function parseToolPrefix(value: unknown, configPath: string): string {
  *
  * Paths are resolved exactly once at configuration load so every watcher and
  * reconciliation uses the same identity. Relative paths are anchored to the
- * directory containing pi-friend.yml, matching memory.root.
+ * directory containing pi-friend-memory.yml, matching memory.root.
  */
 function parseIndexPaths(
   value: unknown,

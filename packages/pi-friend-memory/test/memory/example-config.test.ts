@@ -16,10 +16,10 @@ import { DREAM_SYSTEM_PROMPT } from "../../src/memory/dream.ts";
 import { SWEEP_SYSTEM_PROMPT } from "../../src/memory/sweep-model.ts";
 
 test("the example configuration matches supported defaults", async () => {
-  const examplePath = path.resolve("pi-friend.example.yml");
+  const examplePath = path.resolve("pi-friend-memory.example.yml");
   const config = parseMemoryConfig(
     await readFile(examplePath, "utf8"),
-    path.join("/tmp", "pi-friend.yml"),
+    path.join("/tmp", "pi-friend-memory.yml"),
     "/Users/example",
   );
 

@@ -1,3 +1,4 @@
+# pi-friend-memory configuration
 memory:
   root: ~/.pi/agent/pi-friend/memory
   tool_prefix: ""
