@@ -256,6 +256,11 @@ contains:
   sources, default agent preset, disabled tool count, lazy tool loading, and
   whether their combination causes web UI to replace the system prompt.
 
+Prompt construction failures add a `prompt build failed` entry with the session
+ID, warning message, and a bounded error cause chain. This includes the
+configuration location and missing-file path when a prompt source cannot be
+loaded.
+
 The diagnostic reads `client-state.json` from `PI_WEB_DATA_DIR`, defaulting to
 `~/.pi-web`. A missing file is reported as `available: false`.
 

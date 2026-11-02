@@ -62,6 +62,11 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
       });
     } catch (error) {
       const message = `pi-friend-prompt: ${describeError(error)}`;
+      promptDebugLog("prompt build failed", {
+        sessionId,
+        message,
+        error: describeErrorForLog(error),
+      });
       if (ctx.hasUI) {
         ctx.ui.notify(message, "warning");
       } else {
@@ -103,4 +108,38 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
 /** Formats unknown thrown values for a warning. */
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Builds a bounded, function-free error chain for the debug log. */
+function describeErrorForLog(
+  error: unknown,
+  depth = 0,
+): {
+  name: string;
+  message: string;
+  code?: string;
+  cause?: ReturnType<typeof describeErrorForLog>;
+} {
+  if (!(error instanceof Error)) {
+    return {
+      name: "NonError",
+      message: String(error),
+    };
+  }
+
+  const code = readErrorCode(error);
+  return {
+    name: error.name,
+    message: error.message,
+    ...(code === undefined ? {} : { code }),
+    ...(depth >= 4 || error.cause === undefined
+      ? {}
+      : { cause: describeErrorForLog(error.cause, depth + 1) }),
+  };
+}
+
+/** Reads a Node-style string error code without using an any cast. */
+function readErrorCode(error: Error): string | undefined {
+  const code = (error as Error & { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
 }
