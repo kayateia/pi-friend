@@ -50,6 +50,8 @@ export async function buildIndexPathFiles(
     cwd: string;
     memoryRoot: string;
     homeDir?: string;
+    /** Allows a configured directory to contain no Markdown files yet. */
+    allowEmpty?: boolean;
   },
 ): Promise<IndexPathFiles> {
   const requested = inputPath.trim();
@@ -86,7 +88,7 @@ export async function buildIndexPathFiles(
     );
   }
 
-  if (markdownPaths.length === 0) {
+  if (markdownPaths.length === 0 && options.allowEmpty !== true) {
     throw new MemoryIndexPathError(
       `No Markdown files were found under ${sourcePath}.`,
     );
