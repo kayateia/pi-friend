@@ -16,6 +16,7 @@ import type { EmbeddingProvider } from "./embedding.ts";
 import type { IndexedMarkdownFile } from "./indexer.ts";
 import type {
   VectorIndex,
+  VectorEntryMetadata,
   VectorRecord,
 } from "./vector-index.ts";
 
@@ -26,6 +27,11 @@ export interface VectorSyncResult {
   skipped: number;
   removed: number;
 }
+
+/** Decides whether one existing vector belongs to the synchronization scope. */
+export type VectorPrunePredicate = (
+  entry: VectorEntryMetadata,
+) => boolean;
 
 /**
  * Synchronizes indexed Markdown into the vector store.
@@ -42,6 +48,13 @@ export async function synchronizeVectorIndex(
     signal?: AbortSignal;
     /** Preserve entries outside this synchronization set when false. */
     pruneMissing?: boolean;
+    /**
+     * Limits stale-entry removal to matching records.
+     *
+     * The default applies to the entire index. External-source reconciliation
+     * uses this to remove stale imports without touching memory-tree vectors.
+     */
+    prune?: VectorPrunePredicate;
     /** Maximum characters supplied to the embedding model per chunk. */
     chunkSize?: number;
   } = {},
@@ -91,7 +104,12 @@ export async function synchronizeVectorIndex(
   const staleKeys =
     options.pruneMissing === false
       ? []
-      : [...existing.keys()].filter((key) => !desiredKeys.has(key));
+      : [...existing.entries()]
+          .filter(
+            ([key, entry]) =>
+              !desiredKeys.has(key) && (options.prune?.(entry) ?? true),
+          )
+          .map(([key]) => key);
   const changed =
     options.force === true
       ? desired

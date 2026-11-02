@@ -188,6 +188,47 @@ test("metadata-only changes refresh vector metadata", async () => {
   }
 });
 
+test("scoped synchronization prunes only matching stale vectors", async () => {
+  const index = SqliteVectorIndex.open({
+    databasePath: ":memory:",
+    model: "fake/model",
+    dimensions: 3,
+  });
+  const provider = new FakeEmbeddingProvider();
+  try {
+    const internal = makeFile("nodes/internal.md", "Internal body");
+    const external = {
+      ...makeFile("external:notes.md", "External body"),
+      vectorKey: "external:notes.md",
+    };
+    await synchronizeVectorIndex([internal, external], provider, index);
+
+    index.upsert({
+      key: "external:stale.md",
+      kind: "document",
+      sourcePath: "/notes/stale.md",
+      contentHash: "stale",
+      embedding: new Float32Array([0, 0, 1]),
+      tags: [],
+    });
+    const result = await synchronizeVectorIndex([external], provider, index, {
+      prune: (entry) => entry.key.startsWith("external:"),
+    });
+
+    assert.equal(result.removed, 1);
+    assert.equal(
+      index.listEntries().some((entry) => entry.key === "nodes/internal.md"),
+      true,
+    );
+    assert.equal(
+      index.listEntries().some((entry) => entry.key === "external:stale.md"),
+      false,
+    );
+  } finally {
+    index.close();
+  }
+});
+
 test("long documents synchronize as stable vector chunks", async () => {
   const index = SqliteVectorIndex.open({
     databasePath: ":memory:",
