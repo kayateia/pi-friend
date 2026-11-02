@@ -25,14 +25,29 @@ prompt:
   #     Follow the shared household conventions.
 
   replacements:
+    # With no pattern, prepend and append operate on the complete section.
+    - section: addendum
+      action: prepend
+      replacement: |
+        # Friend context
+
     - section: addendum
       action: append
       replacement: |
 
         Do not confuse an imagined role with the user's real-world identity.
 
-    # Prepending or appending relative to every regex match uses the same action
-    # with a pattern:
+    # Configure other sections by name under prompt.sections. Valid names start
+    # with a lowercase letter and contain only lowercase letters, digits,
+    # underscores, or hyphens. Pi's generated sections are preamble, tools,
+    # rules, docs, addendum, project_context, skills, and cwd. Use prompt.custom
+    # for the preamble and prompt.addendum for the addendum; those two names
+    # cannot be used under prompt.sections.
+    #
+    # replacements[].section may target preamble, addendum, or any section that
+    # exists in the prompt. Add a custom section through prompt.sections first.
+
+    # With a pattern, prepend or append relative to every regex match:
     #
     # - section: addendum
     #   action: prepend

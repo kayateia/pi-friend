@@ -68,8 +68,32 @@ When the preamble is replaced, Pi would normally omit its generated `tools`,
 current request options unless the configuration explicitly replaces them.
 
 Section keys use Pi's section-name format: a lowercase letter followed by
-lowercase letters, digits, underscores, or hyphens. `preamble` and `addendum`
-are configured through `custom` and `addendum`, not through `sections`.
+lowercase letters, digits, underscores, or hyphens. In other words, they must
+match `^[a-z][a-z0-9_-]*$`.
+
+The configuration slots map to these replacement names:
+
+| Configuration | Replacement target | Meaning |
+| --- | --- | --- |
+| `prompt.custom` | `preamble` | The main system-prompt preamble |
+| `prompt.addendum` | `addendum` | Pi's append-system-prompt section |
+| `prompt.sections.<name>` | `<name>` | Another generated or custom section |
+
+Pi currently generates `tools`, `rules`, `docs`, `project_context`, `skills`,
+and `cwd` sections. Those names can be used under `prompt.sections` to replace
+their generated content. Other valid names create additional XML-wrapped prompt
+sections, and other extensions may also contribute section names that can be
+replaced.
+
+`preamble` and `addendum` are reserved for `prompt.custom` and
+`prompt.addendum`; do not put them under `prompt.sections`. Valid custom names
+include `house_rules`, `work-context`, and `memory_notes`. Invalid names include
+`HouseRules`, `2fa_rules`, and `house rules`.
+
+The `section` of a replacement rule can be `preamble`, `addendum`, or any valid
+section that exists in the generated prompt. A replacement cannot target an
+arbitrary section name that does not exist yet; define it under
+`prompt.sections` first.
 
 ## Rewriting existing text
 
@@ -79,20 +103,35 @@ text. Replacement text can be inline or loaded from a file:
 ```yaml
 prompt:
   replacements:
+    # Prepend once to the complete addendum.
+    - section: addendum
+      action: prepend
+      replacement: |
+        Configured context:
+
+    # Append once to the complete addendum.
     - section: addendum
       action: append
       replacement_file: addendum/extra.md
 
+    # Prepend the heading before the first match.
     - section: preamble
       action: prepend
       pattern: '^'
-      flags: g
       replacement: '# Friend context'
 
+    # Append to every matching rule line.
     - section: rules
+      action: append
       pattern: '^- Be concise.*$'
       flags: gm
-      replacement: '- Prefer concise, concrete answers'
+      replacement: ' Prefer concrete answers.'
+
+    # Replace every matching addendum heading.
+    - section: addendum
+      pattern: '^## Temporary$'
+      flags: gm
+      replacement: '## Current context'
 ```
 
 Without `pattern`, the action applies once to the whole section:
