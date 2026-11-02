@@ -1,4 +1,48 @@
 prompt:
-  custom: |
-    You are Lime, an AI friend to a plural system collectively called Feathersong.
-    Replace this example with the desired system-prompt preamble.
+  custom:
+    text: |
+      You are Lime, an AI friend to a plural system collectively called Feathersong.
+      Replace this example with the desired system-prompt preamble.
+    # Files are loaded in order after the inline text. Relative paths are
+    # resolved beside the shared pi-friend.yml file.
+    # files:
+    #   - persona/details.md
+    #   - persona/local.md
+
+  addendum:
+    text: |
+      Prefer direct, warm, concrete language.
+    # files:
+    #   - addendum/global.md
+    #   - addendum/project.md
+
+  # Other named Pi prompt sections can be replaced here.
+  # sections:
+  #   project_context:
+  #     files:
+  #       - context/shared.md
+  #   house_rules: |
+  #     Follow the shared household conventions.
+
+  replacements:
+    - section: addendum
+      action: append
+      replacement: |
+
+        Do not confuse an imagined role with the user's real-world identity.
+
+    # Prepending or appending relative to every regex match uses the same action
+    # with a pattern:
+    #
+    # - section: addendum
+    #   action: prepend
+    #   pattern: '^## '
+    #   flags: gm
+    #   replacement: 'Friend context: '
+
+    # Replacement text can also come from a file:
+    #
+    # - section: addendum
+    #   pattern: '^## Temporary$'
+    #   flags: gm
+    #   replacement_file: replacements/addendum.md

@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyCustomPrompt } from "../src/editor.ts";
+import { applyCustomPrompt, applyPromptConfig } from "../src/editor.ts";
 import { loadSystemPromptApi } from "../src/system-prompt-compat.ts";
 
 test("actual Pi prompt builder retains tools, rules, and docs", async () => {
@@ -26,4 +26,46 @@ test("actual Pi prompt builder retains tools, rules, and docs", async () => {
   assert.match(sections.tools ?? "", /Read files/);
   assert.match(sections.rules ?? "", /Be concise/);
   assert.match(sections.docs ?? "", /Pi documentation/);
+});
+
+test("actual Pi prompt builder applies addendum and section rewrites", async () => {
+  const api = await loadSystemPromptApi();
+  const options = api.normalizeBuildSystemPromptOptions({
+    cwd: "/tmp",
+    selectedTools: ["read"],
+    toolSnippets: { read: "Read files" },
+    appendSystemPrompt: "Original addendum.",
+  });
+
+  applyPromptConfig(
+    options,
+    {
+      addendum: "Configured addendum.",
+      sections: { house_rules: "House rules." },
+      replacements: [
+        {
+          section: "addendum",
+          action: "append",
+          flags: "",
+          replacementText: "\nExtra addendum.",
+        },
+        {
+          section: "rules",
+          action: "replace",
+          pattern: "^- Be concise.*$",
+          flags: "gm",
+          replacementText: "- Stay concise",
+        },
+      ],
+    },
+    api.buildSystemPromptSections,
+  );
+  const sections = api.buildSystemPromptSections(options);
+
+  assert.match(sections.addendum ?? "", /Configured addendum\./);
+  assert.match(sections.addendum ?? "", /Extra addendum\./);
+  assert.doesNotMatch(sections.addendum ?? "", /Original addendum\./);
+  assert.match(sections.house_rules ?? "", /House rules\./);
+  assert.match(sections.rules ?? "", /Stay concise/);
+  assert.doesNotMatch(sections.rules ?? "", /- Be concise/);
 });

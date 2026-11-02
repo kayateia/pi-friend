@@ -2,8 +2,10 @@
 
 Configurable edits to Pi's generated system prompt.
 
-The first pass replaces only the custom prompt preamble while preserving Pi's
-generated `tools`, `rules`, and `docs` sections.
+The extension can replace the prompt preamble, replace or extend Pi's
+`addendum`, edit other structured prompt sections, load text from files, and
+rewrite section text with regular expressions. Configuration and files are
+reread for every request, so changes do not require restarting Pi.
 
 ## Configuration
 
@@ -13,17 +15,119 @@ This package reads the shared configuration file:
 ~/.pi/agent/pi-friend/pi-friend.yml
 ```
 
-It reads only the top-level `prompt` section:
+It reads only the top-level `prompt` section. The original scalar form remains
+supported:
 
 ```yaml
 prompt:
   custom: |
     You are Lime, an AI friend to a plural system collectively called Feathersong.
-    ...
 ```
 
 The `memory` section is ignored by this extension. A missing `prompt` section
-or empty `prompt.custom` leaves Pi's system prompt unchanged.
+leaves Pi's system prompt unchanged.
+
+## Prompt sections
+
+`custom` replaces the preamble. `addendum` replaces Pi's append-system-prompt
+section. Other Pi sections, including `tools`, `rules`, `docs`,
+`project_context`, and `skills`, can be replaced through `sections`.
+
+Each slot accepts a string or an object containing inline `text` and an ordered
+list of `files`:
+
+```yaml
+prompt:
+  custom:
+    text: |
+      You are Lime, an AI friend.
+    files:
+      - persona/details.md
+      - persona/local.md
+
+  addendum:
+    files:
+      - addendum/global.md
+      - addendum/project.md
+
+  sections:
+    project_context:
+      files:
+        - context/shared.md
+    house_rules: |
+      Follow the shared household conventions.
+```
+
+Inline text comes first, followed by files in declaration order. Components are
+trimmed and joined with a blank line. Relative file paths are resolved beside
+`pi-friend.yml`; absolute paths and paths beginning with `~/` are also
+supported.
+
+When the preamble is replaced, Pi would normally omit its generated `tools`,
+`rules`, and `docs` sections. The extension restores those sections from the
+current request options unless the configuration explicitly replaces them.
+
+Section keys use Pi's section-name format: a lowercase letter followed by
+lowercase letters, digits, underscores, or hyphens. `preamble` and `addendum`
+are configured through `custom` and `addendum`, not through `sections`.
+
+## Rewriting existing text
+
+The `replacements` list can replace, prepend to, or append to existing prompt
+text. Replacement text can be inline or loaded from a file:
+
+```yaml
+prompt:
+  replacements:
+    - section: addendum
+      action: append
+      replacement_file: addendum/extra.md
+
+    - section: preamble
+      action: prepend
+      pattern: '^'
+      flags: g
+      replacement: '# Friend context'
+
+    - section: rules
+      pattern: '^- Be concise.*$'
+      flags: gm
+      replacement: '- Prefer concise, concrete answers'
+```
+
+Without `pattern`, the action applies once to the whole section:
+
+- `replace` replaces the complete section. This is the default.
+- `prepend` places the new text before the complete section.
+- `append` places the new text after the complete section.
+
+With `pattern`, the action applies to regular-expression matches:
+
+- `replace` substitutes every match, subject to the regex flags.
+- `prepend` places the new text before each match.
+- `append` places the new text after each match.
+
+Regex flags default to `g`. An explicit `flags` value replaces that default, so
+omit `g` to edit only the first match. Patterns and flags use JavaScript regular
+expression syntax. Replacement text uses JavaScript substitution syntax, such
+as `$1` for capture groups and `$&` for the matched text. Whole-section actions
+use the replacement text literally.
+
+Rules are applied in configuration order, and later rules see the result of
+earlier rules. Replacements target unwrapped section contents rather than the
+generated `<section>...</section>` tags. A replacement fails if its target
+section does not exist.
+
+## Failure handling
+
+The configuration and all referenced prompt files are loaded on every request.
+If parsing, file loading, regex rewriting, or prompt construction fails, the
+extension leaves that request's original prompt unchanged and reports a warning.
+It tries again on every later request, including after the problem is fixed.
+
+This means missing files, malformed YAML, invalid regexes, and misspelled
+section names are visible every time they affect a request instead of only once
+per Pi process.
 
 ## Host compatibility
 
@@ -45,7 +149,7 @@ default prompt composition:
 - Disable `Tool Lazy Loading`.
 
 When those are default, `pi-web-ui` returns no replacement prompt and the
-normal preamble replacement is preserved directly.
+extension's prompt edits are preserved directly.
 
 ## Diagnostics
 

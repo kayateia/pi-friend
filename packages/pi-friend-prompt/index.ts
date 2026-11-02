@@ -10,9 +10,10 @@ import type {
   BeforeAgentStartEvent,
   ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { loadPromptConfig } from "./src/config.ts";
+import { hasPromptEdits, loadPromptConfig } from "./src/config.ts";
 import { promptDebugLog } from "./src/debug-log.ts";
-import { applyCustomPrompt } from "./src/editor.ts";
+import { applyPromptConfig } from "./src/editor.ts";
+import { resolvePromptConfig } from "./src/prompt-files.ts";
 import { loadSystemPromptApi } from "./src/system-prompt-compat.ts";
 import {
   analyzePromptDelivery,
@@ -28,11 +29,11 @@ interface PromptRunState {
 /**
  * Registers configurable system-prompt editing.
  *
- * The extension reads the shared pi-friend config on every agent start so
- * changes to prompt.custom become visible without restarting Pi.
+ * The extension reads config and prompt files on every agent start so changes
+ * become visible without restarting Pi. Failed builds are reported each time
+ * and retried on the next request.
  */
 export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
-  let warningShown = false;
   const promptRuns = new Map<string, PromptRunState>();
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -42,29 +43,29 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
     });
     try {
       const config = await loadPromptConfig();
-      if (!config.customPrompt) {
+      if (!hasPromptEdits(config)) {
         return;
       }
 
+      const resolvedConfig = await resolvePromptConfig(config);
       const api = await loadSystemPromptApi();
-      applyCustomPrompt(
+      const result = applyPromptConfig(
         event.systemPromptOptions,
-        config.customPrompt,
+        resolvedConfig,
         api.buildSystemPromptSections,
       );
       promptRuns.set(sessionId, {
         options: event.systemPromptOptions,
-        narrative: config.customPrompt.trim(),
+        ...(result.narrative === undefined
+          ? {}
+          : { narrative: result.narrative }),
       });
     } catch (error) {
-      if (!warningShown) {
-        warningShown = true;
-        const message = `pi-friend-prompt: ${describeError(error)}`;
-        if (ctx.hasUI) {
-          ctx.ui.notify(message, "warning");
-        } else {
-          console.error(message);
-        }
+      const message = `pi-friend-prompt: ${describeError(error)}`;
+      if (ctx.hasUI) {
+        ctx.ui.notify(message, "warning");
+      } else {
+        console.error(message);
       }
     }
   });
