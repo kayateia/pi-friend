@@ -9,13 +9,14 @@ every request, so changes do not require restarting Pi.
 
 ## Configuration
 
-This package reads the shared configuration file:
+This package reads its dedicated configuration file:
 
 ```text
-~/.pi/agent/pi-friend/pi-friend.yml
+~/.pi/agent/pi-friend/pi-friend-prompt.yml
 ```
 
-It reads only the top-level `prompt` list. The `memory` section is ignored:
+The prompt extension no longer reads the `prompt` section from
+`pi-friend.yml`. The dedicated file contains the top-level `prompt` list:
 
 ```yaml
 prompt:
@@ -47,8 +48,8 @@ Every list entry describes one change:
 
 `text` and `files` may be used together. Inline text comes first, followed by
 files in declaration order. Components are joined with a blank line. Relative
-paths resolve beside `pi-friend.yml`; absolute paths and paths beginning with
-`~/` are also supported.
+paths resolve beside `pi-friend-prompt.yml`; absolute paths and paths beginning
+with `~/` are also supported.
 
 An explicit action is required. A change with neither meaningful text nor a
 file is rejected.
@@ -202,6 +203,10 @@ prompt:
 
 Previous `replacement` fields map to `text`, and `replacement_file` maps to a
 one-item `files` list. Multiple files are now supported for every change.
+
+Move the resulting `prompt` list from `pi-friend.yml` into the new
+`pi-friend-prompt.yml` file. The memory extension continues to use
+`pi-friend.yml`.
 
 ## Failure handling
 

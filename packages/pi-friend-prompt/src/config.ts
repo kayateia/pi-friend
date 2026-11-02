@@ -44,11 +44,11 @@ export class PromptConfigError extends Error {
   }
 }
 
-/** Returns the shared pi-friend configuration path. */
-export function getSharedConfigPath(
+/** Returns the dedicated pi-friend-prompt configuration path. */
+export function getPromptConfigPath(
   agentDir: string = getAgentDir(),
 ): string {
-  return path.join(agentDir, "pi-friend", "pi-friend.yml");
+  return path.join(agentDir, "pi-friend", "pi-friend-prompt.yml");
 }
 
 /** Parses the ordered `prompt` changes while ignoring other sections. */
@@ -95,7 +95,7 @@ export async function loadPromptConfig(
   options: PromptConfigOptions = {},
 ): Promise<PromptConfig> {
   const configPath =
-    options.configPath ?? getSharedConfigPath(options.agentDir);
+    options.configPath ?? getPromptConfigPath(options.agentDir);
 
   let source: string;
   try {

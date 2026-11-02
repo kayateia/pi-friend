@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import test from "node:test";
 import {
-  getSharedConfigPath,
+  getPromptConfigPath,
   hasPromptEdits,
   loadPromptConfig,
   parsePromptConfig,
@@ -43,7 +43,7 @@ test("prompt config parses an ordered list with repeated sections", () => {
       "    flags: gm",
       "    text: '- Stay focused'",
     ].join("\n"),
-    "/tmp/pi-friend.yml",
+    "/tmp/pi-friend-prompt.yml",
   );
 
   assert.deepEqual(config.changes, [
@@ -99,7 +99,7 @@ test("regex flags default to global", () => {
       "    pattern: friend",
       "    text: companion",
     ].join("\n"),
-    "/tmp/pi-friend.yml",
+    "/tmp/pi-friend-prompt.yml",
   );
 
   assert.deepEqual(config.changes[0], {
@@ -133,10 +133,14 @@ test("malformed prompt changes fail closed", () => {
   }
 });
 
-test("prompt config loads from the shared Pi agent path", async () => {
+test("prompt config loads from the dedicated Pi agent path", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-config-"));
   try {
-    const configPath = getSharedConfigPath(directory);
+    const configPath = getPromptConfigPath(directory);
+    assert.equal(
+      configPath,
+      path.join(directory, "pi-friend", "pi-friend-prompt.yml"),
+    );
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
@@ -151,6 +155,29 @@ test("prompt config loads from the shared Pi agent path", async () => {
 
     const config = await loadPromptConfig({ agentDir: directory });
     assert.equal(config.changes[0]?.text, "Configured narrative.");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("prompt config ignores prompt data in the shared pi-friend file", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-config-"));
+  try {
+    const sharedDirectory = path.join(directory, "pi-friend");
+    await mkdir(sharedDirectory, { recursive: true });
+    await writeFile(
+      path.join(sharedDirectory, "pi-friend.yml"),
+      [
+        "prompt:",
+        "  - section: preamble",
+        "    action: replace",
+        "    text: Old shared prompt.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const config = await loadPromptConfig({ agentDir: directory });
+    assert.deepEqual(config.changes, []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

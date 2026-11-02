@@ -31,7 +31,7 @@ test("prompt files resolve in declared order relative to the config", async () =
         "    action: append",
         "    files: [first.md]",
       ].join("\n"),
-      path.join(directory, "pi-friend.yml"),
+      path.join(directory, "pi-friend-prompt.yml"),
     );
 
     const resolved = await resolvePromptConfig(config);
@@ -58,7 +58,7 @@ test("prompt files are reread for every request", async () => {
         "    action: replace",
         "    files: [persona.md]",
       ].join("\n"),
-      path.join(directory, "pi-friend.yml"),
+      path.join(directory, "pi-friend-prompt.yml"),
     );
 
     assert.equal(
@@ -79,7 +79,7 @@ test("prompt files are reread for every request", async () => {
 test("missing prompt files produce a contextual error", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-files-"));
   try {
-    const configPath = path.join(directory, "pi-friend.yml");
+    const configPath = path.join(directory, "pi-friend-prompt.yml");
     const config = parsePromptConfig(
       [
         "prompt:",

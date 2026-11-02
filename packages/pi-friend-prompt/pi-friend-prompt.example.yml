@@ -6,7 +6,7 @@ prompt:
       You are Lime, an AI friend to a plural system collectively called Feathersong.
       Replace this example with the desired system-prompt preamble.
     # Files are loaded in order after the inline text. Relative paths are
-    # resolved beside the shared pi-friend.yml file.
+    # resolved beside pi-friend-prompt.yml.
     # files:
     #   - persona/details.md
     #   - persona/local.md

@@ -32,8 +32,3 @@ memory:
     enabled: true
     max_nodes: 4
     # model: openrouter/google/gemini-2.5-flash
-
-prompt:
-  custom: |
-    You are Lime, an AI friend to a plural system collectively called Feathersong.
-    Replace this example with the desired system-prompt preamble.
