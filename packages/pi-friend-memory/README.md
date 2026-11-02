@@ -339,4 +339,7 @@ PI_FRIEND_DEBUG_HOOKS=1 pi --extension ./index.ts
 Lifecycle debug output never writes to stdout or the TUI.
 
 The logger includes session, agent, turn, prompt, provider, tool, input, model,
-and UI boundaries. It intentionally omits token-level streaming updates.
+and UI boundaries. Each entry contains only the event type and selected context
+fields such as session, model, cwd, usage, and prompt size. Raw event payloads,
+tool output, getters, and context methods are omitted. Token-level streaming
+updates are also intentionally omitted.

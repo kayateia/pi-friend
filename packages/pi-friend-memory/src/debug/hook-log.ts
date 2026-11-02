@@ -16,24 +16,44 @@ import {
   isDebugEnabled,
 } from "./log.ts";
 
+/** Bounded, function-free summary of one lifecycle hook invocation. */
+export interface HookLogSummary {
+  eventType: string;
+  context: {
+    cwd: string;
+    mode: string;
+    hasUI: boolean;
+    sessionId: string;
+    model?: string;
+    thinkingLevel?: string;
+    idle: boolean;
+    projectTrusted: boolean;
+    hasPendingMessages: boolean;
+    hasAbortSignal: boolean;
+    contextUsage: ReturnType<ExtensionContext["getContextUsage"]>;
+    systemPromptChars: number;
+  };
+}
+
 /**
- * Writes one complete hook invocation to the debug log.
- *
- * Every Pi event handler receives the event-specific payload first and the
- * shared ExtensionContext second. Logging both makes it possible to inspect
- * which fields are available before memory behavior is attached to them.
+ * Captures useful lifecycle state without logging raw event payloads or the
+ * function-bearing extension context.
  */
-function logHook(event: ExtensionEvent, ctx: ExtensionContext): void {
-  debugLog(`hook ${event.type}`, {
-    event,
-    context: ctx,
-    contextValues: {
+export function summarizeHook(
+  event: ExtensionEvent,
+  ctx: ExtensionContext,
+): HookLogSummary {
+  return {
+    eventType: event.type,
+    context: {
       cwd: ctx.cwd,
       mode: ctx.mode,
       hasUI: ctx.hasUI,
       sessionId: ctx.sessionManager.getSessionId(),
-      model: ctx.model?.id,
-      thinkingLevel: ctx.thinkingLevel,
+      ...(ctx.model?.id === undefined ? {} : { model: ctx.model.id }),
+      ...(ctx.thinkingLevel === undefined
+        ? {}
+        : { thinkingLevel: ctx.thinkingLevel }),
       idle: ctx.isIdle(),
       projectTrusted: ctx.isProjectTrusted(),
       hasPendingMessages: ctx.hasPendingMessages(),
@@ -41,7 +61,12 @@ function logHook(event: ExtensionEvent, ctx: ExtensionContext): void {
       contextUsage: ctx.getContextUsage(),
       systemPromptChars: ctx.getSystemPrompt().length,
     },
-  });
+  };
+}
+
+/** Writes one concise lifecycle hook summary to the debug log. */
+function logHook(event: ExtensionEvent, ctx: ExtensionContext): void {
+  debugLog(`hook ${event.type}`, summarizeHook(event, ctx));
 }
 
 /**
