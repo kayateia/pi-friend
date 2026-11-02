@@ -147,9 +147,22 @@ test("external manager watches additions and deletions", async () => {
       await waitFor(() => manager.getFiles().length === 1);
       assert.equal(index.count(), 1);
 
+      await writeFile(note, "# Watched\n\nThe marigold changed colour.\n", "utf8");
+      await waitFor(() =>
+        manager
+          .getFiles()
+          .some((file) => file.body.includes("changed colour")),
+      );
+
       await rm(note);
       await waitFor(() => manager.getFiles().length === 0);
       assert.equal(index.count(), 0);
+
+      await rm(corpus, { recursive: true });
+      await waitFor(() => manager.getFiles().length === 0);
+      await mkdir(corpus, { recursive: true });
+      await writeFile(note, "# Recreated\n\nThe marigold returned.\n", "utf8");
+      await waitFor(() => manager.getFiles().length === 1);
     } finally {
       await manager.stop();
       index.close();
