@@ -32,6 +32,12 @@ Use the following copyright header in new files:
 
 Use git, rooted in the project directory (here). Commit early and often with conventional commits.
 
+Avoid stacked or cross-dependent pull requests. Create each PR independently
+from `main` unless a concrete compile, test, or runtime dependency means one
+change cannot function without another unmerged change. When such a dependency
+is unavoidable, state the technical reason and required landing order in each
+affected PR.
+
 ## Building
 
 Building the project before deployment is actually not necessary; Pi itself does this. However,
