@@ -98,6 +98,16 @@ The list is reconciled on session start and after filesystem changes while Pi is
 running. Files deleted or removed from the list have their stale vectors
 removed. Configuration list changes take effect on the next session or reload.
 
+`sweep.allow_drop` offers the consolidation model a third action, `drop`, for
+candidates that are simply wrong — a misread speaker, a misunderstanding, a
+detail nobody needed. It is off by default, because the default pass only ever
+adds to canonical memory. A dropped candidate is archived under
+`sweeps/dropped/<runId>/<slug>.md` rather than deleted, so a bad judgement is
+recoverable, and drops count against the same 25% removal guard as decay so a
+single pass cannot empty staging. Leaving it off withdraws the action from the
+prompt and from the response parser together; setting it while supplying a
+replacement `prompt` that never mentions `drop` is reported as a warning.
+
 `auto_capture`, `sweep`, and `dreaming` each accept two prompt options, and at
 most one of them: `prompt` replaces that internal model's system prompt, while
 `prompt_append` keeps the built-in prompt and adds your text after it. Supplying

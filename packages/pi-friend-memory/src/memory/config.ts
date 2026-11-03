@@ -55,6 +55,13 @@ export interface SweepConfig {
   prompt?: string;
   /** Optional text appended after the built-in sweep system prompt. */
   promptAppend?: string;
+  /**
+   * Offer the sweep model a `drop` action, which archives a candidate under
+   * `sweeps/dropped/` instead of promoting or merging it. Off by default: the
+   * upstream design deliberately has no drop, and this is the disagreement made
+   * configurable rather than the default changed on someone else's behalf.
+   */
+  allowDrop: boolean;
   tombstoneGraceDays: number;
   /** Batches smaller than this bypass the 25% removal guard. */
   minGuardedBatchSize: number;
@@ -158,6 +165,7 @@ export function defaultSweepConfig(): SweepConfig {
     background: false,
     tombstoneGraceDays: 30,
     minGuardedBatchSize: 10,
+    allowDrop: false,
   };
 }
 
@@ -654,6 +662,14 @@ function parseSweep(
     }
     config.model = value.model.trim();
   }
+  if (value.allow_drop !== undefined) {
+    if (typeof value.allow_drop !== "boolean") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.sweep.allow_drop must be a boolean.`,
+      );
+    }
+    config.allowDrop = value.allow_drop;
+  }
   applyModelPrompt(
     config,
     value,
@@ -661,7 +677,19 @@ function parseSweep(
     "memory.sweep",
     "sweep",
     warnings,
+    { allowDrop: config.allowDrop },
   );
+  // A replacement prompt owns the vocabulary, so enabling drop and replacing the
+  // prompt without mentioning it is a silent no-op worth naming.
+  if (
+    config.allowDrop &&
+    config.prompt !== undefined &&
+    !/\bdrop\b/iu.test(config.prompt)
+  ) {
+    warnings.push(
+      `${configPath}: memory.sweep.allow_drop is enabled but memory.sweep.prompt never mentions drop, so the model will never choose it.`,
+    );
+  }
   if (value.tombstone_grace_days !== undefined) {
     if (
       typeof value.tombstone_grace_days !== "number" ||
@@ -825,6 +853,7 @@ function applyModelPrompt(
   field: string,
   section: PromptSection,
   warnings: string[],
+  options: { allowDrop?: boolean } = {},
 ): void {
   const prompt = parseModelPrompt(value.prompt, configPath, `${field}.prompt`);
   const promptAppend = parseModelPrompt(
@@ -839,7 +868,13 @@ function applyModelPrompt(
   }
   if (prompt !== undefined) {
     config.prompt = prompt;
-    collectPromptWarnings(prompt, section, `${configPath}: ${field}.prompt`, warnings);
+    collectPromptWarnings(
+      prompt,
+      section,
+      `${configPath}: ${field}.prompt`,
+      warnings,
+      options,
+    );
   }
   if (promptAppend !== undefined) {
     config.promptAppend = promptAppend;
@@ -848,6 +883,7 @@ function applyModelPrompt(
       section,
       `${configPath}: ${field}.prompt_append`,
       warnings,
+      options,
     );
   }
 }
@@ -883,6 +919,7 @@ const KNOWN_KEYS = {
     "model",
     "prompt",
     "prompt_append",
+    "allow_drop",
     "tombstone_grace_days",
     "min_guarded_batch_size",
   ],
@@ -971,12 +1008,16 @@ function collectPromptWarnings(
   section: PromptSection,
   location: string,
   warnings: string[],
+  options: { allowDrop?: boolean } = {},
 ): void {
   const mentions = (word: string): boolean =>
     new RegExp(`\\b${word}\\b`, "iu").test(text);
 
   if (section === "sweep") {
     for (const word of SWEEP_ACTION_NEAR_MISSES) {
+      if (word === "drop" && options.allowDrop === true) {
+        continue;
+      }
       if (mentions(word)) {
         warnings.push(
           `${location} mentions "${word}", which is not a sweep action; the parser accepts only promote and merge and silently ignores anything else.`,

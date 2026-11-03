@@ -84,6 +84,12 @@ explicit `tool_prefix: memory_` would instead produce `memory_memory_add`, so
 the normal configuration should leave the prefix empty.
 
 Each automated model section accepts at most one of two prompt options.
+`memory.sweep.allow_drop` enables a third sweep action, `drop`. When enabled the
+system prompt offers it and the parser accepts it; a dropped candidate is written
+to `sweeps/dropped/<runId>/<slug>.md` and removed from staging, and the decision
+counts against the 25% removal guard. When disabled, `drop` is neither offered
+nor accepted. The option defaults to off.
+
 `prompt` replaces its system prompt (`memory.auto_capture.prompt`,
 `memory.sweep.prompt`, `memory.dreaming.prompt`); `prompt_append` keeps the
 built-in prompt and appends the configured text after it
