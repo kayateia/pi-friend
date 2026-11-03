@@ -79,6 +79,65 @@ test("prompt build failures warn and retry on every request", async () => {
   }
 });
 
+test("missing prompt files warn individually and the remaining edits still apply", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-run-"));
+  const configDirectory = path.join(directory, "pi-friend");
+  const configPath = path.join(configDirectory, "pi-friend-prompt.yml");
+  const previousAgentDirectory = process.env.PI_CODING_AGENT_DIR;
+  await mkdir(configDirectory, { recursive: true });
+  await writeFile(
+    configPath,
+    [
+      "prompt:",
+      "  - section: preamble",
+      "    action: replace",
+      "    text: Prompt survives.",
+      "    files: [missing-a.md]",
+      "  - section: addendum",
+      "    action: replace",
+      "    text: Addendum survives.",
+      "    files: [missing-b.md]",
+    ].join("\n"),
+    "utf8",
+  );
+  process.env.PI_CODING_AGENT_DIR = directory;
+
+  try {
+    const harness = createPiHarness();
+    const notifications: string[] = [];
+    const context = {
+      hasUI: true,
+      sessionManager: {
+        getSessionId: () => "test-session",
+      },
+      ui: {
+        notify: (message: string) => {
+          notifications.push(message);
+        },
+      },
+    } as unknown as ExtensionContext;
+
+    const event = createEvent();
+    await harness.before(event, context);
+
+    assert.equal(notifications.length, 2);
+    assert.match(notifications[0] ?? "", /missing-a\.md does not exist/);
+    assert.match(notifications[1] ?? "", /missing-b\.md does not exist/);
+    assert.equal(event.systemPromptOptions.customPrompt, "Prompt survives.");
+    assert.equal(
+      event.systemPromptOptions.appendSystemPrompt,
+      "Addendum survives.",
+    );
+  } finally {
+    if (previousAgentDirectory === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_DIR = previousAgentDirectory;
+    }
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 /** Captures the extension's before_agent_start handler. */
 function createPiHarness(): { before: TestHandler } {
   const handlers = new Map<string, TestHandler>();
