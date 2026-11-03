@@ -52,7 +52,6 @@ export function buildSweepSystemPrompt(allowDrop: boolean): string {
     "Do not promote or merge transient, redundant, speculative, or emotionally hollow content.",
     "Preserve concrete relational and emotional content when it is durable.",
     "Use each candidate's type when making decisions.",
-    "Respect type boundaries when merging: never merge ordinary candidate content into a dream memory.",
     "Return only strict JSON.",
   ].join("\n");
 }

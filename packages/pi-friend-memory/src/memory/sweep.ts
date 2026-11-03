@@ -129,6 +129,13 @@ async function runDailySweepLocked(
   try {
     const allCandidates = await service.listStagingCandidates();
     const canonical = await service.listCanonicalNodes();
+    // Dreams are canonical but must never be merge targets: merging ordinary
+    // content into one would turn fiction into memory. Withdrawing them here
+    // keeps them out of the model's window and out of a custom decider's, so the
+    // prompt need not warn about a target that cannot appear.
+    const mergeTargets = canonical.filter(
+      (node) => !isQuarantinedMemoryType(node.frontMatter.type),
+    );
     const candidateDecay = planCandidateDecay(allCandidates, canonical);
     const expiredSet = new Set(candidateDecay.expiredSlugs);
     const candidates = allCandidates.filter(
@@ -138,7 +145,7 @@ async function runDailySweepLocked(
       if (options.decide) {
         decisions = await options.decide(
           candidates,
-          canonical,
+          mergeTargets,
           options.signal,
         );
       } else {
@@ -149,7 +156,7 @@ async function runDailySweepLocked(
           ctx,
           config.model,
           candidates,
-          canonical,
+          mergeTargets,
           options.reportWarning ?? (() => {}),
           options.signal,
           resolveSweepSystemPrompt(config, config.allowDrop),
