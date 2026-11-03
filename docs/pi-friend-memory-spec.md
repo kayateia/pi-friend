@@ -83,11 +83,16 @@ names. `tool_prefix: pf_`, for example, exposes `pf_memory_add` and
 explicit `tool_prefix: memory_` would instead produce `memory_memory_add`, so
 the normal configuration should leave the prefix empty.
 
-Each automated model section supports an optional `prompt` string that replaces
-its system prompt: `memory.auto_capture.prompt`, `memory.sweep.prompt`, and
-`memory.dreaming.prompt`. User-message task framing and JSON output validation
-remain in code. The complete built-in prompts are reproduced in
-`pi-friend-memory.example.yml`.
+Each automated model section accepts at most one of two prompt options.
+`prompt` replaces its system prompt (`memory.auto_capture.prompt`,
+`memory.sweep.prompt`, `memory.dreaming.prompt`); `prompt_append` keeps the
+built-in prompt and appends the configured text after it
+(`memory.auto_capture.prompt_append`, and likewise for the other two). Setting
+both in one section is a configuration error. User-message task framing and JSON
+output validation remain in code and cannot be configured, and the built-in
+prompts hold vocabulary and speaker rules the parser enforces silently, so a
+replacement has to reproduce them. The complete built-in prompts are reproduced
+in `pi-friend-memory.example.yml`.
 
 ## 4. Node schema (strict front matter)
 

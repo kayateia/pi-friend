@@ -7,7 +7,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import {
@@ -16,6 +16,11 @@ import {
   MemoryConfigError,
   parseMemoryConfig,
 } from "../../src/memory/config.ts";
+import {
+  DREAM_SYSTEM_PROMPT,
+  SWEEP_SYSTEM_PROMPT,
+  resolveSystemPrompt,
+} from "../../src/memory/prompts.ts";
 import { withTempDir } from "../helpers.ts";
 
 test("missing configuration uses the default memory root", async () => {
@@ -180,6 +185,12 @@ test("prompt configuration is ignored by the memory parser", () => {
     config.root,
     path.join("/Users/example", "memory"),
   );
+  // The legacy combined file is still accepted, but silently ignoring an
+  // entire section is what used to cost an afternoon, so it is reported.
+  assert.match(
+    config.warnings.join("\n"),
+    /unknown field "prompt" was ignored/,
+  );
 });
 
 test("relative configured roots resolve from the config directory", () => {
@@ -311,6 +322,12 @@ test("the removed daily injection section is ignored", () => {
 
   assert.equal(config.injection.enabled, true);
   assert.equal(config.injection.mode, "hybrid");
+  // Silence here is what makes stale configuration expensive, so the reader is
+  // told the section is dead and that nothing succeeds it.
+  assert.match(
+    config.warnings.join("\n"),
+    /memory\.injection\.daily is no longer read: .*daily-log injection feature was removed/,
+  );
 });
 
 test("auto-capture settings are parsed and validated", () => {
@@ -473,4 +490,110 @@ test("embedding model is configurable and validated", () => {
       ),
     MemoryConfigError,
   );
+});
+
+test("prompt_append keeps the built-in prompt and adds house guidance", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  sweeping: false",
+      "  sweep:",
+      "    prompt_append: |",
+      "      Prefer promoting a distinct new fact over merging it into a broad node.",
+    ].join("\n"),
+    configPath,
+  );
+
+  assert.equal(config.sweep.prompt, undefined);
+  assert.match(config.sweep.promptAppend ?? "", /Prefer promoting/);
+  assert.equal(
+    resolveSystemPrompt(SWEEP_SYSTEM_PROMPT, config.sweep),
+    `${SWEEP_SYSTEM_PROMPT}\n\nPrefer promoting a distinct new fact over merging it into a broad node.`,
+  );
+  assert.equal(config.warnings.length, 1);
+  assert.match(config.warnings[0] ?? "", /unknown field "sweeping"/);
+});
+
+test("prompt and prompt_append cannot be combined", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        [
+          "memory:",
+          "  sweep:",
+          "    prompt: Replace everything.",
+          "    prompt_append: Add to it.",
+        ].join("\n"),
+        configPath,
+      ),
+    (error: unknown) =>
+      error instanceof MemoryConfigError &&
+      error.message.includes("memory.sweep.prompt") &&
+      error.message.includes("memory.sweep.prompt_append"),
+  );
+});
+
+test("a replacement prompt leaves the built-in text untouched upstream", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  const config = parseMemoryConfig(
+    "memory:\n  dreaming:\n    prompt: Only dream in haiku.\n",
+    configPath,
+  );
+
+  assert.equal(config.dreaming.prompt, "Only dream in haiku.");
+  assert.equal(config.dreaming.promptAppend, undefined);
+  assert.equal(
+    resolveSystemPrompt(DREAM_SYSTEM_PROMPT, config.dreaming),
+    "Only dream in haiku.",
+  );
+});
+
+test("prompt text naming vocabulary the code cannot honour is reported", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  auto_capture:",
+      "    prompt: |",
+      "      When the speaker cannot be determined, use 'unknown' for them.",
+      "  sweep:",
+      "    prompt: |",
+      "      Choose drop for anything operational, otherwise promote.",
+    ].join("\n"),
+    configPath,
+  );
+
+  const joined = config.warnings.join("\n");
+  assert.match(joined, /attribute a speaker as "unknown"/);
+  assert.match(joined, /drop.*not a sweep action/);
+});
+
+test("ordinary prose that resembles vocabulary does not warn", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  auto_capture:",
+      "    prompt_append: |",
+      "      Care about the inner life of the person, and never label a",
+      "      speaker USER or ASSISTANT.",
+      "  dreaming:",
+      "    prompt_append: |",
+      "      A thoughtful aside is welcome; keep it short.",
+    ].join("\n"),
+    configPath,
+  );
+
+  assert.deepEqual(config.warnings, []);
+});
+
+test("built-in prompts and the example configuration produce no warnings", async () => {
+  const examplePath = path.resolve("pi-friend-memory.example.yml");
+  const config = parseMemoryConfig(
+    await readFile(examplePath, "utf8"),
+    examplePath,
+  );
+  assert.deepEqual(config.warnings, []);
 });

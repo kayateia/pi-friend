@@ -11,10 +11,10 @@ import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import {
-  SWEEP_SYSTEM_PROMPT,
   buildSweepPrompt,
   parseSweepResponse,
 } from "../../src/memory/sweep-model.ts";
+import { SWEEP_SYSTEM_PROMPT } from "../../src/memory/prompts.ts";
 import { runDailySweep } from "../../src/memory/sweep.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import type { MemoryType } from "../../src/memory/schema.ts";
