@@ -9,18 +9,39 @@
 import { lstat } from "node:fs/promises";
 import * as path from "node:path";
 
+/**
+ * The memory layout, declared once.
+ *
+ * This table is the single source of truth for what the extension owns inside a
+ * memory root. Three things derive from it and none of them keep a second copy:
+ * {@link createMemoryPaths} builds absolute paths, `ensureMemoryLayout` creates
+ * the directories and the log file, and the external-index exclusion in
+ * `index-exclude.ts` derives the reserved prefixes. Adding or removing a feature
+ * that needs storage means editing this table and nothing else; a list kept in
+ * parallel would drift, and drift here means either importing the extension's
+ * own files or hiding a directory it no longer owns.
+ */
+export const MEMORY_LAYOUT = {
+  nodes: { relativePath: "nodes", kind: "directory" },
+  supersededNodes: { relativePath: "nodes/superseded", kind: "directory" },
+  staging: { relativePath: "staging", kind: "directory" },
+  sweeps: { relativePath: "sweeps", kind: "directory" },
+  index: { relativePath: "index", kind: "directory" },
+  recovery: { relativePath: "recovery", kind: "directory" },
+  accessLog: { relativePath: "access-log", kind: "file" },
+} as const satisfies Record<
+  string,
+  { relativePath: string; kind: "directory" | "file" }
+>;
+
+/** One entry name in {@link MEMORY_LAYOUT}. */
+export type MemoryLayoutEntry = keyof typeof MEMORY_LAYOUT;
+
 /** Canonical locations inside one configured memory tree. */
-export interface MemoryPaths {
+export type MemoryPaths = {
   configPath: string;
   root: string;
-  nodes: string;
-  supersededNodes: string;
-  staging: string;
-  accessLog: string;
-  sweeps: string;
-  index: string;
-  recovery: string;
-}
+} & Record<MemoryLayoutEntry, string>;
 
 /** How a Markdown file participates in the memory system. */
 export type MemoryFileKind = "node" | "staging-candidate" | "document";
@@ -36,18 +57,20 @@ export class MemoryPathError extends Error {
 /** Builds the complete canonical path model for a memory root. */
 export function createMemoryPaths(root: string, configPath: string): MemoryPaths {
   const resolvedRoot = path.resolve(root);
+  const entries = Object.entries(MEMORY_LAYOUT) as Array<
+    [MemoryLayoutEntry, { relativePath: string }]
+  >;
+  const layout = Object.fromEntries(
+    entries.map(([name, entry]) => [
+      name,
+      path.join(
+        resolvedRoot,
+        entry.relativePath.split("/").join(path.sep),
+      ),
+    ]),
+  ) as Record<MemoryLayoutEntry, string>;
 
-  return {
-    configPath,
-    root: resolvedRoot,
-    nodes: path.join(resolvedRoot, "nodes"),
-    supersededNodes: path.join(resolvedRoot, "nodes", "superseded"),
-    staging: path.join(resolvedRoot, "staging"),
-    accessLog: path.join(resolvedRoot, "access-log"),
-    sweeps: path.join(resolvedRoot, "sweeps"),
-    index: path.join(resolvedRoot, "index"),
-    recovery: path.join(resolvedRoot, "recovery"),
-  };
+  return { configPath, root: resolvedRoot, ...layout };
 }
 
 /** Validates a lowercase hyphenated memory-node slug. */

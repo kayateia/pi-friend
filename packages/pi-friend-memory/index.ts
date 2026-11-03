@@ -236,6 +236,7 @@ export default async function registerPiFriend(
       semanticSearch = createSemanticSearch(repository, reportWarning);
       externalIndexManager = new ExternalIndexManager({
         indexPaths: repository.store.config.indexPaths,
+        indexExclude: repository.store.config.indexExclude,
         memoryRoot: repository.store.root,
         semantic: semanticSearch,
         chunkSize: repository.store.config.vector.chunkSize,

@@ -18,6 +18,11 @@ import {
   isImportedVectorEntry,
 } from "./external-index.ts";
 import type { IndexedMarkdownFile } from "./indexer.ts";
+import {
+  compileExcludePatterns,
+  isExcludedPath,
+  type CompiledExclude,
+} from "./index-exclude.ts";
 import type { VectorIndex } from "./vector-index.ts";
 import { synchronizeVectorIndex } from "./vector-sync.ts";
 
@@ -37,6 +42,8 @@ export interface ExternalIndexManagerOptions {
   indexPaths: readonly string[];
   /** Canonical memory root used to preserve normal memory-relative keys. */
   memoryRoot: string;
+  /** Resolved `index_exclude` glob patterns. */
+  indexExclude?: readonly string[];
   semantic?: ExternalIndexSemanticDependencies;
   /** Embedding chunk size from memory.vector.chunk_size. */
   chunkSize: number;
@@ -66,6 +73,7 @@ export interface ExternalIndexSource {
 export class ExternalIndexManager implements ExternalIndexSource {
   private readonly indexPaths: string[];
   private readonly memoryRoot: string;
+  private readonly excludes: CompiledExclude[];
   private readonly semantic: ExternalIndexSemanticDependencies | undefined;
   private readonly chunkSize: number;
   private readonly reportWarning: (message: string) => void;
@@ -84,6 +92,7 @@ export class ExternalIndexManager implements ExternalIndexSource {
   constructor(options: ExternalIndexManagerOptions) {
     this.indexPaths = [...options.indexPaths];
     this.memoryRoot = options.memoryRoot;
+    this.excludes = compileExcludePatterns(options.indexExclude ?? []);
     this.semantic = options.semantic;
     this.chunkSize = options.chunkSize;
     this.reportWarning = options.reportWarning;
@@ -203,6 +212,7 @@ export class ExternalIndexManager implements ExternalIndexSource {
           cwd: path.dirname(configuredPath),
           memoryRoot: this.memoryRoot,
           allowEmpty: true,
+          exclude: this.excludes,
         });
         for (const file of prepared.files) {
           filesByPath.set(file.absolutePath, file);
@@ -267,7 +277,7 @@ export class ExternalIndexManager implements ExternalIndexSource {
           stabilityThreshold: WRITE_STABILITY_MS,
           pollInterval: WRITE_POLL_MS,
         },
-        ignored: (candidate) => this.isHiddenWithinConfiguredPath(candidate),
+        ignored: (candidate) => this.isIgnored(candidate),
       });
       this.watcher.on("all", () => this.scheduleReconcile());
       this.watcher.on("error", (error) => {
@@ -295,6 +305,22 @@ export class ExternalIndexManager implements ExternalIndexSource {
       this.debounceTimer = undefined;
       void this.rescan();
     }, this.debounceMs);
+  }
+
+  /**
+   * Ignores paths the importer would never read anyway.
+   *
+   * Two reasons: dot paths below a configured root (while still watching a
+   * dot-named root itself), and the store's own paths or anything matched by
+   * `index_exclude`. Without the second part, a watch over a parent of the
+   * memory store would treat every memory write as a source change and rescan
+   * forever.
+   */
+  private isIgnored(candidate: string): boolean {
+    if (isExcludedPath(candidate, this.memoryRoot, this.excludes)) {
+      return true;
+    }
+    return this.isHiddenWithinConfiguredPath(candidate);
   }
 
   /**

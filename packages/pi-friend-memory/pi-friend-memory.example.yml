@@ -3,9 +3,19 @@ memory:
   root: ~/.pi/agent/pi-friend/memory
   tool_prefix: ""
   # Markdown files and directories watched and included in memory search.
+  # The paths the extension owns inside its root (nodes/, staging/, sweeps/,
+  # recovery/, index/, access-log) are never imported, so a path that contains
+  # the store cannot index those files twice; anything else under the root stays
+  # indexable.
   index_paths: []
   #  - ~/Documents/notes
   #  - ~/journal
+  # Glob patterns whose matches are never imported. `**` crosses directories,
+  # `*` stays within one path segment, `?` matches one character, and a pattern
+  # with no wildcard is an exact path (a directory excludes everything under it).
+  index_exclude: []
+  #  - ~/journal/private
+  #  - '**/*.draft.md'
 
   vector:
     chunk_size: 4000
