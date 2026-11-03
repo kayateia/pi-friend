@@ -46,6 +46,7 @@ test("repeated section changes apply in configuration order", () => {
   const result = applyPromptConfig(
     options,
     {
+      warnings: [],
       changes: [
         {
           section: "house_rules",
@@ -87,6 +88,7 @@ test("addendum prepend and append use the existing addendum", () => {
   const result = applyPromptConfig(
     options,
     {
+      warnings: [],
       changes: [
         {
           section: "addendum",
@@ -120,6 +122,7 @@ test("regex replacements support capture groups and global matches", () => {
   applyPromptConfig(
     options,
     {
+      warnings: [],
       changes: [
         {
           section: "preamble",
@@ -142,6 +145,7 @@ test("a missing custom section must be created before it can be appended", () =>
   const options = normalizedOptions();
   const before = JSON.parse(JSON.stringify(options)) as unknown;
   const config: ResolvedPromptConfig = {
+    warnings: [],
     changes: [
       {
         section: "preamble",

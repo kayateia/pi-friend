@@ -7,12 +7,12 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { parsePromptConfig, PromptConfigError } from "../src/config.ts";
+import { parsePromptConfig } from "../src/config.ts";
 import { resolvePromptConfig } from "../src/prompt-files.ts";
 
 test("prompt files resolve in declared order relative to the config", async () => {
@@ -76,7 +76,38 @@ test("prompt files are reread for every request", async () => {
   }
 });
 
-test("missing prompt files produce a contextual error", async () => {
+test("a missing prompt file warns and is skipped while readable sources still apply", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-files-"));
+  try {
+    await writeFile(path.join(directory, "present.md"), "Present file.\n", "utf8");
+    const configPath = path.join(directory, "pi-friend-prompt.yml");
+    const config = parsePromptConfig(
+      [
+        "prompt:",
+        "  - section: addendum",
+        "    action: replace",
+        "    text: Inline text.",
+        "    files: [missing.md, present.md]",
+      ].join("\n"),
+      configPath,
+    );
+
+    const resolved = await resolvePromptConfig(config);
+
+    assert.equal(resolved.changes.length, 1);
+    assert.equal(resolved.changes[0]?.sourceText, "Inline text.\n\nPresent file.");
+    assert.equal(resolved.warnings.length, 1);
+    assert.match(resolved.warnings[0] ?? "", /prompt\[0\]\.files\[0\]/);
+    assert.match(
+      resolved.warnings[0] ?? "",
+      new RegExp(path.join(directory, "missing\.md")),
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a change whose only file is missing is skipped and reported", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-files-"));
   try {
     const configPath = path.join(directory, "pi-friend-prompt.yml");
@@ -86,17 +117,48 @@ test("missing prompt files produce a contextual error", async () => {
         "  - section: addendum",
         "    action: replace",
         "    files: [missing.md]",
+        "  - section: house_rules",
+        "    action: replace",
+        "    text: Be kind.",
       ].join("\n"),
       configPath,
     );
 
-    await assert.rejects(
-      resolvePromptConfig(config),
-      (error: unknown) =>
-        error instanceof PromptConfigError &&
-        error.message.includes("prompt[0].files[0]") &&
-        error.message.includes(path.join(directory, "missing.md")),
+    const resolved = await resolvePromptConfig(config);
+
+    assert.equal(resolved.changes.length, 1);
+    assert.equal(resolved.changes[0]?.section, "house_rules");
+    assert.equal(resolved.warnings.length, 2);
+    assert.match(resolved.warnings[0] ?? "", /does not exist/);
+    assert.match(resolved.warnings[1] ?? "", /prompt\[0\].*was skipped/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("an unreadable file that is not missing also warns instead of failing", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-files-"));
+  try {
+    // A directory in place of a file produces EISDIR on Linux and macOS alike,
+    // so this covers read failures other than a plain missing file.
+    await mkdir(path.join(directory, "not-a-file.md"));
+    const configPath = path.join(directory, "pi-friend-prompt.yml");
+    const config = parsePromptConfig(
+      [
+        "prompt:",
+        "  - section: addendum",
+        "    action: replace",
+        "    text: Still applied.",
+        "    files: [not-a-file.md]",
+      ].join("\n"),
+      configPath,
     );
+
+    const resolved = await resolvePromptConfig(config);
+
+    assert.equal(resolved.changes[0]?.sourceText, "Still applied.");
+    assert.equal(resolved.warnings.length, 1);
+    assert.match(resolved.warnings[0] ?? "", /could not be read \(EISDIR\)/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

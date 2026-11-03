@@ -89,6 +89,7 @@ export function applyCustomPrompt(
   return applyPromptConfig(
     options,
     {
+      warnings: [],
       changes: [
         {
           section: "preamble",

@@ -9,6 +9,7 @@
 import type {
   BeforeAgentStartEvent,
   ExtensionAPI,
+  ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { hasPromptEdits, loadPromptConfig } from "./src/config.ts";
 import { promptDebugLog } from "./src/debug-log.ts";
@@ -48,6 +49,11 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
       }
 
       const resolvedConfig = await resolvePromptConfig(config);
+      // Unreadable prompt files are reported but not fatal: the rest of the
+      // configuration still applies to this request.
+      for (const warning of resolvedConfig.warnings) {
+        reportWarning(ctx, warning);
+      }
       const api = await loadSystemPromptApi();
       const result = applyPromptConfig(
         event.systemPromptOptions,
@@ -61,12 +67,7 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
           : { narrative: result.narrative }),
       });
     } catch (error) {
-      const message = `pi-friend-prompt: ${describeError(error)}`;
-      if (ctx.hasUI) {
-        ctx.ui.notify(message, "warning");
-      } else {
-        console.error(message);
-      }
+      reportWarning(ctx, describeError(error));
     }
   });
 
@@ -98,6 +99,16 @@ export default function registerPiFriendPrompt(pi: ExtensionAPI): void {
   pi.on("session_shutdown", () => {
     promptRuns.clear();
   });
+}
+
+/** Raises one warning banner, or logs it when the host has no UI. */
+function reportWarning(ctx: ExtensionContext, message: string): void {
+  const text = `pi-friend-prompt: ${message}`;
+  if (ctx.hasUI) {
+    ctx.ui.notify(text, "warning");
+  } else {
+    console.error(text);
+  }
 }
 
 /** Formats unknown thrown values for a warning. */
