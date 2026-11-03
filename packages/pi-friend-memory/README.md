@@ -169,6 +169,36 @@ extension still injects an empty `<pi-friend-memory></pi-friend-memory>` block.
 This makes request-context plumbing visible in traces without requiring test
 memories. Debug-disabled runs inject nothing in that case.
 
+## External Markdown and exclusions
+
+`memory.index_paths` imports Markdown from outside the memory tree. Two rules
+decide what is skipped.
+
+The paths the extension owns inside its root are never imported, even when a
+configured path contains them: `nodes/`, `staging/`, `sweeps/`, `recovery/`,
+`index/`, and `access-log`. Without that, pointing `index_paths` at a directory
+that contains the store — `~/identity`, when the store lives at
+`~/identity/pi-friend-memory` — would index every memory file a second time as a
+document and rescan on every memory write. The exclusion stops at those paths on
+purpose: anything else kept under the same root (a `notes/` directory, a loose
+`.md` file) is ordinary Markdown and stays indexable.
+
+`index_exclude` removes more, by glob:
+
+```yaml
+memory:
+  index_paths:
+    - ~/journal
+  index_exclude:
+    - ~/journal/private
+    - '**/*.draft.md'
+```
+
+`**` crosses directory separators, `*` matches within one segment, `?` matches
+one character, and a pattern with no wildcard is an exact path — so naming a
+directory excludes everything beneath it. Patterns resolve beside the
+configuration file and accept a leading `~`, exactly like `index_paths`.
+
 ## Development
 
 From the monorepo root, install all development dependencies:

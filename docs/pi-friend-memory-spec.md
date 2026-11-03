@@ -46,6 +46,7 @@ memory:
   root: ~/workspace/memory
   tool_prefix: ""
   index_paths: []
+  index_exclude: []
   vector:
     chunk_size: 4000
   injection:
@@ -144,7 +145,12 @@ The names below are the built-in tool names. A configured `tool_prefix` is prepe
 External Markdown files and directory trees are configured through
 `memory.index_paths` rather than a model-facing tool. A leading `~` is expanded,
 relative paths resolve from the directory containing `pi-friend-memory.yml`, and
-overlapping paths are indexed once. The list is reconciled when a session
+overlapping paths are indexed once. The paths the extension owns inside
+its root (`nodes/`, `staging/`, `sweeps/`, `recovery/`, `index/`, `access-log`)
+are never imported, while anything else under that root remains indexable;
+`memory.index_exclude` adds glob patterns (`**` crosses directories, `*` stays
+within a segment, a pattern without wildcards is an exact path) and a named
+directory excludes its subtree. The list is reconciled when a session
 starts and while Pi runs through a filesystem watcher. Deleting or renaming a
 source removes its stale vector chunks; keyword search reads the current source
 catalog and therefore also omits missing files. Changes to the YAML path list

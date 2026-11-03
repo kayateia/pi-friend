@@ -100,6 +100,11 @@ export interface MemoryConfig {
   root: string;
   /** Resolved files and directory trees watched and included in search. */
   indexPaths: string[];
+  /**
+   * Resolved glob patterns whose matches are never imported from `indexPaths`.
+   * The memory root is always excluded, whether or not it appears here.
+   */
+  indexExclude: string[];
   injection: RagInjectionConfig;
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
@@ -234,6 +239,7 @@ export function parseMemoryConfig(
       toolPrefix: DEFAULT_MEMORY_TOOL_PREFIX,
       root: defaultRoot,
       indexPaths: [],
+      indexExclude: [],
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
@@ -283,6 +289,12 @@ export function parseMemoryConfig(
       configDir,
       homeDir,
     ),
+    indexExclude: parseIndexExclude(
+      memoryConfig.index_exclude,
+      configPath,
+      configDir,
+      homeDir,
+    ),
     injection: parseRagInjection(memoryConfig.injection, configPath, warnings),
     autoCapture: parseAutoCapture(
       memoryConfig.auto_capture,
@@ -319,6 +331,7 @@ export async function loadMemoryConfig(
         toolPrefix: DEFAULT_MEMORY_TOOL_PREFIX,
         root: path.join(configDir, "memory"),
         indexPaths: [],
+        indexExclude: [],
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
@@ -395,6 +408,37 @@ function parseIndexPaths(
     }
   }
   return resolved;
+}
+
+/**
+ * Parses `index_exclude`, resolving `~` and relative patterns like `index_paths`.
+ *
+ * Glob characters survive resolution untouched, so a recursive draft pattern
+ * keeps its meaning while still anchoring to the configuration directory.
+ */
+function parseIndexExclude(
+  value: unknown,
+  configPath: string,
+  configDir: string,
+  homeDir: string,
+): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.index_exclude must be a YAML array of path patterns.`,
+    );
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.index_exclude[${index}] must be a non-empty string.`,
+      );
+    }
+    const expanded = expandHomePath(entry.trim(), homeDir);
+    return path.resolve(configDir, expanded);
+  });
 }
 
 /** Parses optional vector-index settings while applying safe defaults. */
@@ -859,6 +903,7 @@ const KNOWN_KEYS = {
     "root",
     "tool_prefix",
     "index_paths",
+    "index_exclude",
     "vector",
     "injection",
     "auto_capture",
