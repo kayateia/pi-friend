@@ -228,6 +228,11 @@ export default async function registerPiFriend(
           console.error(message);
         }
       };
+      // Configuration problems that do not stop startup: unknown fields, or
+      // prompt text naming vocabulary the parser cannot honour.
+      for (const warning of repository.store.config.warnings) {
+        reportWarning(`pi-friend memory configuration: ${warning}`);
+      }
       semanticSearch = createSemanticSearch(repository, reportWarning);
       externalIndexManager = new ExternalIndexManager({
         indexPaths: repository.store.config.indexPaths,

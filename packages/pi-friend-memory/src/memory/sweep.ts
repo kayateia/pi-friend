@@ -17,6 +17,11 @@ import type { MemoryNodeService } from "./service.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
 import { planCandidateDecay } from "./decay.ts";
 import {
+  DREAM_SYSTEM_PROMPT,
+  SWEEP_SYSTEM_PROMPT,
+  resolveSystemPrompt,
+} from "./prompts.ts";
+import {
   runSweepModel,
   type SweepDecision,
 } from "./sweep-model.ts";
@@ -147,7 +152,7 @@ async function runDailySweepLocked(
           canonical,
           options.reportWarning ?? (() => {}),
           options.signal,
-          config.prompt,
+          resolveSystemPrompt(SWEEP_SYSTEM_PROMPT, config),
         );
       }
       options.signal?.throwIfAborted();
@@ -225,7 +230,7 @@ async function runDailySweepLocked(
                   options.dreaming.maxNodes,
                   options.reportWarning ?? (() => {}),
                   options.signal,
-                  options.dreaming.prompt,
+                  resolveSystemPrompt(DREAM_SYSTEM_PROMPT, options.dreaming),
                 )
               : (() => {
                   throw new Error("Dream model context is unavailable.");

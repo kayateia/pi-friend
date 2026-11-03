@@ -11,9 +11,11 @@ import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import { parseMemoryConfig } from "../../src/memory/config.ts";
-import { CAPTURE_SYSTEM_PROMPT } from "../../src/memory/capture.ts";
-import { DREAM_SYSTEM_PROMPT } from "../../src/memory/dream.ts";
-import { SWEEP_SYSTEM_PROMPT } from "../../src/memory/sweep-model.ts";
+import {
+  CAPTURE_SYSTEM_PROMPT,
+  DREAM_SYSTEM_PROMPT,
+  SWEEP_SYSTEM_PROMPT,
+} from "../../src/memory/prompts.ts";
 
 test("the example configuration matches supported defaults", async () => {
   const examplePath = path.resolve("pi-friend-memory.example.yml");
