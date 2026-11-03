@@ -200,7 +200,7 @@ once-per-day consolidation schedule, not daily-log processing.
   - Auto-capture also uses an idle debounce measured from the **last settled agent run**. Each new settled run resets the timer. When the configured `idle_timeout` expires (default 600 seconds), capture runs if no agent run is active. A run that starts before expiry suppresses capture; the timer restarts when that run settles. Session shutdown clears the pending timer. This is wall-clock scheduling, not memory decay.
 - The default candidate limit is 3. Auto-capture excludes `dream`; that types is not generated from ordinary conversation capture.
 - Promotion happens two ways:
-  1. **Sweep promotion** (daily): the sweep model chooses `promote` or `merge` for each candidate. Every decision is logged with reasoning in the sweep log.
+  1. **Sweep promotion** (daily): the sweep model chooses `promote` or `merge` for each candidate. Every decision is logged with reasoning in the sweep log. Dreams are not offered as merge targets, so the model is never shown a destination it must not choose.
   2. **Main-model promotion**: the interactive model may call `memory_promote` for a candidate it has verified mid-conversation. Unpromoted candidates remain staged for a later sweep.
 - Dedupe happens at promotion time: staging candidates are compared (via embedding similarity) against existing nodes before promotion; near-duplicates are merged with `links` preserved.
 

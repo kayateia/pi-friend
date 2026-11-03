@@ -55,7 +55,6 @@ test("sweep response parsing validates candidate actions and targets", () => {
     [makeCandidate("existing")],
   );
   assert.match(prompt, /Candidates:/);
-  assert.match(SWEEP_SYSTEM_PROMPT, /never merge.*dream memory/);
 });
 
 test("daily sweep writes preimage, state, log, and promotes candidates", async () => {
@@ -530,6 +529,116 @@ test("model drops count against the 25% removal guard", async () => {
     for (const slug of candidates) {
       assert.ok(await service.read(slug, "staging"));
     }
+  });
+});
+
+
+test("dreams are withheld from the sweep's merge targets", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(
+      repository,
+      () => new Date("2026-10-25T05:00:00.000Z"),
+    );
+    const ordinary = await service.add({
+      title: "Ordinary Memory",
+      type: "fact",
+      body: "An ordinary canonical memory.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const dream = await service.createDream({
+      title: "Dream Of Two",
+      narrative: "A dream woven from two memories.",
+      nodeSlugs: [ordinary.slug, (await service.add({
+        title: "Second Ordinary",
+        type: "fact",
+        body: "Another ordinary canonical memory.",
+        speaker: [{ name: "Aisling", confident: true }],
+      })).slug],
+    });
+    const candidate = await service.stageCandidate({
+      title: "Mergeable Candidate",
+      type: "fact",
+      body: "A candidate that wants merging into something real.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    let offered: string[] = [];
+    const result = await runDailySweep(
+      undefined,
+      service,
+      {
+        enabled: true,
+        background: false,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 10,
+        allowDrop: false,
+      },
+      {
+        now: new Date("2026-10-25T05:00:00.000Z"),
+        decide: async (candidates, canonical) => {
+          offered = canonical.map((node) => node.slug);
+          return [
+            {
+              slug: candidates[0]?.slug ?? candidate.node.slug,
+              action: "promote",
+              reason: "durable",
+            },
+          ];
+        },
+      },
+    );
+
+    assert.equal(result.error, undefined);
+    assert.ok(offered.length >= 2);
+    assert.ok(!offered.includes(dream.slug));
+    // The dream still exists; it simply is not filterable as a merge target.
+    assert.ok(await service.read(dream.slug));
+  });
+});
+
+
+test("the service refuses a merge into a dream even when asked directly", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const first = await service.add({
+      title: "First Source",
+      type: "fact",
+      body: "First dream source.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const second = await service.add({
+      title: "Second Source",
+      type: "fact",
+      body: "Second dream source.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const dream = await service.createDream({
+      title: "Refused Dream",
+      narrative: "A dream that must stay fiction.",
+      nodeSlugs: [first.slug, second.slug],
+    });
+    const candidate = await service.stageCandidate({
+      title: "Would Be Contaminated",
+      type: "fact",
+      body: "Ordinary content that must not enter a dream.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    // The decider is filtered, but the write path is guarded too — so a caller
+    // that names a dream anyway gets an error rather than a fabricated memory.
+    await assert.rejects(
+      service.promoteCandidate(candidate.node.slug, dream.slug),
+      /Cannot merge a staging candidate into dream memory/,
+    );
+    assert.ok(await service.read(candidate.node.slug, "staging"));
   });
 });
 
