@@ -59,6 +59,7 @@ test("missing configuration uses the default memory root", async () => {
       background: false,
       tombstoneGraceDays: 30,
       minGuardedBatchSize: 10,
+      allowDrop: false,
     });
     assert.deepEqual(config.dreaming, {
       enabled: true,
@@ -396,6 +397,7 @@ test("sweep settings are parsed and validated", () => {
     background: true,
     tombstoneGraceDays: 14,
     minGuardedBatchSize: 12,
+    allowDrop: false,
     model: "openrouter/google/gemini-2.5-flash",
     prompt: "Custom sweep prompt.",
   });
@@ -596,4 +598,71 @@ test("built-in prompts and the example configuration produce no warnings", async
     examplePath,
   );
   assert.deepEqual(config.warnings, []);
+});
+
+test("allow_drop is off by default and must be a boolean", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  assert.equal(
+    parseMemoryConfig("memory:\n  sweep:\n    enabled: true\n", configPath)
+      .sweep.allowDrop,
+    false,
+  );
+  assert.equal(
+    parseMemoryConfig(
+      "memory:\n  sweep:\n    allow_drop: true\n",
+      configPath,
+    ).sweep.allowDrop,
+    true,
+  );
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        'memory:\n  sweep:\n    allow_drop: "yes"\n',
+        configPath,
+      ),
+    MemoryConfigError,
+  );
+});
+
+test("drop stops being a near-miss once allow_drop is enabled", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  const allowed = parseMemoryConfig(
+    [
+      "memory:",
+      "  sweep:",
+      "    allow_drop: true",
+      "    prompt_append: |",
+      "      Choose drop for anything that misread the speaker.",
+    ].join("\n"),
+    configPath,
+  );
+  assert.deepEqual(allowed.warnings, []);
+
+  const refused = parseMemoryConfig(
+    [
+      "memory:",
+      "  sweep:",
+      "    prompt_append: |",
+      "      Choose drop for anything that misread the speaker.",
+    ].join("\n"),
+    configPath,
+  );
+  assert.match(refused.warnings.join("\n"), /not a sweep action/);
+});
+
+test("a replacement sweep prompt that never mentions drop is reported", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  sweep:",
+      "    allow_drop: true",
+      "    prompt: Promote or merge; prefer merge.",
+    ].join("\n"),
+    configPath,
+  );
+  assert.match(
+    config.warnings.join("\n"),
+    /allow_drop is enabled but memory\.sweep\.prompt never mentions drop/,
+  );
 });
