@@ -277,7 +277,10 @@ Pi reads the extension entry point from the `pi.extensions` field in
 - `memory_read` reads a complete node from canonical, staging, or superseded
   storage.
 - `memory_search` supports ranked keyword search and semantic search across
-  nodes, staging candidates, and plain Markdown documents.
+  nodes, staging candidates, and plain Markdown documents. Pass `corpus` to
+  narrow it: `memory` for nodes and staging candidates, `documents` for imported
+  and ordinary Markdown, `all` for both (the default). `type` filters memory
+  nodes, so it cannot be combined with `corpus: documents`.
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.
