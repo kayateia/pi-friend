@@ -183,3 +183,57 @@ test("malformed nodes remain discoverable as documents", async () => {
     assert.match(results[0]?.snippet ?? "", /damaged-node phrase/);
   });
 });
+
+test("corpus narrows a search to memory or documents", async () => {
+  await withTempDir(async (agentDir) => {
+    const { repository, service } = await makeService(agentDir);
+    const common = {
+      type: "fact" as const,
+      speaker: [{ name: "Aisling", confident: true }],
+    };
+    const node = await service.add({
+      ...common,
+      title: "Harbour Note",
+      body: "The harbour bell rings once at dusk.",
+    });
+    const candidate = await service.stageCandidate({
+      ...common,
+      title: "Harbour Candidate",
+      body: "A staged note about the harbour bell.",
+    });
+    await repository.store.writeTextFile(
+      "docs/harbour.md",
+      "# Harbour Document\nThe harbour bell appears in an imported file.\n",
+    );
+
+    const memory = await service.search({ query: "harbour bell", corpus: "memory" });
+    assert.deepEqual(
+      memory.map((result) => result.kind).sort(),
+      ["node", "staging-candidate"],
+    );
+    assert.ok(memory.some((result) => result.slug === node.slug));
+    assert.ok(memory.some((result) => result.slug === candidate.node.slug));
+
+    const documents = await service.search({
+      query: "harbour bell",
+      corpus: "documents",
+    });
+    assert.deepEqual(
+      documents.map((result) => result.relativePath),
+      ["docs/harbour.md"],
+    );
+
+    const all = await service.search({ query: "harbour bell", corpus: "all" });
+    assert.equal(all.length, 3);
+
+    await assert.rejects(
+      () =>
+        service.search({
+          query: "harbour bell",
+          corpus: "memory",
+          kinds: ["document"],
+        }),
+      /cannot set both corpus and kinds/,
+    );
+  });
+});

@@ -144,7 +144,7 @@ The names below are the built-in tool names. A configured `tool_prefix` is prepe
 - `memory_restore(recoveryId)` → restores a deleted node from its durable recovery record without overwriting newer canonical content.
 - `memory_read(slug, area?)` → reads a complete serialized node from canonical, staging, or superseded storage.
 - `memory_promote(candidateSlug)` → promotes one staging candidate. Near-duplicates are merged into an existing canonical node with links and attribution preserved.
-- `memory_search(query, mode, type?, limit?)` → `keyword`, `semantic`, or `hybrid` search over nodes, staging candidates, ordinary documents, and imported Markdown. Results include typed metadata, a match-centered or document-preview snippet, ranks, matched fields, and score.
+- `memory_search(query, mode, type?, corpus?, limit?)` → `keyword`, `semantic`, or `hybrid` search over nodes, staging candidates, ordinary documents, and imported Markdown. `corpus` narrows that: `all` (default), `memory` for nodes and staging candidates only, or `documents` for imported and ordinary Markdown only. `type` filters memory nodes and therefore implies the memory corpus; combining it with `corpus: documents` is rejected. Results include typed metadata, a match-centered or document-preview snippet, ranks, matched fields, and score.
 
 **Search must find documents, not just nodes.** Front matter is required only for `nodes/` and
 `staging/`. Only those two areas are searchable: `sweeps/`, `index/`, `recovery/` and `access-log`

@@ -531,11 +531,12 @@ export function registerMemoryTools(
     name: toolName("memory_search"),
     label: "Memory Search",
     description: [
-      "Search every Markdown file in the memory tree using deterministic keyword ranking.",
-      "Results distinguish memory nodes, staging candidates, and ordinary documents.",
-      "Exact slug and title matches rank above tag and body matches.",
-      "Semantic mode uses embeddings; hybrid mode fuses keyword and semantic ranks.",
-      "Use the optional type filter to restrict results to one memory-node category.",
+      "Search memory and indexed Markdown. The two corpora are different kinds of thing, not two folders.",
+      "corpus memory: canonical nodes, which are memories I decided to keep, plus staging candidates, which are unverified proposals that appear in results labelled as candidates. This is the material automatic recall can inject into a prompt.",
+      "corpus documents: imported Markdown (notes, journals, workspace files) and ordinary documents in the tree. Searchable, and never injected automatically — context, not memory.",
+      "corpus all (default): both, ranked together.",
+      "Exact slug and title matches rank above tag and body matches. Semantic mode uses embeddings; hybrid mode fuses keyword and semantic ranks.",
+      "Use type to restrict results to one memory-node category; it implies the memory corpus.",
     ].join("\n"),
     parameters: Type.Object({
       query: Type.String({
@@ -548,7 +549,14 @@ export function registerMemoryTools(
       ),
       type: Type.Optional(
         StringEnum(MEMORY_TYPES, {
-          description: "Restrict results to one memory-node type.",
+          description:
+            "Restrict results to one memory-node type. Implies corpus memory.",
+        }),
+      ),
+      corpus: Type.Optional(
+        StringEnum(["all", "memory", "documents"] as const, {
+          description:
+            "Which part of the index to search. memory: canonical nodes (remembered) and staging candidates (unverified proposals) — what recall can inject. documents: imported and ordinary Markdown — context, never injected. all (default): both.",
         }),
       ),
       limit: Type.Optional(
@@ -569,10 +577,16 @@ export function registerMemoryTools(
     ): Promise<AgentToolResult<MemorySearchDetails>> {
       const service = requireService(getService);
       const mode = params.mode ?? "keyword";
+      if (params.type !== undefined && params.corpus === "documents") {
+        throw new Error(
+          "type filters memory nodes, so it cannot be combined with corpus \"documents\".",
+        );
+      }
       const searchOptions: MemorySearchOptions = {
         query: params.query,
         mode,
         type: params.type,
+        corpus: params.corpus,
         limit: params.limit,
       };
       const results = await service.search(searchOptions);
