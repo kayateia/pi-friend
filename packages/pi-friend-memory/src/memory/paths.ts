@@ -13,25 +13,38 @@ import * as path from "node:path";
  * The memory layout, declared once.
  *
  * This table is the single source of truth for what the extension owns inside a
- * memory root. Three things derive from it and none of them keep a second copy:
+ * memory root. Four things derive from it and none of them keep a second copy:
  * {@link createMemoryPaths} builds absolute paths, `ensureMemoryLayout` creates
- * the directories and the log file, and the external-index exclusion in
- * `index-exclude.ts` derives the reserved prefixes. Adding or removing a feature
- * that needs storage means editing this table and nothing else; a list kept in
- * parallel would drift, and drift here means either importing the extension's
- * own files or hiding a directory it no longer owns.
+ * the directories and the log file, the external-index exclusion in
+ * `index-exclude.ts` derives the reserved prefixes, and {@link isSearchablePath}
+ * tells the store's own walker which Markdown belongs to memory rather than to
+ * bookkeeping. Adding or removing a feature that needs storage means editing
+ * this table and nothing else; a list kept in parallel would drift, and drift
+ * here means either importing the extension's own files, hiding a directory it
+ * no longer owns, or indexing its own receipts.
+ *
+ * `searchable` is not about secrecy: it separates "this file is memory" from
+ * "this file is a record of what happened to memory". Sweep logs, preimages,
+ * dropped and archived candidates, the vector index and recovery records are all
+ * useful to a person reading the tree with `ls`, and none of them should answer
+ * a memory search — a preimage especially, since it is a full copy of the store
+ * from before a change.
  */
 export const MEMORY_LAYOUT = {
-  nodes: { relativePath: "nodes", kind: "directory" },
-  supersededNodes: { relativePath: "nodes/superseded", kind: "directory" },
-  staging: { relativePath: "staging", kind: "directory" },
-  sweeps: { relativePath: "sweeps", kind: "directory" },
-  index: { relativePath: "index", kind: "directory" },
-  recovery: { relativePath: "recovery", kind: "directory" },
-  accessLog: { relativePath: "access-log", kind: "file" },
+  nodes: { relativePath: "nodes", kind: "directory", searchable: true },
+  supersededNodes: {
+    relativePath: "nodes/superseded",
+    kind: "directory",
+    searchable: true,
+  },
+  staging: { relativePath: "staging", kind: "directory", searchable: true },
+  sweeps: { relativePath: "sweeps", kind: "directory", searchable: false },
+  index: { relativePath: "index", kind: "directory", searchable: false },
+  recovery: { relativePath: "recovery", kind: "directory", searchable: false },
+  accessLog: { relativePath: "access-log", kind: "file", searchable: false },
 } as const satisfies Record<
   string,
-  { relativePath: string; kind: "directory" | "file" }
+  { relativePath: string; kind: "directory" | "file"; searchable: boolean }
 >;
 
 /** One entry name in {@link MEMORY_LAYOUT}. */
@@ -71,6 +84,24 @@ export function createMemoryPaths(root: string, configPath: string): MemoryPaths
   ) as Record<MemoryLayoutEntry, string>;
 
   return { configPath, root: resolvedRoot, ...layout };
+}
+
+/**
+ * Returns true when a memory-relative path holds searchable memory.
+ *
+ * Top-level directories the layout marks unsearchable are bookkeeping: their
+ * Markdown is never enumerated as a node, candidate or document. Deeper paths
+ * inherit their top-level segment, so `sweeps/preimages/<run>/nodes/x.md` is
+ * unsearchable even though it looks like a node path.
+ */
+export function isSearchablePath(relativePath: string): boolean {
+  const topLevel = relativePath.split(/[\\/]+/u)[0] ?? relativePath;
+  for (const entry of Object.values(MEMORY_LAYOUT)) {
+    if (entry.relativePath === topLevel) {
+      return entry.searchable;
+    }
+  }
+  return true;
 }
 
 /** Validates a lowercase hyphenated memory-node slug. */

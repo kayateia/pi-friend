@@ -17,6 +17,8 @@ import {
 import * as path from "node:path";
 import test from "node:test";
 import { MemoryStore } from "../../src/memory/store.ts";
+import { buildMemoryDocumentIndex } from "../../src/memory/indexer.ts";
+import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { withTempDir } from "../helpers.ts";
 
 test("Markdown replacement preserves exact text", async () => {
@@ -69,20 +71,26 @@ test("the access log remains append-only", async () => {
   });
 });
 
-test("file inventory classifies nodes and documents and skips index state", async () => {
+test("file inventory classifies memory and skips bookkeeping", async () => {
   await withTempDir(async (agentDir) => {
     const store = await MemoryStore.open({ agentDir, homeDir: agentDir });
     for (const relativePath of [
       "nodes/topic.md",
       "nodes/superseded/old.md",
       "staging/candidate.md",
-      "sweeps/2026-10-19.md",
       "docs/reference.md",
       "MEMORY.md",
+      // Bookkeeping, none of which is memory: a sweep log, a preimage copy of a
+      // real node, a dropped candidate, a recovery record, and the vector index.
+      "sweeps/2026-10-19.md",
+      "sweeps/preimages/2026-10-19T00-00-00-000Z/nodes/topic.md",
+      "sweeps/dropped/2026-10-19/discarded.md",
+      "recovery/0f0f.json.md",
       "index/state.md",
     ]) {
       await store.writeTextFile(relativePath, relativePath);
     }
+
     const files = await store.listMarkdownFiles();
     assert.deepEqual(
       files.map((file) => [file.relativePath, file.kind]),
@@ -92,8 +100,46 @@ test("file inventory classifies nodes and documents and skips index state", asyn
         ["nodes/superseded/old.md", "node"],
         ["nodes/topic.md", "node"],
         ["staging/candidate.md", "staging-candidate"],
-        ["sweeps/2026-10-19.md", "document"],
       ],
+    );
+  });
+});
+
+test("a preimage of a node never appears in the search index", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const path = "sweeps/preimages/2026-11-03T00-00-00-000Z/nodes/ghost.md";
+    await repository.store.writeTextFile(
+      path,
+      [
+        "---",
+        "title: Ghost",
+        "type: fact",
+        "speaker: [{ name: Aisling, confident: true }]",
+        "created: 2026-11-03T00:00:00Z",
+        "last_used: 2026-11-03T00:00:00Z",
+        "use_count: 0",
+        "decay_weight: 1",
+        "status: active",
+        "emotional_flavor: neutral",
+        "tags: []",
+        "supersedes: []",
+        "superseded_by: \"\"",
+        "links: []",
+        "source: \"\"",
+        "---",
+        "",
+        "A snapshot of something that used to be true.",
+      ].join("\n"),
+    );
+
+    const index = await buildMemoryDocumentIndex(repository.store);
+    assert.equal(
+      index.some((file) => file.relativePath.includes("preimages")),
+      false,
     );
   });
 });
