@@ -280,7 +280,11 @@ Pi reads the extension entry point from the `pi.extensions` field in
   nodes, staging candidates, and plain Markdown documents. Pass `corpus` to
   narrow it: `memory` for nodes and staging candidates, `documents` for imported
   and ordinary Markdown, `all` for both (the default). `type` filters memory
-  nodes, so it cannot be combined with `corpus: documents`.
+  nodes, so it cannot be combined with `corpus: documents`. When `mode` is
+  omitted the tool uses `memory.search.default_mode`, which defaults to `hybrid`
+  and is configured separately from retrieval's `injection.mode`. If that
+  default needs embeddings and none are available, the tool searches with
+  keyword and says so; an explicit `mode` that cannot run still fails.
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.

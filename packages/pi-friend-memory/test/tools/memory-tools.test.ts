@@ -43,16 +43,15 @@ test("memory_search exposes corpus and passes it through", async () => {
     },
   } as unknown as ExtensionAPI;
   const stubService = {
+    store: { config: { search: { defaultMode: "keyword" } } },
+    canSearchSemantically: true,
     async search(options: unknown) {
       captured.push(options);
       return [];
     },
   };
 
-  registerMemoryTools(
-    pi,
-    () => stubService as unknown as MemoryNodeService,
-  );
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
 
   const definition = definitions.get("memory_search") as {
     parameters: { properties: Record<string, unknown> };
@@ -63,7 +62,7 @@ test("memory_search exposes corpus and passes it through", async () => {
   await definition.execute("call", { query: "harbour", corpus: "documents" });
   assert.deepEqual(captured.at(-1), {
     query: "harbour",
-    mode: "keyword",
+    mode: undefined,
     type: undefined,
     corpus: "documents",
     limit: undefined,
@@ -78,4 +77,39 @@ test("memory_search exposes corpus and passes it through", async () => {
       }),
     /cannot be combined with corpus/,
   );
+});
+
+test("an unavailable configured default degrades to keyword with a note", async () => {
+  const captured: Array<Record<string, unknown>> = [];
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  const stubService = {
+    store: { config: { search: { defaultMode: "hybrid" } } },
+    canSearchSemantically: false,
+    async search(options: Record<string, unknown>) {
+      captured.push(options);
+      return [];
+    },
+  };
+
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
+  const definition = definitions.get("memory_search") as {
+    execute: (
+      id: string,
+      params: unknown,
+    ) => Promise<{ content: Array<{ text: string }> }>;
+  };
+
+  // Inherited default: degrade, and say why.
+  const degraded = await definition.execute("call", { query: "harbour" });
+  assert.equal(captured.at(-1)?.mode, "keyword");
+  assert.match(degraded.content[0]?.text ?? "", /no embedding provider is available/);
+
+  // Explicit request: fail rather than silently downgrade.
+  await definition.execute("call", { query: "harbour", mode: "semantic" });
+  assert.equal(captured.at(-1)?.mode, "semantic");
 });

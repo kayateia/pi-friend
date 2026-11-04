@@ -153,6 +153,11 @@ export class MemoryNodeService {
     return this.repository.store;
   }
 
+  /** True when semantic and hybrid search can run in this runtime. */
+  get canSearchSemantically(): boolean {
+    return this.semantic !== undefined;
+  }
+
   /** Lists staging candidates for sweep decisions. */
   async listStagingCandidates(): Promise<ParsedMemoryNode[]> {
     return this.repository.list("staging");
@@ -315,7 +320,7 @@ export class MemoryNodeService {
         : { ...options, kinds: kindsForCorpus(options.corpus) };
 
     const index = await this.buildSearchIndex();
-    const mode = options.mode ?? "keyword";
+    const mode = options.mode ?? this.store.config.search.defaultMode;
     const vectorOptions = {
       chunkSize: this.store.config.vector.chunkSize,
     };

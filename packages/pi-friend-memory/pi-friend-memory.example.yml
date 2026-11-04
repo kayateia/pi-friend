@@ -17,6 +17,13 @@ memory:
   #  - ~/journal/private
   #  - '**/*.draft.md'
 
+  # Default search mode for the memory_search tool when a call omits it.
+  # Keyword matches words, semantic matches meaning, hybrid combines both.
+  # Retrieval has its own mode under injection.mode; this is the same choice
+  # for explicit searches.
+  search:
+    default_mode: hybrid
+
   vector:
     chunk_size: 4000
 
