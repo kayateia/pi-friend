@@ -146,7 +146,10 @@ The names below are the built-in tool names. A configured `tool_prefix` is prepe
 - `memory_promote(candidateSlug)` → promotes one staging candidate. Near-duplicates are merged into an existing canonical node with links and attribution preserved.
 - `memory_search(query, mode, type?, limit?)` → `keyword`, `semantic`, or `hybrid` search over nodes, staging candidates, ordinary documents, and imported Markdown. Results include typed metadata, a match-centered or document-preview snippet, ranks, matched fields, and score.
 
-**Search must find documents, not just nodes.** Front matter is required only for `nodes/` and `staging/`.
+**Search must find documents, not just nodes.** Front matter is required only for `nodes/` and
+`staging/`. Only those two areas are searchable: `sweeps/`, `index/`, `recovery/` and `access-log`
+are bookkeeping and are never enumerated, because a preimage of a node would otherwise be
+indistinguishable from the node itself in results.
 
 External Markdown files and directory trees are configured through
 `memory.index_paths` rather than a model-facing tool. A leading `~` is expanded,

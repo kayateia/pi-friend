@@ -33,6 +33,13 @@ The default tree is:
 └── recovery/
 ```
 
+`nodes/` and `staging/` are memory and are searchable. `sweeps/`, `index/`,
+`recovery/` and `access-log` are the extension's own bookkeeping — run logs,
+preimages, dropped and archived candidates, the vector index, recovery records —
+and are never enumerated for search, even though they are Markdown. A preimage is
+a full copy of the store from before a change, so indexing it would let an
+outdated version of a memory answer a search as though it were current.
+
 Override the root in `~/.pi/agent/pi-friend/pi-friend-memory.yml`:
 
 ```yaml

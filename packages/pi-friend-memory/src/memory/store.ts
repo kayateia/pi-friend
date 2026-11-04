@@ -25,6 +25,7 @@ import type {
 } from "./config.ts";
 import { loadMemoryConfig } from "./config.ts";
 import { ensureMemoryLayout } from "./layout.ts";
+import { isSearchablePath } from "./paths.ts";
 import type {
   MemoryFileKind,
   MemoryPaths,
@@ -189,7 +190,15 @@ export class MemoryStore {
     await this.appendText("access-log", `${JSON.stringify(record)}\n`);
   }
 
-  /** Lists all searchable Markdown files without reading their contents. */
+  /**
+   * Lists all searchable Markdown files without reading their contents.
+   *
+   * Skips dot paths, symlinks, non-Markdown files, and every top-level path the
+   * memory layout marks unsearchable — the vector index, sweep logs and
+   * preimages, and recovery records. Those are the extension's own bookkeeping,
+   * not memory, and indexing them made a preimage of a node indistinguishable
+   * from the node itself in search results.
+   */
   async listMarkdownFiles(): Promise<StoredMarkdownFile[]> {
     const files: StoredMarkdownFile[] = [];
     await this.collectMarkdownFiles("", files);
@@ -271,14 +280,13 @@ export class MemoryStore {
         continue;
       }
 
-      if (relativeDirectory === "" && entry.name === "index") {
-        continue;
-      }
-
       const relativePath =
         relativeDirectory === ""
           ? entry.name
           : path.join(relativeDirectory, entry.name);
+      if (!isSearchablePath(relativePath)) {
+        continue;
+      }
 
       if (entry.isDirectory()) {
         await this.collectMarkdownFiles(relativePath, files);
