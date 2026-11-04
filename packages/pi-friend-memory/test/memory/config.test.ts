@@ -60,6 +60,7 @@ test("missing configuration uses the default memory root", async () => {
       tombstoneGraceDays: 30,
       minGuardedBatchSize: 10,
       allowDrop: false,
+      preimageKeep: 3,
     });
     assert.deepEqual(config.dreaming, {
       enabled: true,
@@ -397,6 +398,7 @@ test("sweep settings are parsed and validated", () => {
     background: true,
     tombstoneGraceDays: 14,
     minGuardedBatchSize: 12,
+    preimageKeep: 3,
     allowDrop: false,
     model: "openrouter/google/gemini-2.5-flash",
     prompt: "Custom sweep prompt.",
@@ -665,4 +667,31 @@ test("a replacement sweep prompt that never mentions drop is reported", () => {
     config.warnings.join("\n"),
     /allow_drop is enabled but memory\.sweep\.prompt never mentions drop/,
   );
+});
+
+test("preimage_keep defaults to a bounded number and accepts zero", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  assert.equal(
+    parseMemoryConfig("memory:\n  root: ~/memory\n", configPath).sweep
+      .preimageKeep,
+    3,
+  );
+  assert.equal(
+    parseMemoryConfig(
+      "memory:\n  sweep:\n    preimage_keep: 0\n",
+      configPath,
+    ).sweep.preimageKeep,
+    0,
+  );
+  for (const invalid of ['"two"', "-1", "101", "1.5"]) {
+    assert.throws(
+      () =>
+        parseMemoryConfig(
+          `memory:\n  sweep:\n    preimage_keep: ${invalid}\n`,
+          configPath,
+        ),
+      MemoryConfigError,
+      invalid,
+    );
+  }
 });
