@@ -56,6 +56,14 @@ export interface SweepConfig {
   /** Optional text appended after the built-in sweep system prompt. */
   promptAppend?: string;
   /**
+   * How many sweep preimages to keep, newest first.
+   *
+   * `0` disables preimages: no snapshot is taken and existing ones are pruned at
+   * the next sweep. A positive count keeps that many run snapshots, which bounds
+   * the disk and index cost of a full store copy per run.
+   */
+  preimageKeep: number;
+  /**
    * Offer the sweep model a `drop` action, which archives a candidate under
    * `sweeps/dropped/` instead of promoting or merging it. Off by default: the
    * upstream design deliberately has no drop, and this is the disagreement made
@@ -188,6 +196,7 @@ export function defaultSweepConfig(): SweepConfig {
     background: false,
     tombstoneGraceDays: 30,
     minGuardedBatchSize: 10,
+    preimageKeep: 3,
     allowDrop: false,
   };
 }
@@ -782,6 +791,19 @@ function parseSweep(
       `${configPath}: memory.sweep.allow_drop is enabled but memory.sweep.prompt never mentions drop, so the model will never choose it.`,
     );
   }
+  if (value.preimage_keep !== undefined) {
+    if (
+      typeof value.preimage_keep !== "number" ||
+      !Number.isInteger(value.preimage_keep) ||
+      value.preimage_keep < 0 ||
+      value.preimage_keep > 100
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.sweep.preimage_keep must be an integer from 0 to 100 (0 disables preimages).`,
+      );
+    }
+    config.preimageKeep = value.preimage_keep;
+  }
   if (value.tombstone_grace_days !== undefined) {
     if (
       typeof value.tombstone_grace_days !== "number" ||
@@ -1015,6 +1037,7 @@ const KNOWN_KEYS = {
     "prompt",
     "prompt_append",
     "allow_drop",
+    "preimage_keep",
     "tombstone_grace_days",
     "min_guarded_batch_size",
   ],

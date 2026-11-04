@@ -76,6 +76,9 @@ memory:
     # allow_drop: false
     tombstone_grace_days: 30
     min_guarded_batch_size: 10
+    # Full store snapshots kept before each sweep, newest first. 0 disables
+    # preimages and prunes any existing ones at the next sweep.
+    preimage_keep: 3
     # model: openrouter/google/gemini-2.5-flash
     #
     # `prompt` replaces, `prompt_append` extends; set at most one. The parser

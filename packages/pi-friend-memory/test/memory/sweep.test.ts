@@ -7,7 +7,7 @@
  */
 
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import {
@@ -83,6 +83,7 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
+        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-20T05:00:00.000Z"),
@@ -131,6 +132,7 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
+        preimageKeep: 3,
       },
       { now: new Date("2026-10-20T06:00:00.000Z") },
     );
@@ -162,6 +164,7 @@ test("sweep failure still advances state and writes a failure log", async () => 
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
+        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-21T05:00:00.000Z"),
@@ -216,6 +219,7 @@ test("an aborted background sweep does not mutate candidates", async () => {
             tombstoneGraceDays: 30,
             minGuardedBatchSize: 10,
             allowDrop: false,
+            preimageKeep: 3,
           },
           { signal: controller.signal },
         ),
@@ -264,6 +268,7 @@ test("sweep archives expired tombstones and creates one dream", async () => {
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
+        preimageKeep: 3,
       },
       {
         now: new Date("2026-02-15T05:00:00.000Z"),
@@ -328,6 +333,7 @@ test("small batches may expire more than 25% below the guard threshold", async (
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 5,
         allowDrop: false,
+        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-22T05:00:00.000Z"),
@@ -376,6 +382,7 @@ test("the 25% guard still applies at the configured batch threshold", async () =
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 2,
         allowDrop: false,
+        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-23T05:00:00.000Z"),
@@ -456,6 +463,7 @@ test("an allowed drop archives the candidate instead of promoting it", async () 
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: true,
+        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-24T05:00:00.000Z"),
@@ -516,6 +524,7 @@ test("model drops count against the 25% removal guard", async () => {
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 2,
         allowDrop: true,
+        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-24T05:00:00.000Z"),
@@ -580,6 +589,7 @@ test("dreams are withheld from the sweep's merge targets", async () => {
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
+        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-25T05:00:00.000Z"),
@@ -643,6 +653,52 @@ test("the service refuses a merge into a dream even when asked directly", async 
       /Cannot merge a staging candidate into dream memory/,
     );
     assert.ok(await service.read(candidate.node.slug, "staging"));
+  });
+});
+
+
+test("preimages are capped, and zero disables them", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const base = {
+      enabled: true,
+      background: false,
+      tombstoneGraceDays: 30,
+      minGuardedBatchSize: 10,
+      allowDrop: false,
+    };
+    const preimages = path.join(repository.store.paths.sweeps, "preimages");
+
+    for (const iso of [
+      "2026-11-01T05:00:00.000Z",
+      "2026-11-02T05:00:00.000Z",
+      "2026-11-03T05:00:00.000Z",
+    ]) {
+      await runDailySweep(
+        undefined,
+        service,
+        { ...base, preimageKeep: 2 },
+        { force: true, now: new Date(iso) },
+      );
+    }
+
+    const kept = (await readdir(preimages)).sort();
+    assert.equal(kept.length, 2);
+    assert.match(kept[0] ?? "", /^2026-11-02/);
+    assert.match(kept[1] ?? "", /^2026-11-03/);
+
+    const disabled = await runDailySweep(
+      undefined,
+      service,
+      { ...base, preimageKeep: 0 },
+      { force: true, now: new Date("2026-11-04T05:00:00.000Z") },
+    );
+    assert.equal(disabled.preimage, undefined);
+    assert.deepEqual(await readdir(preimages), []);
   });
 });
 

@@ -314,6 +314,14 @@ settles. Before mutation it writes a full canonical preimage under
 `sweeps/preimages/`. It always advances `sweeps/state.json`, including failed
 attempts, and appends a dated decision log under `sweeps/`.
 
+`memory.sweep.preimage_keep` bounds those snapshots: the newest *n* are kept and
+older runs are pruned, so a full store copy per sweep cannot grow without limit.
+`0` disables preimages entirely — none is taken and existing ones are removed at
+the next sweep. The trade-off is narrow: recovery records and the superseded
+tombstones cover deletions, and dropped or archived candidates keep their own
+copies, so what preimages uniquely preserve is the *previous wording* of an edited
+or merged memory.
+
 Set `memory.sweep.background: true` to schedule the sweep on the next event-loop
 task instead of making agent settlement wait for its model calls. The sweep
 holds an exclusive memory-mutation lock while it runs, so interactive memory

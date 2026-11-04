@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { cp, mkdir, readdir } from "node:fs/promises";
+import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import * as path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type {
@@ -187,7 +187,11 @@ async function runDailySweepLocked(
       );
     }
 
-    preimage = await createPreimage(service, runId);
+    if (config.preimageKeep > 0) {
+      preimage = await createPreimage(service, runId);
+      options.signal?.throwIfAborted();
+    }
+    await prunePreimages(service, config.preimageKeep);
     options.signal?.throwIfAborted();
 
     await service.applyCandidateDecay(candidateDecay.updates);
@@ -346,6 +350,48 @@ async function runDailySweepLocked(
       error: message,
     };
   }
+}
+
+/**
+ * Deletes preimages beyond the configured retention count.
+ *
+ * Run identifiers are ISO timestamps, so lexicographic order is chronological:
+ * the newest `keep` directories survive and older ones are removed. A `keep` of
+ * zero removes every preimage, which is how preimages are disabled — the caller
+ * stops creating them at the same time, so this only has to clean up.
+ */
+async function prunePreimages(
+  service: MemoryNodeService,
+  keep: number,
+): Promise<void> {
+  const directory = path.join(service.store.paths.sweeps, "preimages");
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (getErrorCode(error) === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+
+  const runIds = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  const excess = runIds.slice(0, Math.max(0, runIds.length - keep));
+  for (const runId of excess) {
+    await rm(path.join(directory, runId), { recursive: true, force: true });
+  }
+}
+
+/** Returns a Node filesystem error code without relying on an any cast. */
+function getErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
+  }
+  const code = error.code;
+  return typeof code === "string" ? code : undefined;
 }
 
 /** Captures a full preimage of canonical files before sweep mutation. */
