@@ -13,6 +13,7 @@ import type { MemorySearchResult } from "./search.ts";
 import { formatRetrievalExplanation } from "./search.ts";
 import type { ParsedMemoryNode } from "./schema.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
+import { formatErrorChain } from "../debug/log.ts";
 
 /** One retrieval pass ready for insertion into an agent prompt. */
 export interface RagContext {
@@ -35,6 +36,11 @@ export interface RagRetrievalDiagnostics {
 
 type RagTier = "fresh" | "middle" | "cold";
 
+/** Optional diagnostics hooks for swallowed retrieval failures. */
+export interface RagContextOptions {
+  reportError?: (label: string, error: unknown) => void;
+}
+
 /**
  * Retrieves relevant active memory nodes and formats them into a bounded block.
  *
@@ -45,6 +51,7 @@ export async function buildRagContext(
   service: MemoryNodeService,
   query: string,
   config: RagInjectionConfig,
+  options: RagContextOptions = {},
 ): Promise<RagContext> {
   if (!config.enabled || query.trim() === "") {
     return {
@@ -78,7 +85,8 @@ export async function buildRagContext(
       minTokenMatches: 1,
     });
   } catch (error) {
-    searchError = describeError(error);
+    options.reportError?.("RAG primary search", error);
+    searchError = formatErrorChain(error);
     if (config.mode !== "keyword") {
       fallbackUsed = true;
       modeUsed = "keyword";
@@ -92,7 +100,9 @@ export async function buildRagContext(
           minTokenMatches: 1,
         });
       } catch (fallbackError) {
-        searchError = `${searchError}; keyword fallback: ${describeError(fallbackError)}`;
+        options.reportError?.("RAG keyword fallback", fallbackError);
+        searchError =
+          `${searchError}; keyword fallback: ${formatErrorChain(fallbackError)}`;
         results = [];
       }
     }
@@ -270,9 +280,4 @@ function summarizeBody(
   return summary.length <= charLimit
     ? summary
     : `${summary.slice(0, charLimit - 1).trimEnd()}…`;
-}
-
-/** Returns a readable error message for diagnostics. */
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -72,12 +72,14 @@ test("external manager reconciles initial paths and removes stale vectors", asyn
     });
 
     const warnings: string[] = [];
+    const reported: Array<{ label: string; error: unknown }> = [];
     const manager = new ExternalIndexManager({
       indexPaths: [corpus, await realpath(corpus), first],
       memoryRoot: repository.store.root,
       semantic: { provider, index },
       chunkSize: 4_000,
       reportWarning: (message) => warnings.push(message),
+      reportError: (label, error) => reported.push({ label, error }),
       debounceMs: 10,
       usePolling: true,
     });
@@ -106,6 +108,8 @@ test("external manager reconciles initial paths and removes stale vectors", asyn
         warnings.some((warning) => warning.includes("first.md")),
         true,
       );
+      assert.equal(reported[0]?.label, "external index path");
+      assert.match(String(reported[0]?.error), /Could not resolve/u);
     } finally {
       await manager.stop();
       index.close();

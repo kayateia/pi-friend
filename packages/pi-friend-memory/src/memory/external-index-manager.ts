@@ -17,6 +17,7 @@ import {
   ExternalIndexPathError,
   isImportedVectorEntry,
 } from "./external-index.ts";
+import { formatErrorChain } from "../debug/log.ts";
 import type { IndexedMarkdownFile } from "./indexer.ts";
 import {
   compileExcludePatterns,
@@ -49,6 +50,8 @@ export interface ExternalIndexManagerOptions {
   chunkSize: number;
   /** Reports recoverable scan, watch, and embedding failures. */
   reportWarning: (message: string) => void;
+  /** Records full error details for recoverable failures. */
+  reportError?: (label: string, error: unknown) => void;
   /** Overrides the change coalescing delay for tests. */
   debounceMs?: number;
   /** Uses polling where native recursive watches are unavailable. */
@@ -77,6 +80,7 @@ export class ExternalIndexManager implements ExternalIndexSource {
   private readonly semantic: ExternalIndexSemanticDependencies | undefined;
   private readonly chunkSize: number;
   private readonly reportWarning: (message: string) => void;
+  private readonly reportError: (label: string, error: unknown) => void;
   private readonly debounceMs: number;
   private readonly usePolling: boolean;
   private readonly abortController = new AbortController();
@@ -96,6 +100,7 @@ export class ExternalIndexManager implements ExternalIndexSource {
     this.semantic = options.semantic;
     this.chunkSize = options.chunkSize;
     this.reportWarning = options.reportWarning;
+    this.reportError = options.reportError ?? (() => undefined);
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.usePolling = options.usePolling ?? false;
   }
@@ -192,8 +197,9 @@ export class ExternalIndexManager implements ExternalIndexSource {
         if (this.abortController.signal.aborted) {
           return;
         }
+        this.reportError("external index scan", error);
         this.reportWarning(
-          `pi-friend external index scan failed: ${describeError(error)}`,
+          `pi-friend external index scan failed: ${formatErrorChain(error)}`,
         );
       }
     }
@@ -221,8 +227,9 @@ export class ExternalIndexManager implements ExternalIndexSource {
         if (!(error instanceof ExternalIndexPathError)) {
           throw error;
         }
+        this.reportError("external index path", error);
         this.reportWarning(
-          `pi-friend external index path unavailable: ${error.message}`,
+          `pi-friend external index path unavailable: ${formatErrorChain(error)}`,
         );
       }
     }
@@ -254,8 +261,9 @@ export class ExternalIndexManager implements ExternalIndexSource {
       if (this.abortController.signal.aborted) {
         return;
       }
+      this.reportError("external index refresh", error);
       this.reportWarning(
-        `pi-friend external index refresh failed: ${describeError(error)}`,
+        `pi-friend external index refresh failed: ${formatErrorChain(error)}`,
       );
     }
   }
@@ -281,14 +289,16 @@ export class ExternalIndexManager implements ExternalIndexSource {
       });
       this.watcher.on("all", () => this.scheduleReconcile());
       this.watcher.on("error", (error) => {
+        this.reportError("external index watcher", error);
         this.reportWarning(
-          `pi-friend external index watcher failed: ${describeError(error)}`,
+          `pi-friend external index watcher failed: ${formatErrorChain(error)}`,
         );
       });
     } catch (error) {
       this.watcher = undefined;
+      this.reportError("external index watcher initialization", error);
       this.reportWarning(
-        `pi-friend external index watcher unavailable: ${describeError(error)}`,
+        `pi-friend external index watcher unavailable: ${formatErrorChain(error)}`,
       );
     }
   }
@@ -347,9 +357,4 @@ export class ExternalIndexManager implements ExternalIndexSource {
     }
     return false;
   }
-}
-
-/** Formats unknown failures without leaking provider internals beyond messages. */
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

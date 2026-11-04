@@ -11,6 +11,9 @@ import { lstat, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import {
+  formatErrorChain,
+  formatErrorDetails,
+  logError,
   resolveDebugLogPath,
   writeDebugLog,
 } from "../../src/debug/log.ts";
@@ -49,4 +52,62 @@ test("debug log path defaults under the Pi agent config directory", () => {
     }),
     "/tmp/custom-debug.log",
   );
+});
+
+test("error formatting includes nested causes and stacks", () => {
+  const root = new Error("no such module: vec0");
+  const wrapped = new Error("Could not initialize sqlite-vec index.", {
+    cause: root,
+  });
+
+  assert.equal(
+    formatErrorChain(wrapped),
+    "Error: Could not initialize sqlite-vec index.; caused by Error: no such module: vec0",
+  );
+  const details = formatErrorDetails(wrapped);
+  assert.match(details, /\[Error\] Error: Could not initialize sqlite-vec index\./u);
+  assert.match(details, /\[Caused by 1\] Error: no such module: vec0/u);
+  assert.match(details, /at /u);
+});
+
+test("operational errors are persisted when debug logging is disabled", async () => {
+  await withTempDir(async (directory) => {
+    const logPath = path.join(directory, "debug.log");
+    const error = new Error("outer failure", {
+      cause: new Error("sqlite extension failed"),
+    });
+
+    logError("semantic index unavailable", error, {
+      logPath,
+      dedupeMs: 0,
+      now: 1,
+    });
+    logError("semantic index unavailable", error, {
+      logPath,
+      dedupeMs: 60_000,
+      now: 2,
+    });
+
+    const content = await readFile(logPath, "utf8");
+    assert.match(content, /\[error semantic index unavailable\]/u);
+    assert.match(content, /outer failure/u);
+    assert.match(content, /sqlite extension failed/u);
+    assert.equal(content.match(/\[error semantic index unavailable\]/gu)?.length, 1);
+    assert.equal((await lstat(logPath)).mode & 0o777, 0o600);
+  });
+});
+
+test("error logging deduplicates identical failures for a short interval", async () => {
+  await withTempDir(async (directory) => {
+    const logPath = path.join(directory, "debug.log");
+    const first = new Error("repeat me");
+    const second = new Error("repeat me");
+
+    logError("watcher", first, { logPath, now: 100, dedupeMs: 50 });
+    logError("watcher", second, { logPath, now: 120, dedupeMs: 50 });
+    logError("watcher", second, { logPath, now: 151, dedupeMs: 50 });
+
+    const content = await readFile(logPath, "utf8");
+    assert.equal(content.match(/\[error watcher\]/gu)?.length, 2);
+  });
 });

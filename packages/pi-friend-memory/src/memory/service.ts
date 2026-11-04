@@ -8,6 +8,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { formatErrorChain, logError } from "../debug/log.ts";
 import type { MemorySpeaker, MemoryType, ParsedMemoryNode } from "./schema.ts";
 import {
   isQuarantinedMemoryType,
@@ -355,7 +356,9 @@ export class MemoryNodeService {
       const nodes = await this.repository.list("canonical");
       const accessLog =
         (await this.repository.store.readTextFileIfExists("access-log")) ?? "";
-      const updates = computeDecayUpdates(nodes, accessLog);
+      const updates = computeDecayUpdates(nodes, accessLog, {
+        reportError: (label, error) => logError(label, error),
+      });
       const bySlug = new Map(nodes.map((node) => [node.slug, node]));
 
       for (const update of updates) {
@@ -718,10 +721,15 @@ export class MemoryNodeService {
         // The recovery record is harmless and preserves the original payload.
         try {
           await this.repository.remove(target.slug, "superseded");
-        } catch {
+        } catch (cleanupError) {
           throw new MemoryServiceError(
             `Deletion of "${target.slug}" partially failed; both canonical and tombstone files may exist.`,
-            { cause: error },
+            {
+              cause: new Error(
+                `Tombstone cleanup also failed: ${formatErrorChain(cleanupError)}`,
+                { cause: error },
+              ),
+            },
           );
         }
         throw error;

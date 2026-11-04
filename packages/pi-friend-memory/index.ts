@@ -14,7 +14,9 @@ import type {
 import { registerHookLogging } from "./src/debug/hook-log.ts";
 import {
   debugLog,
+  formatErrorChain,
   isDebugEnabled,
+  logError,
 } from "./src/debug/log.ts";
 import {
   DEFAULT_MEMORY_TOOL_PREFIX,
@@ -146,7 +148,12 @@ export default async function registerPiFriend(
         candidates: drafts.length,
       });
     } catch (error) {
-      debugRag("capture-failed", { error: describeError(error) });
+      logError("auto-capture", error);
+      debugRag("capture-failed", { error });
+      reportCaptureWarning(
+        ctx,
+        `pi-friend auto-capture failed: ${formatErrorChain(error)}`,
+      );
     }
   };
 
@@ -163,6 +170,7 @@ export default async function registerPiFriend(
         dreaming,
         signal,
         reportWarning: (message) => reportCaptureWarning(ctx, message),
+        reportError: (label, error) => logError(label, error),
       });
       debugRag("sweep", { ...result });
       if (result.error && !signal?.aborted) {
@@ -172,11 +180,12 @@ export default async function registerPiFriend(
         );
       }
     } catch (error) {
-      debugRag("sweep-failed", { error: describeError(error) });
+      logError("daily sweep", error);
+      debugRag("sweep-failed", { error });
       if (!signal?.aborted) {
         reportCaptureWarning(
           ctx,
-          `pi-friend daily sweep failed: ${describeError(error)}`,
+          `pi-friend daily sweep failed: ${formatErrorChain(error)}`,
         );
       }
     }
@@ -241,6 +250,7 @@ export default async function registerPiFriend(
         semantic: semanticSearch,
         chunkSize: repository.store.config.vector.chunkSize,
         reportWarning,
+        reportError: (label, error) => logError(label, error),
       });
       memoryService = new MemoryNodeService(
         repository,
@@ -257,9 +267,11 @@ export default async function registerPiFriend(
         idleTimeoutMs: config.idleTimeout * 1_000,
         isIdle: () => ctx.isIdle(),
         capture: () => executeCapture(ctx, service, config),
+        reportError: (label, error) => logError(label, error),
       });
     } catch (error) {
-      const message = `pi-friend memory initialization failed: ${describeError(error)}`;
+      logError("memory initialization", error);
+      const message = `pi-friend memory initialization failed: ${formatErrorChain(error)}`;
       if (ctx.hasUI) {
         ctx.ui.notify(message, "error");
       } else {
@@ -320,6 +332,9 @@ export default async function registerPiFriend(
           service,
           ragQuery.query,
           injectionConfig,
+          {
+            reportError: (label, error) => logError(label, error),
+          },
         )
           .then((rag) => {
             debugRag("retrieved", {
@@ -332,7 +347,8 @@ export default async function registerPiFriend(
             return rag.text;
           })
           .catch((error: unknown) => {
-            debugRag("failed", { error: describeError(error) });
+            logError("RAG context", error);
+            debugRag("failed", { error });
             return "";
           }),
       };
@@ -457,16 +473,12 @@ function createSemanticSearch(
     });
     return { provider, index };
   } catch (error) {
+    logError("semantic index initialization", error);
     reportWarning(
-      `pi-friend semantic index unavailable: ${describeError(error)}`,
+      `pi-friend semantic index unavailable: ${formatErrorChain(error)}`,
     );
     return undefined;
   }
-}
-
-/** Formats unknown thrown values for a user-visible initialization error. */
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Emits opt-in diagnostics for the retrieval and injection pipeline. */

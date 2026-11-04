@@ -55,6 +55,27 @@ test("capture scheduler runs only after post-settlement idle time", async () => 
   }
 });
 
+test("background capture failures are reported", async () => {
+  const reported: Array<{ label: string; error: unknown }> = [];
+  const scheduler = new AutoCaptureScheduler({
+    everyTurns: 10,
+    idleTimeoutMs: 10,
+    isIdle: () => true,
+    capture: async () => {
+      throw new Error("capture backend unavailable");
+    },
+    reportError: (label, error) => reported.push({ label, error }),
+  });
+  try {
+    await scheduler.onSettled();
+    await delay(30);
+    assert.equal(reported[0]?.label, "auto-capture scheduler");
+    assert.match(String(reported[0]?.error), /capture backend unavailable/u);
+  } finally {
+    scheduler.shutdown();
+  }
+});
+
 /** Waits for timer callbacks in scheduler tests. */
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));

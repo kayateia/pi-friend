@@ -54,9 +54,9 @@ export function promptDebugLog(
           colors: false,
           compact: 3,
           breakLength: 120,
-          depth: 8,
-          maxArrayLength: 100,
-          maxStringLength: 12_000,
+          depth: 5,
+          maxArrayLength: 25,
+          maxStringLength: 6_000,
         });
 
   try {

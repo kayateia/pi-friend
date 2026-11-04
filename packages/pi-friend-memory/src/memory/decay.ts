@@ -22,12 +22,18 @@ export interface CandidateDecayPlan {
   expiredSlugs: string[];
 }
 
+/** Optional diagnostics for malformed access-log records. */
+export interface DecayDiagnosticsOptions {
+  reportError?: (label: string, error: unknown) => void;
+}
+
 /** Computes decay changes without modifying node files. */
 export function computeDecayUpdates(
   nodes: ParsedMemoryNode[],
   accessLog: string,
+  options: DecayDiagnosticsOptions = {},
 ): DecayUpdate[] {
-  const access = parseAccessLog(accessLog);
+  const access = parseAccessLog(accessLog, options.reportError);
   const updates: DecayUpdate[] = [];
 
   for (const node of nodes) {
@@ -119,14 +125,21 @@ interface ParsedAccessEntry {
 }
 
 /** Parses valid JSON-lines access records and drops malformed lines. */
-function parseAccessLog(source: string): ParsedAccessEntry[] {
+function parseAccessLog(
+  source: string,
+  reportError?: (label: string, error: unknown) => void,
+): ParsedAccessEntry[] {
   const entries: ParsedAccessEntry[] = [];
-  for (const line of source.split("\n")) {
+  for (const [index, line] of source.split("\n").entries()) {
     if (line.trim() === "") continue;
     let value: unknown;
     try {
       value = JSON.parse(line);
-    } catch {
+    } catch (error) {
+      reportError?.(
+        "access log parse",
+        new Error(`Malformed access-log line ${index + 1}.`, { cause: error }),
+      );
       continue;
     }
     if (
@@ -134,6 +147,10 @@ function parseAccessLog(source: string): ParsedAccessEntry[] {
       typeof value.timestamp !== "string" ||
       !Number.isFinite(Date.parse(value.timestamp))
     ) {
+      reportError?.(
+        "access log parse",
+        new Error(`Access-log line ${index + 1} has an invalid record shape.`),
+      );
       continue;
     }
     entries.push({

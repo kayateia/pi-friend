@@ -175,12 +175,17 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
       maxChars: 900,
     };
     const service = new MemoryNodeService(repository);
-    const context = await buildRagContext(service, "orchid", config);
+    const reported: Array<{ label: string; error: unknown }> = [];
+    const context = await buildRagContext(service, "orchid", config, {
+      reportError: (label, error) => reported.push({ label, error }),
+    });
 
     assert.ok(context.count >= 1);
     assert.ok(context.text.length <= config.maxChars);
     assert.match(context.text, /Orchid 0/);
     assert.match(context.text, /Why recalled: keyword rank #\d+/);
+    assert.equal(reported[0]?.label, "RAG primary search");
+    assert.match(String(reported[0]?.error), /no embedding provider/u);
   });
 });
 

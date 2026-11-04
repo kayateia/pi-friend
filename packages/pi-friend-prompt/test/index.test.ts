@@ -7,7 +7,13 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import test from "node:test";
@@ -25,10 +31,15 @@ test("prompt build failures warn and retry on every request", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-run-"));
   const configDirectory = path.join(directory, "pi-friend");
   const configPath = path.join(configDirectory, "pi-friend-prompt.yml");
+  const logPath = path.join(configDirectory, "debug.log");
   const previousAgentDirectory = process.env.PI_CODING_AGENT_DIR;
+  const previousDebugHooks = process.env.PI_FRIEND_DEBUG_HOOKS;
+  const previousDebugLog = process.env.PI_FRIEND_DEBUG_LOG;
   await mkdir(configDirectory, { recursive: true });
   await writeFile(configPath, "prompt: invalid\n", "utf8");
   process.env.PI_CODING_AGENT_DIR = directory;
+  process.env.PI_FRIEND_DEBUG_HOOKS = "1";
+  process.env.PI_FRIEND_DEBUG_LOG = logPath;
 
   try {
     const harness = createPiHarness();
@@ -50,6 +61,14 @@ test("prompt build failures warn and retry on every request", async () => {
     assert.equal(notifications.length, 2);
     assert.match(notifications[0] ?? "", /pi-friend-prompt:/);
     assert.match(notifications[1] ?? "", /pi-friend-prompt:/);
+
+    const debugLog = await readFile(logPath, "utf8");
+    assert.equal(
+      debugLog.match(/\[prompt build failed\]/gu)?.length,
+      2,
+    );
+    assert.match(debugLog, /prompt must be a YAML list of changes/u);
+    assert.match(debugLog, /PromptConfigError/u);
 
     await writeFile(
       configPath,
@@ -74,6 +93,16 @@ test("prompt build failures warn and retry on every request", async () => {
       delete process.env.PI_CODING_AGENT_DIR;
     } else {
       process.env.PI_CODING_AGENT_DIR = previousAgentDirectory;
+    }
+    if (previousDebugHooks === undefined) {
+      delete process.env.PI_FRIEND_DEBUG_HOOKS;
+    } else {
+      process.env.PI_FRIEND_DEBUG_HOOKS = previousDebugHooks;
+    }
+    if (previousDebugLog === undefined) {
+      delete process.env.PI_FRIEND_DEBUG_LOG;
+    } else {
+      process.env.PI_FRIEND_DEBUG_LOG = previousDebugLog;
     }
     await rm(directory, { recursive: true, force: true });
   }
