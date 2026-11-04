@@ -544,7 +544,8 @@ export function registerMemoryTools(
       }),
       mode: Type.Optional(
         StringEnum(["keyword", "semantic", "hybrid"] as const, {
-          description: "Search mode. Default: keyword.",
+          description:
+            "Search mode. Omitted means memory.search.default_mode (hybrid unless configured otherwise); falls back to keyword with a note when embeddings are unavailable.",
         }),
       ),
       type: Type.Optional(
@@ -576,7 +577,17 @@ export function registerMemoryTools(
       params,
     ): Promise<AgentToolResult<MemorySearchDetails>> {
       const service = requireService(getService);
-      const mode = params.mode ?? "keyword";
+      const configuredMode = service.store.config.search.defaultMode;
+      const requestedMode = params.mode;
+      // A call that named a mode gets exactly what it asked for, including the
+      // failure. A call that inherited the configured default degrades to
+      // keyword when embeddings are unavailable, so a configuration mistake
+      // cannot make the tool look broken.
+      const degradeDefault =
+        requestedMode === undefined &&
+        configuredMode !== "keyword" &&
+        !service.canSearchSemantically;
+      const mode = degradeDefault ? "keyword" : requestedMode;
       if (params.type !== undefined && params.corpus === "documents") {
         throw new Error(
           "type filters memory nodes, so it cannot be combined with corpus \"documents\".",
@@ -590,17 +601,21 @@ export function registerMemoryTools(
         limit: params.limit,
       };
       const results = await service.search(searchOptions);
+      const text = formatSearchResults(params.query, results);
+      const note = degradeDefault
+        ? `(memory.search.default_mode is "${configuredMode}" but no embedding provider is available; searched with keyword.)\n\n`
+        : "";
 
       return {
         content: [
           {
             type: "text",
-            text: formatSearchResults(params.query, results),
+            text: `${note}${text}`,
           },
         ],
         details: {
           query: params.query,
-          mode,
+          mode: mode ?? configuredMode,
           count: results.length,
           results,
         },
