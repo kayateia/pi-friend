@@ -59,6 +59,8 @@ memory:
     # model: openrouter/google/gemini-2.5-flash
     # prompt: |
     #   Replacement system prompt for capture.
+    # prompt_append: |
+    #   Added after the built-in capture prompt.
   sweep:
     enabled: true
     background: false
@@ -67,12 +69,16 @@ memory:
     # model: openrouter/google/gemini-2.5-flash
     # prompt: |
     #   Replacement system prompt for sweep decisions.
+    # prompt_append: |
+    #   Added after the built-in sweep prompt.
   dreaming:
     enabled: true
     max_nodes: 4
     # model: openrouter/google/gemini-2.5-flash
     # prompt: |
     #   Replacement system prompt for dream selection and writing.
+    # prompt_append: |
+    #   Added after the built-in dream prompt.
   embeddings:
     model: openrouter/openai/text-embedding-3-small
 ```
@@ -92,11 +98,35 @@ The list is reconciled on session start and after filesystem changes while Pi is
 running. Files deleted or removed from the list have their stale vectors
 removed. Configuration list changes take effect on the next session or reload.
 
-`auto_capture.prompt`, `sweep.prompt`, and `dreaming.prompt` replace the
-corresponding internal model's system prompt. The task framing and required
-JSON response contract remain enforced by the extension. When omitted, the
-built-in prompt is used. The complete current defaults are copied into
-`pi-friend-memory.example.yml`.
+`sweep.allow_drop` offers the consolidation model a third action, `drop`, for
+candidates that are simply wrong — a misread speaker, a misunderstanding, a
+detail nobody needed. It is off by default, because the default pass only ever
+adds to canonical memory. A dropped candidate is archived under
+`sweeps/dropped/<runId>/<slug>.md` rather than deleted, so a bad judgement is
+recoverable, and drops count against the same 25% removal guard as decay so a
+single pass cannot empty staging. Leaving it off withdraws the action from the
+prompt and from the response parser together; setting it while supplying a
+replacement `prompt` that never mentions `drop` is reported as a warning.
+
+`auto_capture`, `sweep`, and `dreaming` each accept two prompt options, and at
+most one of them: `prompt` replaces that internal model's system prompt, while
+`prompt_append` keeps the built-in prompt and adds your text after it. Supplying
+both is a configuration error naming both keys, so the result never depends on
+an invisible precedence rule.
+
+Most of the built-in text is load-bearing. It holds the output contract, the
+observed-data rule, the type and action vocabulary, and the speaker rules the
+parser enforces by silently discarding anything that breaks them — so a
+replacement prompt has to carry those itself. The complete current defaults are
+copied into `pi-friend-memory.example.yml` under each section's `prompt`, which
+is also where the append form is shown commented out.
+
+Configuration problems that do not stop startup are reported once per session as
+warnings rather than errors: an unknown field (`promptAddition` instead of
+`prompt_append`, say, which used to be ignored in silence), or custom prompt text
+that names vocabulary the code cannot honour — a sweep action other than
+`promote`/`merge`, a memory type that does not exist, or generic speaker labels
+without the rule to omit them.
 
 The repository includes a complete, ready-to-copy example at
 [`pi-friend-memory.example.yml`](./pi-friend-memory.example.yml). Install it manually with:
@@ -148,6 +178,36 @@ When `PI_FRIEND_DEBUG_HOOKS` is enabled and retrieval selects no nodes, the
 extension still injects an empty `<pi-friend-memory></pi-friend-memory>` block.
 This makes request-context plumbing visible in traces without requiring test
 memories. Debug-disabled runs inject nothing in that case.
+
+## External Markdown and exclusions
+
+`memory.index_paths` imports Markdown from outside the memory tree. Two rules
+decide what is skipped.
+
+The paths the extension owns inside its root are never imported, even when a
+configured path contains them: `nodes/`, `staging/`, `sweeps/`, `recovery/`,
+`index/`, and `access-log`. Without that, pointing `index_paths` at a directory
+that contains the store — `~/identity`, when the store lives at
+`~/identity/pi-friend-memory` — would index every memory file a second time as a
+document and rescan on every memory write. The exclusion stops at those paths on
+purpose: anything else kept under the same root (a `notes/` directory, a loose
+`.md` file) is ordinary Markdown and stays indexable.
+
+`index_exclude` removes more, by glob:
+
+```yaml
+memory:
+  index_paths:
+    - ~/journal
+  index_exclude:
+    - ~/journal/private
+    - '**/*.draft.md'
+```
+
+`**` crosses directory separators, `*` matches within one segment, `?` matches
+one character, and a pattern with no wildcard is an exact path — so naming a
+directory excludes everything beneath it. Patterns resolve beside the
+configuration file and accept a leading `~`, exactly like `index_paths`.
 
 ## Development
 

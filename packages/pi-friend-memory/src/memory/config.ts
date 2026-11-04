@@ -40,6 +40,8 @@ export interface AutoCaptureConfig {
   model?: string;
   /** Optional replacement for the capture model's system prompt. */
   prompt?: string;
+  /** Optional text appended after the built-in capture system prompt. */
+  promptAppend?: string;
 }
 
 /** Configuration for the daily consolidation pass. */
@@ -51,6 +53,15 @@ export interface SweepConfig {
   model?: string;
   /** Optional replacement for the sweep model's system prompt. */
   prompt?: string;
+  /** Optional text appended after the built-in sweep system prompt. */
+  promptAppend?: string;
+  /**
+   * Offer the sweep model a `drop` action, which archives a candidate under
+   * `sweeps/dropped/` instead of promoting or merging it. Off by default: the
+   * upstream design deliberately has no drop, and this is the disagreement made
+   * configurable rather than the default changed on someone else's behalf.
+   */
+  allowDrop: boolean;
   tombstoneGraceDays: number;
   /** Batches smaller than this bypass the 25% removal guard. */
   minGuardedBatchSize: number;
@@ -64,6 +75,8 @@ export interface DreamingConfig {
   model?: string;
   /** Optional replacement for the dream model's system prompt. */
   prompt?: string;
+  /** Optional text appended after the built-in dream system prompt. */
+  promptAppend?: string;
 }
 
 /** Configuration for the derived vector index. */
@@ -94,12 +107,23 @@ export interface MemoryConfig {
   root: string;
   /** Resolved files and directory trees watched and included in search. */
   indexPaths: string[];
+  /**
+   * Resolved glob patterns whose matches are never imported from `indexPaths`.
+   * The memory root is always excluded, whether or not it appears here.
+   */
+  indexExclude: string[];
   injection: RagInjectionConfig;
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
   dreaming: DreamingConfig;
   vector: VectorConfig;
   embeddings: EmbeddingsConfig;
+  /**
+   * Non-fatal configuration problems found while loading, such as unknown
+   * fields or prompt text that names vocabulary the code cannot honour.
+   * Reported once at startup; never treated as errors.
+   */
+  warnings: string[];
 }
 
 /** Inputs that can be overridden by tests or alternate Pi environments. */
@@ -146,6 +170,7 @@ export function defaultSweepConfig(): SweepConfig {
     background: false,
     tombstoneGraceDays: 30,
     minGuardedBatchSize: 10,
+    allowDrop: false,
   };
 }
 
@@ -222,24 +247,32 @@ export function parseMemoryConfig(
       toolPrefix: DEFAULT_MEMORY_TOOL_PREFIX,
       root: defaultRoot,
       indexPaths: [],
+      indexExclude: [],
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
       dreaming: defaultDreamingConfig(),
       vector: defaultVectorConfig(),
       embeddings: defaultEmbeddingsConfig(),
+      warnings: [],
     };
   }
 
   if (!isRecord(document)) {
     throw new MemoryConfigError(`${configPath} must contain a YAML object.`);
   }
+  const warnings: string[] = [];
+  collectUnknownKeys(document, "document", configPath, warnings);
 
   const memory = document.memory;
   if (memory !== undefined && !isRecord(memory)) {
     throw new MemoryConfigError(`${configPath}: memory must be a YAML object.`);
   }
   const memoryConfig = memory ?? {};
+  collectUnknownKeys(memoryConfig, "memory",
+    `${configPath}: memory`,
+    warnings,
+  );
 
   const configuredRoot = memoryConfig.root;
   let root = defaultRoot;
@@ -264,12 +297,23 @@ export function parseMemoryConfig(
       configDir,
       homeDir,
     ),
-    injection: parseRagInjection(memoryConfig.injection, configPath),
-    autoCapture: parseAutoCapture(memoryConfig.auto_capture, configPath),
-    sweep: parseSweep(memoryConfig.sweep, configPath),
-    dreaming: parseDreaming(memoryConfig.dreaming, configPath),
-    vector: parseVector(memoryConfig.vector, configPath),
-    embeddings: parseEmbeddings(memoryConfig.embeddings, configPath),
+    indexExclude: parseIndexExclude(
+      memoryConfig.index_exclude,
+      configPath,
+      configDir,
+      homeDir,
+    ),
+    injection: parseRagInjection(memoryConfig.injection, configPath, warnings),
+    autoCapture: parseAutoCapture(
+      memoryConfig.auto_capture,
+      configPath,
+      warnings,
+    ),
+    sweep: parseSweep(memoryConfig.sweep, configPath, warnings),
+    dreaming: parseDreaming(memoryConfig.dreaming, configPath, warnings),
+    vector: parseVector(memoryConfig.vector, configPath, warnings),
+    embeddings: parseEmbeddings(memoryConfig.embeddings, configPath, warnings),
+    warnings,
   };
 }
 
@@ -295,12 +339,14 @@ export async function loadMemoryConfig(
         toolPrefix: DEFAULT_MEMORY_TOOL_PREFIX,
         root: path.join(configDir, "memory"),
         indexPaths: [],
+        indexExclude: [],
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
         dreaming: defaultDreamingConfig(),
         vector: defaultVectorConfig(),
         embeddings: defaultEmbeddingsConfig(),
+        warnings: [],
       };
     }
 
@@ -372,8 +418,43 @@ function parseIndexPaths(
   return resolved;
 }
 
+/**
+ * Parses `index_exclude`, resolving `~` and relative patterns like `index_paths`.
+ *
+ * Glob characters survive resolution untouched, so a recursive draft pattern
+ * keeps its meaning while still anchoring to the configuration directory.
+ */
+function parseIndexExclude(
+  value: unknown,
+  configPath: string,
+  configDir: string,
+  homeDir: string,
+): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.index_exclude must be a YAML array of path patterns.`,
+    );
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.index_exclude[${index}] must be a non-empty string.`,
+      );
+    }
+    const expanded = expandHomePath(entry.trim(), homeDir);
+    return path.resolve(configDir, expanded);
+  });
+}
+
 /** Parses optional vector-index settings while applying safe defaults. */
-function parseVector(value: unknown, configPath: string): VectorConfig {
+function parseVector(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): VectorConfig {
   const config = defaultVectorConfig();
   if (value === undefined) {
     return config;
@@ -383,6 +464,10 @@ function parseVector(value: unknown, configPath: string): VectorConfig {
       `${configPath}: memory.vector must be a YAML object.`,
     );
   }
+  collectUnknownKeys(value, "vector",
+    `${configPath}: memory.vector`,
+    warnings,
+  );
   if (value.chunk_size !== undefined) {
     if (
       typeof value.chunk_size !== "number" ||
@@ -403,6 +488,7 @@ function parseVector(value: unknown, configPath: string): VectorConfig {
 function parseRagInjection(
   value: unknown,
   configPath: string,
+  warnings: string[],
 ): RagInjectionConfig {
   const config = defaultRagInjectionConfig();
   if (value === undefined) {
@@ -413,6 +499,10 @@ function parseRagInjection(
       `${configPath}: memory.injection must be a YAML object.`,
     );
   }
+  collectUnknownKeys(value, "injection",
+    `${configPath}: memory.injection`,
+    warnings,
+  );
 
   if (value.enabled !== undefined) {
     if (typeof value.enabled !== "boolean") {
@@ -480,6 +570,7 @@ function parseRagInjection(
 function parseAutoCapture(
   value: unknown,
   configPath: string,
+  warnings: string[],
 ): AutoCaptureConfig {
   const config = defaultAutoCaptureConfig();
   if (value === undefined) {
@@ -490,6 +581,10 @@ function parseAutoCapture(
       `${configPath}: memory.auto_capture must be a YAML object.`,
     );
   }
+  collectUnknownKeys(value, "auto_capture",
+    `${configPath}: memory.auto_capture`,
+    warnings,
+  );
 
   if (value.enabled !== undefined) {
     if (typeof value.enabled !== "boolean") {
@@ -552,19 +647,23 @@ function parseAutoCapture(
     }
     config.model = value.model.trim();
   }
-  const prompt = parseModelPrompt(
-    value.prompt,
+  applyModelPrompt(
+    config,
+    value,
     configPath,
-    "memory.auto_capture.prompt",
+    "memory.auto_capture",
+    "capture",
+    warnings,
   );
-  if (prompt !== undefined) {
-    config.prompt = prompt;
-  }
   return config;
 }
 
 /** Parses optional daily-sweep settings. */
-function parseSweep(value: unknown, configPath: string): SweepConfig {
+function parseSweep(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): SweepConfig {
   const config = defaultSweepConfig();
   if (value === undefined) {
     return config;
@@ -574,6 +673,10 @@ function parseSweep(value: unknown, configPath: string): SweepConfig {
       `${configPath}: memory.sweep must be a YAML object.`,
     );
   }
+  collectUnknownKeys(value, "sweep",
+    `${configPath}: memory.sweep`,
+    warnings,
+  );
   if (value.enabled !== undefined) {
     if (typeof value.enabled !== "boolean") {
       throw new MemoryConfigError(
@@ -603,13 +706,33 @@ function parseSweep(value: unknown, configPath: string): SweepConfig {
     }
     config.model = value.model.trim();
   }
-  const prompt = parseModelPrompt(
-    value.prompt,
+  if (value.allow_drop !== undefined) {
+    if (typeof value.allow_drop !== "boolean") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.sweep.allow_drop must be a boolean.`,
+      );
+    }
+    config.allowDrop = value.allow_drop;
+  }
+  applyModelPrompt(
+    config,
+    value,
     configPath,
-    "memory.sweep.prompt",
+    "memory.sweep",
+    "sweep",
+    warnings,
+    { allowDrop: config.allowDrop },
   );
-  if (prompt !== undefined) {
-    config.prompt = prompt;
+  // A replacement prompt owns the vocabulary, so enabling drop and replacing the
+  // prompt without mentioning it is a silent no-op worth naming.
+  if (
+    config.allowDrop &&
+    config.prompt !== undefined &&
+    !/\bdrop\b/iu.test(config.prompt)
+  ) {
+    warnings.push(
+      `${configPath}: memory.sweep.allow_drop is enabled but memory.sweep.prompt never mentions drop, so the model will never choose it.`,
+    );
   }
   if (value.tombstone_grace_days !== undefined) {
     if (
@@ -641,7 +764,11 @@ function parseSweep(value: unknown, configPath: string): SweepConfig {
 }
 
 /** Parses optional dreaming settings. */
-function parseDreaming(value: unknown, configPath: string): DreamingConfig {
+function parseDreaming(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): DreamingConfig {
   const config = defaultDreamingConfig();
   if (value === undefined) {
     return config;
@@ -651,6 +778,10 @@ function parseDreaming(value: unknown, configPath: string): DreamingConfig {
       `${configPath}: memory.dreaming must be a YAML object.`,
     );
   }
+  collectUnknownKeys(value, "dreaming",
+    `${configPath}: memory.dreaming`,
+    warnings,
+  );
   if (value.enabled !== undefined) {
     if (typeof value.enabled !== "boolean") {
       throw new MemoryConfigError(
@@ -685,14 +816,14 @@ function parseDreaming(value: unknown, configPath: string): DreamingConfig {
     }
     config.model = value.model.trim();
   }
-  const prompt = parseModelPrompt(
-    value.prompt,
+  applyModelPrompt(
+    config,
+    value,
     configPath,
-    "memory.dreaming.prompt",
+    "memory.dreaming",
+    "dream",
+    warnings,
   );
-  if (prompt !== undefined) {
-    config.prompt = prompt;
-  }
   return config;
 }
 
@@ -717,6 +848,7 @@ function parseModelPrompt(
 function parseEmbeddings(
   value: unknown,
   configPath: string,
+  warnings: string[],
 ): EmbeddingsConfig {
   const config = defaultEmbeddingsConfig();
   if (value === undefined) {
@@ -727,6 +859,10 @@ function parseEmbeddings(
       `${configPath}: memory.embeddings must be a YAML object.`,
     );
   }
+  collectUnknownKeys(value, "embeddings",
+    `${configPath}: memory.embeddings`,
+    warnings,
+  );
   if (value.model !== undefined) {
     if (
       typeof value.model !== "string" ||
@@ -742,6 +878,204 @@ function parseEmbeddings(
     config.model = value.model.trim();
   }
   return config;
+}
+
+/** Sections whose system prompt can be replaced or extended by config. */
+type PromptSection = "capture" | "sweep" | "dream";
+
+/**
+ * Reads `prompt` and `prompt_append` for one internal model section.
+ *
+ * The two are mutually exclusive: replacing a prompt is supported, but it is
+ * never combined with appending, because the result would depend on an implicit
+ * precedence rule nobody can see in the file.
+ */
+function applyModelPrompt(
+  config: { prompt?: string; promptAppend?: string },
+  value: Record<string, unknown>,
+  configPath: string,
+  field: string,
+  section: PromptSection,
+  warnings: string[],
+  options: { allowDrop?: boolean } = {},
+): void {
+  const prompt = parseModelPrompt(value.prompt, configPath, `${field}.prompt`);
+  const promptAppend = parseModelPrompt(
+    value.prompt_append,
+    configPath,
+    `${field}.prompt_append`,
+  );
+  if (prompt !== undefined && promptAppend !== undefined) {
+    throw new MemoryConfigError(
+      `${configPath}: ${field}.prompt and ${field}.prompt_append cannot both be set; prompt replaces the built-in prompt and prompt_append extends it.`,
+    );
+  }
+  if (prompt !== undefined) {
+    config.prompt = prompt;
+    collectPromptWarnings(
+      prompt,
+      section,
+      `${configPath}: ${field}.prompt`,
+      warnings,
+      options,
+    );
+  }
+  if (promptAppend !== undefined) {
+    config.promptAppend = promptAppend;
+    collectPromptWarnings(
+      promptAppend,
+      section,
+      `${configPath}: ${field}.prompt_append`,
+      warnings,
+      options,
+    );
+  }
+}
+
+/** Configuration objects and the fields this version actually reads. */
+const KNOWN_KEYS = {
+  document: ["memory"],
+  memory: [
+    "root",
+    "tool_prefix",
+    "index_paths",
+    "index_exclude",
+    "vector",
+    "injection",
+    "auto_capture",
+    "sweep",
+    "dreaming",
+    "embeddings",
+  ],
+  injection: ["enabled", "position", "mode", "limit", "max_chars"],
+  vector: ["chunk_size"],
+  auto_capture: [
+    "enabled",
+    "every_turns",
+    "idle_timeout",
+    "max_candidates",
+    "model",
+    "prompt",
+    "prompt_append",
+  ],
+  sweep: [
+    "enabled",
+    "background",
+    "model",
+    "prompt",
+    "prompt_append",
+    "allow_drop",
+    "tombstone_grace_days",
+    "min_guarded_batch_size",
+  ],
+  dreaming: ["enabled", "max_nodes", "model", "prompt", "prompt_append"],
+  embeddings: ["model"],
+} as const;
+
+/**
+ * Fields that used to configure a feature which no longer exists.
+ *
+ * These earn a specific sentence instead of "unknown field", because the reader
+ * is usually looking at a configuration that predates the removal and needs to
+ * know that nothing replaces it.
+ */
+const REMOVED_KEYS: Record<string, Record<string, string>> = {
+  injection: {
+    daily:
+      "the daily-log injection feature was removed, so this section does nothing; recalled memory nodes are injected instead",
+  },
+};
+
+/**
+ * Reports fields this version does not read.
+ *
+ * Unknown keys are ignored rather than rejected, so a misnamed or removed
+ * option used to disable a whole feature in silence: `promptAddition` looks
+ * exactly like a working key until nothing happens.
+ */
+function collectUnknownKeys(
+  value: Record<string, unknown>,
+  section: keyof typeof KNOWN_KEYS,
+  location: string,
+  warnings: string[],
+): void {
+  const knownKeys: readonly string[] = KNOWN_KEYS[section];
+  for (const key of Object.keys(value)) {
+    if (knownKeys.includes(key)) {
+      continue;
+    }
+    const removed = REMOVED_KEYS[section]?.[key];
+    warnings.push(
+      removed === undefined
+        ? `${location}: unknown field "${key}" was ignored.`
+        : `${location}.${key} is no longer read: ${removed}.`,
+    );
+  }
+}
+
+/**
+ * True when the text instructs capture to label a speaker as `unknown`.
+ *
+ * `unknown` is one of the generic names the parser rejects, so this instruction
+ * deletes the candidates it was meant to keep — the failure is silent, which is
+ * why it earns a warning. Merely mentioning the word is not enough.
+ */
+function assignsUnknownSpeaker(text: string): boolean {
+  return /(?:use|record|label|attribute|write|set)\b[^.\n]{0,40}\bunknown\b/iu.test(
+    text,
+  );
+}
+
+/** Words that look like sweep actions but are not part of the vocabulary. */
+const SWEEP_ACTION_NEAR_MISSES = [
+  "drop",
+  "discard",
+  "defer",
+  "skip",
+  "archive",
+  "reject",
+];
+
+/**
+ * Reports custom prompt text that appears to name vocabulary the code cannot
+ * honour.
+ *
+ * This is deliberately narrow, not an attempt to understand prose: it looks for
+ * sweep actions outside the enum and for the one speaker instruction that
+ * silently costs candidates, and says what the code will do with them. Ordinary
+ * words that happen to resemble vocabulary ("the inner life of a person", a
+ * quoted mention of `USER`) are left alone, because a warning that cries wolf
+ * teaches people to ignore warnings. It never blocks startup and never inspects
+ * the built-in prompts.
+ */
+function collectPromptWarnings(
+  text: string,
+  section: PromptSection,
+  location: string,
+  warnings: string[],
+  options: { allowDrop?: boolean } = {},
+): void {
+  const mentions = (word: string): boolean =>
+    new RegExp(`\\b${word}\\b`, "iu").test(text);
+
+  if (section === "sweep") {
+    for (const word of SWEEP_ACTION_NEAR_MISSES) {
+      if (word === "drop" && options.allowDrop === true) {
+        continue;
+      }
+      if (mentions(word)) {
+        warnings.push(
+          `${location} mentions "${word}", which is not a sweep action; the parser accepts only promote and merge and silently ignores anything else.`,
+        );
+      }
+    }
+  }
+
+  if (section === "capture" && assignsUnknownSpeaker(text)) {
+    warnings.push(
+      `${location} tells capture to attribute a speaker as "unknown"; the parser treats that as a generic name and discards those candidates, so name the speaker or omit the candidate instead.`,
+    );
+  }
 }
 
 /** Narrows an unknown config value to a supported search mode. */

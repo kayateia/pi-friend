@@ -211,12 +211,26 @@ Move the resulting `prompt` list from `pi-friend.yml` into the new
 ## Failure handling
 
 The configuration and all referenced prompt files are loaded on every request.
-If parsing, file loading, regex rewriting, or prompt construction fails, the
-extension leaves that request's original prompt unchanged and reports a warning.
-It tries again on every later request, including after the problem is fixed.
+A prompt file that cannot be read — because it is missing, unreadable, or not a
+regular file — is reported in its own warning and skipped, and the rest of the
+configuration is still applied:
+
+- The change keeps its inline `text` plus every file that did read.
+- A change left with no text at all is skipped, and that is reported too.
+- Every other configured change applies as usual.
+
+Each problem produces one notification, so several missing files produce
+several warnings. Nothing is remembered between requests, so an unresolved
+file is reported again on the next one.
+
+If parsing the configuration, rewriting the prompt, or building it fails, the
+extension instead leaves that request's original prompt unchanged and reports a
+warning. It tries again on every later request, including after the problem is
+fixed.
 
 Because changes are applied atomically, failure in a later change also rolls
-back earlier changes from that request.
+back earlier changes from that request. A skipped prompt file is not such a
+failure: it only costs that file's own contents.
 
 ## Host compatibility
 

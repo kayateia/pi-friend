@@ -40,6 +40,7 @@ test("actual Pi prompt builder applies addendum and section rewrites", async () 
   applyPromptConfig(
     options,
     {
+      warnings: [],
       changes: [
         {
           section: "addendum",

@@ -11,10 +11,14 @@ import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
 import {
-  SWEEP_SYSTEM_PROMPT,
   buildSweepPrompt,
   parseSweepResponse,
 } from "../../src/memory/sweep-model.ts";
+import {
+  SWEEP_SYSTEM_PROMPT,
+  buildSweepSystemPrompt,
+  resolveSweepSystemPrompt,
+} from "../../src/memory/prompts.ts";
 import { runDailySweep } from "../../src/memory/sweep.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import type { MemoryType } from "../../src/memory/schema.ts";
@@ -51,7 +55,6 @@ test("sweep response parsing validates candidate actions and targets", () => {
     [makeCandidate("existing")],
   );
   assert.match(prompt, /Candidates:/);
-  assert.match(SWEEP_SYSTEM_PROMPT, /never merge.*dream memory/);
 });
 
 test("daily sweep writes preimage, state, log, and promotes candidates", async () => {
@@ -79,6 +82,7 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
         background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
+        allowDrop: false,
       },
       {
         now: new Date("2026-10-20T05:00:00.000Z"),
@@ -126,6 +130,7 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
         background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
+        allowDrop: false,
       },
       { now: new Date("2026-10-20T06:00:00.000Z") },
     );
@@ -156,6 +161,7 @@ test("sweep failure still advances state and writes a failure log", async () => 
         background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
+        allowDrop: false,
       },
       {
         now: new Date("2026-10-21T05:00:00.000Z"),
@@ -209,6 +215,7 @@ test("an aborted background sweep does not mutate candidates", async () => {
             background: true,
             tombstoneGraceDays: 30,
             minGuardedBatchSize: 10,
+            allowDrop: false,
           },
           { signal: controller.signal },
         ),
@@ -256,6 +263,7 @@ test("sweep archives expired tombstones and creates one dream", async () => {
         background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
+        allowDrop: false,
       },
       {
         now: new Date("2026-02-15T05:00:00.000Z"),
@@ -319,6 +327,7 @@ test("small batches may expire more than 25% below the guard threshold", async (
         background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 5,
+        allowDrop: false,
       },
       {
         now: new Date("2026-10-22T05:00:00.000Z"),
@@ -366,6 +375,7 @@ test("the 25% guard still applies at the configured batch threshold", async () =
         background: false,
         tombstoneGraceDays: 30,
         minGuardedBatchSize: 2,
+        allowDrop: false,
       },
       {
         now: new Date("2026-10-23T05:00:00.000Z"),
@@ -375,6 +385,264 @@ test("the 25% guard still applies at the configured batch threshold", async () =
     assert.match(result.error ?? "", /guard applies at 2 or more/);
     assert.ok(await service.read(first.node.slug, "staging"));
     assert.ok(await service.read(second.node.slug, "staging"));
+  });
+});
+
+
+test("drop is offered only when allow_drop is enabled", () => {
+  const response = JSON.stringify({
+    decisions: [
+      { slug: "candidate", action: "drop", reason: "a misunderstanding" },
+    ],
+  });
+
+  assert.deepEqual(
+    parseSweepResponse(response, ["candidate"], [], false),
+    [],
+  );
+  assert.deepEqual(
+    parseSweepResponse(response, ["candidate"], [], true).map(
+      (decision) => decision.action,
+    ),
+    ["drop"],
+  );
+
+  const withoutDrop = buildSweepPrompt([makeCandidate("c")], []);
+  const withDrop = buildSweepPrompt([makeCandidate("c")], [], true);
+  assert.match(withoutDrop, /"action":"promote\|merge"/);
+  assert.match(withDrop, /"action":"promote\|merge\|drop"/);
+
+  assert.doesNotMatch(SWEEP_SYSTEM_PROMPT, /`drop`/);
+  assert.match(buildSweepSystemPrompt(true), /`promote`, `merge`, or `drop`/);
+  assert.match(
+    buildSweepSystemPrompt(true),
+    /dropped candidates are archived, not deleted/,
+  );
+  assert.doesNotMatch(buildSweepSystemPrompt(false), /`drop`/);
+});
+
+test("prompt_append extends the drop-enabled sweep prompt", () => {
+  const prompt = resolveSweepSystemPrompt(
+    { promptAppend: "Prefer promoting distinct facts." },
+    true,
+  );
+  assert.match(prompt, /`promote`, `merge`, or `drop`/);
+  assert.ok(prompt.endsWith("Prefer promoting distinct facts."));
+});
+
+test("an allowed drop archives the candidate instead of promoting it", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(
+      repository,
+      () => new Date("2026-10-24T05:00:00.000Z"),
+    );
+    const candidate = await service.stageCandidate({
+      title: "Droppable Candidate",
+      type: "fact",
+      body: "An incorrect capture worth discarding.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    const result = await runDailySweep(
+      undefined,
+      service,
+      {
+        enabled: true,
+        background: false,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 10,
+        allowDrop: true,
+      },
+      {
+        now: new Date("2026-10-24T05:00:00.000Z"),
+        decide: async () => [
+          {
+            slug: candidate.node.slug,
+            action: "drop",
+            reason: "misunderstood the speaker",
+          },
+        ],
+      },
+    );
+
+    assert.equal(result.error, undefined);
+    assert.equal(result.dropped, 1);
+    assert.equal(result.promoted, 0);
+    assert.equal(result.merged, 0);
+    assert.equal(await service.read(candidate.node.slug, "staging"), null);
+    assert.equal(await service.read(candidate.node.slug), null);
+
+    const archived = await readFile(
+      path.join(
+        repository.store.paths.sweeps,
+        "dropped",
+        result.runId ?? "",
+        `${candidate.node.slug}.md`,
+      ),
+      "utf8",
+    );
+    assert.match(archived, /incorrect capture worth discarding/);
+  });
+});
+
+test("model drops count against the 25% removal guard", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const candidates: string[] = [];
+    for (const title of ["Guard One", "Guard Two", "Guard Three", "Guard Four"]) {
+      const staged = await service.stageCandidate({
+        title,
+        type: "fact",
+        body: `${title} body.`,
+        speaker: [{ name: "Aisling", confident: true }],
+      });
+      candidates.push(staged.node.slug);
+    }
+
+    const result = await runDailySweep(
+      undefined,
+      service,
+      {
+        enabled: true,
+        background: false,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 2,
+        allowDrop: true,
+      },
+      {
+        now: new Date("2026-10-24T05:00:00.000Z"),
+        decide: async () =>
+          candidates.slice(0, 2).map((slug) => ({
+            slug,
+            action: "drop" as const,
+            reason: "not worth keeping",
+          })),
+      },
+    );
+
+    assert.match(result.error ?? "", /more than 25%/);
+    // Nothing was applied: a refused batch must leave staging exactly as it was.
+    for (const slug of candidates) {
+      assert.ok(await service.read(slug, "staging"));
+    }
+  });
+});
+
+
+test("dreams are withheld from the sweep's merge targets", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(
+      repository,
+      () => new Date("2026-10-25T05:00:00.000Z"),
+    );
+    const ordinary = await service.add({
+      title: "Ordinary Memory",
+      type: "fact",
+      body: "An ordinary canonical memory.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const dream = await service.createDream({
+      title: "Dream Of Two",
+      narrative: "A dream woven from two memories.",
+      nodeSlugs: [ordinary.slug, (await service.add({
+        title: "Second Ordinary",
+        type: "fact",
+        body: "Another ordinary canonical memory.",
+        speaker: [{ name: "Aisling", confident: true }],
+      })).slug],
+    });
+    const candidate = await service.stageCandidate({
+      title: "Mergeable Candidate",
+      type: "fact",
+      body: "A candidate that wants merging into something real.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    let offered: string[] = [];
+    const result = await runDailySweep(
+      undefined,
+      service,
+      {
+        enabled: true,
+        background: false,
+        tombstoneGraceDays: 30,
+        minGuardedBatchSize: 10,
+        allowDrop: false,
+      },
+      {
+        now: new Date("2026-10-25T05:00:00.000Z"),
+        decide: async (candidates, canonical) => {
+          offered = canonical.map((node) => node.slug);
+          return [
+            {
+              slug: candidates[0]?.slug ?? candidate.node.slug,
+              action: "promote",
+              reason: "durable",
+            },
+          ];
+        },
+      },
+    );
+
+    assert.equal(result.error, undefined);
+    assert.ok(offered.length >= 2);
+    assert.ok(!offered.includes(dream.slug));
+    // The dream still exists; it simply is not filterable as a merge target.
+    assert.ok(await service.read(dream.slug));
+  });
+});
+
+
+test("the service refuses a merge into a dream even when asked directly", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const first = await service.add({
+      title: "First Source",
+      type: "fact",
+      body: "First dream source.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const second = await service.add({
+      title: "Second Source",
+      type: "fact",
+      body: "Second dream source.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const dream = await service.createDream({
+      title: "Refused Dream",
+      narrative: "A dream that must stay fiction.",
+      nodeSlugs: [first.slug, second.slug],
+    });
+    const candidate = await service.stageCandidate({
+      title: "Would Be Contaminated",
+      type: "fact",
+      body: "Ordinary content that must not enter a dream.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    // The decider is filtered, but the write path is guarded too — so a caller
+    // that names a dream anyway gets an error rather than a fabricated memory.
+    await assert.rejects(
+      service.promoteCandidate(candidate.node.slug, dream.slug),
+      /Cannot merge a staging candidate into dream memory/,
+    );
+    assert.ok(await service.read(candidate.node.slug, "staging"));
   });
 });
 

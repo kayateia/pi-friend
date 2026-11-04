@@ -12,11 +12,14 @@ import type { AutoCaptureConfig } from "./config.ts";
 import { debugLog } from "../debug/log.ts";
 import {
   buildCapturePrompt,
-  CAPTURE_SYSTEM_PROMPT,
   inferSpeakerName,
   parseCaptureResponse,
   type CaptureCandidateDraft,
 } from "./capture.ts";
+import {
+  CAPTURE_SYSTEM_PROMPT,
+  resolveSystemPrompt,
+} from "./prompts.ts";
 
 const CAPTURE_TIMEOUT_MS = 30_000;
 
@@ -42,7 +45,7 @@ export async function runCaptureModel(
   const stream = ctx.modelRegistry.streamSimple(
     model,
     {
-      systemPrompt: config.prompt ?? CAPTURE_SYSTEM_PROMPT,
+      systemPrompt: resolveSystemPrompt(CAPTURE_SYSTEM_PROMPT, config),
       messages: [
         {
           role: "user",

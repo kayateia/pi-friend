@@ -11,6 +11,10 @@ import { homedir } from "node:os";
 import * as path from "node:path";
 import { expandHomePath } from "./config.ts";
 import {
+  isExcludedPath,
+  type CompiledExclude,
+} from "./index-exclude.ts";
+import {
   buildDocumentIndexEntry,
   type IndexedMarkdownFile,
 } from "./indexer.ts";
@@ -49,6 +53,8 @@ export async function buildIndexPathFiles(
     homeDir?: string;
     /** Allows a configured directory to contain no Markdown files yet. */
     allowEmpty?: boolean;
+    /** Compiled `index_exclude` patterns, in configuration order. */
+    exclude?: readonly CompiledExclude[];
   },
 ): Promise<IndexPathFiles> {
   const requested = inputPath.trim();
@@ -68,6 +74,11 @@ export async function buildIndexPathFiles(
     );
   }
 
+  const root = await realpath(options.memoryRoot);
+  const exclude = options.exclude ?? [];
+  const isExcluded = (candidate: string): boolean =>
+    isExcludedPath(candidate, root, exclude);
+
   const sourceStat = await stat(sourcePath);
   const markdownPaths: string[] = [];
   if (sourceStat.isFile()) {
@@ -76,9 +87,11 @@ export async function buildIndexPathFiles(
         `Index path must be a Markdown file or directory: ${sourcePath}`,
       );
     }
-    markdownPaths.push(sourcePath);
+    if (!isExcluded(sourcePath)) {
+      markdownPaths.push(sourcePath);
+    }
   } else if (sourceStat.isDirectory()) {
-    await collectMarkdownFiles(sourcePath, markdownPaths);
+    await collectMarkdownFiles(sourcePath, markdownPaths, isExcluded);
   } else {
     throw new ExternalIndexPathError(
       `Index path is not a regular file or directory: ${sourcePath}`,
@@ -91,7 +104,6 @@ export async function buildIndexPathFiles(
     );
   }
 
-  const root = await realpath(options.memoryRoot);
   const files: IndexedMarkdownFile[] = [];
   for (const markdownPath of markdownPaths.sort()) {
     files.push(await buildIndexedFile(markdownPath, root));
@@ -107,10 +119,15 @@ export function isImportedVectorEntry(entry: VectorEntryMetadata): boolean {
   );
 }
 
-/** Recursively collects Markdown files while ignoring symlinks and dot paths. */
+/**
+ * Recursively collects Markdown files while ignoring symlinks, dot paths, and
+ * anything the exclusion predicate rejects. Directories are tested before they
+ * are entered, so an excluded tree is never walked at all.
+ */
 async function collectMarkdownFiles(
   directory: string,
   files: string[],
+  isExcluded: (candidate: string) => boolean,
 ): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries.sort((left, right) =>
@@ -121,8 +138,11 @@ async function collectMarkdownFiles(
     }
 
     const entryPath = path.join(directory, entry.name);
+    if (isExcluded(entryPath)) {
+      continue;
+    }
     if (entry.isDirectory()) {
-      await collectMarkdownFiles(entryPath, files);
+      await collectMarkdownFiles(entryPath, files, isExcluded);
       continue;
     }
     if (!entry.isFile() || !isMarkdownPath(entry.name)) {

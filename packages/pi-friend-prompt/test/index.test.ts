@@ -31,22 +31,12 @@ test("prompt build failures warn and retry on every request", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-run-"));
   const configDirectory = path.join(directory, "pi-friend");
   const configPath = path.join(configDirectory, "pi-friend-prompt.yml");
-  const promptFile = path.join(configDirectory, "missing.md");
   const logPath = path.join(configDirectory, "debug.log");
   const previousAgentDirectory = process.env.PI_CODING_AGENT_DIR;
   const previousDebugHooks = process.env.PI_FRIEND_DEBUG_HOOKS;
   const previousDebugLog = process.env.PI_FRIEND_DEBUG_LOG;
   await mkdir(configDirectory, { recursive: true });
-  await writeFile(
-    configPath,
-    [
-      "prompt:",
-      "  - section: preamble",
-      "    action: replace",
-      "    files: [missing.md]",
-    ].join("\n"),
-    "utf8",
-  );
+  await writeFile(configPath, "prompt: invalid\n", "utf8");
   process.env.PI_CODING_AGENT_DIR = directory;
   process.env.PI_FRIEND_DEBUG_HOOKS = "1";
   process.env.PI_FRIEND_DEBUG_LOG = logPath;
@@ -77,11 +67,19 @@ test("prompt build failures warn and retry on every request", async () => {
       debugLog.match(/\[prompt build failed\]/gu)?.length,
       2,
     );
-    assert.match(debugLog, /prompt\[0\]\.files\[0\]/u);
-    assert.match(debugLog, /missing\.md/u);
-    assert.match(debugLog, /ENOENT/u);
+    assert.match(debugLog, /prompt must be a YAML list of changes/u);
+    assert.match(debugLog, /PromptConfigError/u);
 
-    await writeFile(promptFile, "Recovered prompt.", "utf8");
+    await writeFile(
+      configPath,
+      [
+        "prompt:",
+        "  - section: preamble",
+        "    action: replace",
+        "    text: Recovered prompt.",
+      ].join("\n"),
+      "utf8",
+    );
     const recoveredEvent = createEvent();
     await harness.before(recoveredEvent, context);
 
@@ -105,6 +103,65 @@ test("prompt build failures warn and retry on every request", async () => {
       delete process.env.PI_FRIEND_DEBUG_LOG;
     } else {
       process.env.PI_FRIEND_DEBUG_LOG = previousDebugLog;
+    }
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("missing prompt files warn individually and the remaining edits still apply", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "pi-friend-prompt-run-"));
+  const configDirectory = path.join(directory, "pi-friend");
+  const configPath = path.join(configDirectory, "pi-friend-prompt.yml");
+  const previousAgentDirectory = process.env.PI_CODING_AGENT_DIR;
+  await mkdir(configDirectory, { recursive: true });
+  await writeFile(
+    configPath,
+    [
+      "prompt:",
+      "  - section: preamble",
+      "    action: replace",
+      "    text: Prompt survives.",
+      "    files: [missing-a.md]",
+      "  - section: addendum",
+      "    action: replace",
+      "    text: Addendum survives.",
+      "    files: [missing-b.md]",
+    ].join("\n"),
+    "utf8",
+  );
+  process.env.PI_CODING_AGENT_DIR = directory;
+
+  try {
+    const harness = createPiHarness();
+    const notifications: string[] = [];
+    const context = {
+      hasUI: true,
+      sessionManager: {
+        getSessionId: () => "test-session",
+      },
+      ui: {
+        notify: (message: string) => {
+          notifications.push(message);
+        },
+      },
+    } as unknown as ExtensionContext;
+
+    const event = createEvent();
+    await harness.before(event, context);
+
+    assert.equal(notifications.length, 2);
+    assert.match(notifications[0] ?? "", /missing-a\.md does not exist/);
+    assert.match(notifications[1] ?? "", /missing-b\.md does not exist/);
+    assert.equal(event.systemPromptOptions.customPrompt, "Prompt survives.");
+    assert.equal(
+      event.systemPromptOptions.appendSystemPrompt,
+      "Addendum survives.",
+    );
+  } finally {
+    if (previousAgentDirectory === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_DIR = previousAgentDirectory;
     }
     await rm(directory, { recursive: true, force: true });
   }

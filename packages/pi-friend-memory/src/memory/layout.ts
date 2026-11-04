@@ -7,25 +7,24 @@
  */
 
 import { lstat, mkdir, open, stat } from "node:fs/promises";
-import type { MemoryPaths } from "./paths.ts";
+import { MEMORY_LAYOUT } from "./paths.ts";
+import type { MemoryLayoutEntry, MemoryPaths } from "./paths.ts";
 import { MemoryPathError } from "./paths.ts";
 
 /** Creates the complete private memory layout without overwriting content. */
 export async function ensureMemoryLayout(paths: MemoryPaths): Promise<void> {
   await ensureDirectory(paths.root, true);
 
-  for (const directory of [
-    paths.nodes,
-    paths.supersededNodes,
-    paths.staging,
-    paths.sweeps,
-    paths.index,
-    paths.recovery,
-  ]) {
-    await ensureDirectory(directory);
+  const entries = Object.entries(MEMORY_LAYOUT) as Array<
+    [MemoryLayoutEntry, { kind: "directory" | "file" }]
+  >;
+  for (const [name, entry] of entries) {
+    if (entry.kind === "directory") {
+      await ensureDirectory(paths[name]);
+      continue;
+    }
+    await ensureFile(paths[name]);
   }
-
-  await ensureFile(paths.accessLog);
 }
 
 /**

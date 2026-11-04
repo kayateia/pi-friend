@@ -17,6 +17,11 @@ import type { MemoryNodeService } from "./service.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
 import { planCandidateDecay } from "./decay.ts";
 import {
+  DREAM_SYSTEM_PROMPT,
+  resolveSweepSystemPrompt,
+  resolveSystemPrompt,
+} from "./prompts.ts";
+import {
   runSweepModel,
   type SweepDecision,
 } from "./sweep-model.ts";
@@ -126,6 +131,13 @@ async function runDailySweepLocked(
   try {
     const allCandidates = await service.listStagingCandidates();
     const canonical = await service.listCanonicalNodes();
+    // Dreams are canonical but must never be merge targets: merging ordinary
+    // content into one would turn fiction into memory. Withdrawing them here
+    // keeps them out of the model's window and out of a custom decider's, so the
+    // prompt need not warn about a target that cannot appear.
+    const mergeTargets = canonical.filter(
+      (node) => !isQuarantinedMemoryType(node.frontMatter.type),
+    );
     const candidateDecay = planCandidateDecay(allCandidates, canonical);
     const expiredSet = new Set(candidateDecay.expiredSlugs);
     const candidates = allCandidates.filter(
@@ -135,7 +147,7 @@ async function runDailySweepLocked(
       if (options.decide) {
         decisions = await options.decide(
           candidates,
-          canonical,
+          mergeTargets,
           options.signal,
         );
       } else {
@@ -146,16 +158,24 @@ async function runDailySweepLocked(
           ctx,
           config.model,
           candidates,
-          canonical,
+          mergeTargets,
           options.reportWarning ?? (() => {}),
           options.signal,
-          config.prompt,
+          resolveSweepSystemPrompt(config, config.allowDrop),
+          config.allowDrop,
         );
       }
       options.signal?.throwIfAborted();
     }
 
-    const destructiveActions = candidateDecay.expiredSlugs.length;
+    // Model-requested drops are destructive too, so they count against the same
+    // guard. Otherwise enabling `allow_drop` would quietly turn a rate limit on
+    // deletion into no limit at all.
+    const modelDrops = decisions.filter(
+      (decision) => decision.action === "drop",
+    ).length;
+    const destructiveActions =
+      candidateDecay.expiredSlugs.length + modelDrops;
     const ratioGuardApplies =
       allCandidates.length >= config.minGuardedBatchSize;
     if (
@@ -179,6 +199,11 @@ async function runDailySweepLocked(
 
     for (const decision of decisions) {
       options.signal?.throwIfAborted();
+      if (decision.action === "drop") {
+        await service.archiveCandidate(decision.slug, runId);
+        dropped += 1;
+        continue;
+      }
       const result = await service.promoteCandidate(
         decision.slug,
         decision.action === "merge" ? decision.target : undefined,
@@ -227,7 +252,7 @@ async function runDailySweepLocked(
                   options.dreaming.maxNodes,
                   options.reportWarning ?? (() => {}),
                   options.signal,
-                  options.dreaming.prompt,
+                  resolveSystemPrompt(DREAM_SYSTEM_PROMPT, options.dreaming),
                 )
               : (() => {
                   throw new Error("Dream model context is unavailable.");

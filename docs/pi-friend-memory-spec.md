@@ -46,6 +46,7 @@ memory:
   root: ~/workspace/memory
   tool_prefix: ""
   index_paths: []
+  index_exclude: []
   vector:
     chunk_size: 4000
   injection:
@@ -83,11 +84,22 @@ names. `tool_prefix: pf_`, for example, exposes `pf_memory_add` and
 explicit `tool_prefix: memory_` would instead produce `memory_memory_add`, so
 the normal configuration should leave the prefix empty.
 
-Each automated model section supports an optional `prompt` string that replaces
-its system prompt: `memory.auto_capture.prompt`, `memory.sweep.prompt`, and
-`memory.dreaming.prompt`. User-message task framing and JSON output validation
-remain in code. The complete built-in prompts are reproduced in
-`pi-friend-memory.example.yml`.
+Each automated model section accepts at most one of two prompt options.
+`memory.sweep.allow_drop` enables a third sweep action, `drop`. When enabled the
+system prompt offers it and the parser accepts it; a dropped candidate is written
+to `sweeps/dropped/<runId>/<slug>.md` and removed from staging, and the decision
+counts against the 25% removal guard. When disabled, `drop` is neither offered
+nor accepted. The option defaults to off.
+
+`prompt` replaces its system prompt (`memory.auto_capture.prompt`,
+`memory.sweep.prompt`, `memory.dreaming.prompt`); `prompt_append` keeps the
+built-in prompt and appends the configured text after it
+(`memory.auto_capture.prompt_append`, and likewise for the other two). Setting
+both in one section is a configuration error. User-message task framing and JSON
+output validation remain in code and cannot be configured, and the built-in
+prompts hold vocabulary and speaker rules the parser enforces silently, so a
+replacement has to reproduce them. The complete built-in prompts are reproduced
+in `pi-friend-memory.example.yml`.
 
 ## 4. Node schema (strict front matter)
 
@@ -139,7 +151,12 @@ The names below are the built-in tool names. A configured `tool_prefix` is prepe
 External Markdown files and directory trees are configured through
 `memory.index_paths` rather than a model-facing tool. A leading `~` is expanded,
 relative paths resolve from the directory containing `pi-friend-memory.yml`, and
-overlapping paths are indexed once. The list is reconciled when a session
+overlapping paths are indexed once. The paths the extension owns inside
+its root (`nodes/`, `staging/`, `sweeps/`, `recovery/`, `index/`, `access-log`)
+are never imported, while anything else under that root remains indexable;
+`memory.index_exclude` adds glob patterns (`**` crosses directories, `*` stays
+within a segment, a pattern without wildcards is an exact path) and a named
+directory excludes its subtree. The list is reconciled when a session
 starts and while Pi runs through a filesystem watcher. Deleting or renaming a
 source removes its stale vector chunks; keyword search reads the current source
 catalog and therefore also omits missing files. Changes to the YAML path list
@@ -189,7 +206,7 @@ once-per-day consolidation schedule, not daily-log processing.
   - Auto-capture also uses an idle debounce measured from the **last settled agent run**. Each new settled run resets the timer. When the configured `idle_timeout` expires (default 600 seconds), capture runs if no agent run is active. A run that starts before expiry suppresses capture; the timer restarts when that run settles. Session shutdown clears the pending timer. This is wall-clock scheduling, not memory decay.
 - The default candidate limit is 3. Auto-capture excludes `dream`; that types is not generated from ordinary conversation capture.
 - Promotion happens two ways:
-  1. **Sweep promotion** (daily): the sweep model chooses `promote` or `merge` for each candidate. Every decision is logged with reasoning in the sweep log.
+  1. **Sweep promotion** (daily): the sweep model chooses `promote` or `merge` for each candidate. Every decision is logged with reasoning in the sweep log. Dreams are not offered as merge targets, so the model is never shown a destination it must not choose.
   2. **Main-model promotion**: the interactive model may call `memory_promote` for a candidate it has verified mid-conversation. Unpromoted candidates remain staged for a later sweep.
 - Dedupe happens at promotion time: staging candidates are compared (via embedding similarity) against existing nodes before promotion; near-duplicates are merged with `links` preserved.
 
