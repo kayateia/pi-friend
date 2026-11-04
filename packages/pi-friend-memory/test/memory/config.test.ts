@@ -695,3 +695,31 @@ test("preimage_keep defaults to a bounded number and accepts zero", () => {
     );
   }
 });
+test("memory.search.default_mode is hybrid unless configured", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  assert.equal(
+    parseMemoryConfig("memory:\n  root: ~/memory\n", configPath).search
+      .defaultMode,
+    "hybrid",
+  );
+  assert.equal(
+    parseMemoryConfig(
+      "memory:\n  search:\n    default_mode: keyword\n",
+      configPath,
+    ).search.defaultMode,
+    "keyword",
+  );
+  assert.throws(
+    () =>
+      parseMemoryConfig(
+        "memory:\n  search:\n    default_mode: fuzzy\n",
+        configPath,
+      ),
+    MemoryConfigError,
+  );
+  const typo = parseMemoryConfig(
+    "memory:\n  search:\n    defaultMode: keyword\n",
+    configPath,
+  );
+  assert.match(typo.warnings.join("\n"), /unknown field "defaultMode"/);
+});

@@ -35,7 +35,7 @@ import type { IndexedMarkdownFile } from "./indexer.ts";
 import { searchHybrid } from "./hybrid-search.ts";
 import type { EmbeddingProvider } from "./embedding.ts";
 import type { MemorySearchOptions, MemorySearchResult } from "./search.ts";
-import { searchIndexedFiles } from "./search.ts";
+import { kindsForCorpus, searchIndexedFiles } from "./search.ts";
 import { searchSemantically } from "./semantic-search.ts";
 import type { VectorIndex } from "./vector-index.ts";
 import { buildEmbeddingText } from "./vector-sync.ts";
@@ -151,6 +151,11 @@ export class MemoryNodeService {
   /** Storage handle used by sweep artifact/state management. */
   get store() {
     return this.repository.store;
+  }
+
+  /** True when semantic and hybrid search can run in this runtime. */
+  get canSearchSemantically(): boolean {
+    return this.semantic !== undefined;
   }
 
   /** Lists staging candidates for sweep decisions. */
@@ -304,9 +309,18 @@ export class MemoryNodeService {
     if (options.query.trim() === "") {
       throw new MemoryServiceError("Search query must not be empty.");
     }
+    if (options.corpus !== undefined && options.kinds !== undefined) {
+      throw new MemoryServiceError(
+        "Search options cannot set both corpus and kinds.",
+      );
+    }
+    const resolved: MemorySearchOptions =
+      options.corpus === undefined
+        ? options
+        : { ...options, kinds: kindsForCorpus(options.corpus) };
 
     const index = await this.buildSearchIndex();
-    const mode = options.mode ?? "keyword";
+    const mode = options.mode ?? this.store.config.search.defaultMode;
     const vectorOptions = {
       chunkSize: this.store.config.vector.chunkSize,
     };
@@ -321,20 +335,20 @@ export class MemoryNodeService {
         mode === "hybrid"
           ? await searchHybrid(
               index,
-              options,
+              resolved,
               this.semantic.provider,
               this.semantic.index,
               vectorOptions,
             )
           : await searchSemantically(
               index,
-              options,
+              resolved,
               this.semantic.provider,
               this.semantic.index,
               vectorOptions,
             );
     } else {
-      results = searchIndexedFiles(index, options);
+      results = searchIndexedFiles(index, resolved);
     }
 
     for (const result of results) {

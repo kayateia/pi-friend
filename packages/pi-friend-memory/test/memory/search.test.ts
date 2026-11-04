@@ -62,7 +62,7 @@ test("keyword search ranks exact slug, title, tag, and body matches", async () =
       body: "The lantern appears in this body.",
     });
 
-    const results = await service.search({ query: "lantern" });
+    const results = await service.search({ query: "lantern", mode: "keyword" });
     assert.deepEqual(
       results.map((result) => result.slug),
       ["lantern", "title-match", "tag-match", "body-match"],
@@ -92,7 +92,7 @@ test("search finds ordinary documents and returns typed results", async () => {
       "# Lighthouse Reference\n\nA plain document about a lighthouse.\n",
     );
 
-    const results = await service.search({ query: "lighthouse" });
+    const results = await service.search({ query: "lighthouse", mode: "keyword" });
     assert.equal(results.length, 2);
     assert.deepEqual(
       new Set(results.map((result) => result.kind)),
@@ -129,6 +129,7 @@ test("type filters exclude documents and other memory types", async () => {
 
     const results = await service.search({
       query: "violet",
+      mode: "keyword",
       type: "preference",
     });
     assert.equal(results.length, 1);
@@ -149,7 +150,7 @@ test("search applies limits and records one access-log entry per result", async 
       });
     }
 
-    const results = await service.search({ query: "comet", limit: 2 });
+    const results = await service.search({ query: "comet", mode: "keyword", limit: 2 });
     assert.equal(results.length, 2);
 
     const accessLog = await repository.store.readTextFile("access-log");
@@ -176,10 +177,65 @@ test("malformed nodes remain discoverable as documents", async () => {
       "# Damaged Node\n\nA recoverable damaged-node phrase.\n",
     );
 
-    const results = await service.search({ query: "damaged-node phrase" });
+    const results = await service.search({ query: "damaged-node phrase", mode: "keyword" });
     assert.equal(results.length, 1);
     assert.equal(results[0]?.kind, "document");
     assert.match(results[0]?.schemaError ?? "", /strict YAML front matter/);
     assert.match(results[0]?.snippet ?? "", /damaged-node phrase/);
+  });
+});
+
+test("corpus narrows a search to memory or documents", async () => {
+  await withTempDir(async (agentDir) => {
+    const { repository, service } = await makeService(agentDir);
+    const common = {
+      type: "fact" as const,
+      speaker: [{ name: "Aisling", confident: true }],
+    };
+    const node = await service.add({
+      ...common,
+      title: "Harbour Note",
+      body: "The harbour bell rings once at dusk.",
+    });
+    const candidate = await service.stageCandidate({
+      ...common,
+      title: "Harbour Candidate",
+      body: "A staged note about the harbour bell.",
+    });
+    await repository.store.writeTextFile(
+      "docs/harbour.md",
+      "# Harbour Document\nThe harbour bell appears in an imported file.\n",
+    );
+
+    const memory = await service.search({ query: "harbour bell", mode: "keyword", corpus: "memory" });
+    assert.deepEqual(
+      memory.map((result) => result.kind).sort(),
+      ["node", "staging-candidate"],
+    );
+    assert.ok(memory.some((result) => result.slug === node.slug));
+    assert.ok(memory.some((result) => result.slug === candidate.node.slug));
+
+    const documents = await service.search({
+      query: "harbour bell",
+      mode: "keyword",
+      corpus: "documents",
+    });
+    assert.deepEqual(
+      documents.map((result) => result.relativePath),
+      ["docs/harbour.md"],
+    );
+
+    const all = await service.search({ query: "harbour bell", mode: "keyword", corpus: "all" });
+    assert.equal(all.length, 3);
+
+    await assert.rejects(
+      () =>
+        service.search({
+          query: "harbour bell",
+          corpus: "memory",
+          kinds: ["document"],
+        }),
+      /cannot set both corpus and kinds/,
+    );
   });
 });

@@ -87,6 +87,23 @@ export interface DreamingConfig {
   promptAppend?: string;
 }
 
+/** Configuration for search defaults shared by tools and retrieval. */
+export interface SearchConfig {
+  /**
+   * Mode used by `memory_search` when a call does not name one.
+   *
+   * Retrieval configures its own mode under `injection.mode`; this is the same
+   * choice for the explicit tool, so the two callers stop disagreeing about
+   * which default is sensible.
+   */
+  defaultMode: MemorySearchMode;
+}
+
+/** Default search settings: hybrid, matching retrieval's default. */
+export function defaultSearchConfig(): SearchConfig {
+  return { defaultMode: "hybrid" };
+}
+
 /** Configuration for the derived vector index. */
 export interface VectorConfig {
   /** Maximum characters supplied for one embedding chunk. */
@@ -124,6 +141,7 @@ export interface MemoryConfig {
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
   dreaming: DreamingConfig;
+  search: SearchConfig;
   vector: VectorConfig;
   embeddings: EmbeddingsConfig;
   /**
@@ -257,6 +275,7 @@ export function parseMemoryConfig(
       root: defaultRoot,
       indexPaths: [],
       indexExclude: [],
+      search: defaultSearchConfig(),
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
@@ -312,6 +331,7 @@ export function parseMemoryConfig(
       configDir,
       homeDir,
     ),
+    search: parseSearch(memoryConfig.search, configPath, warnings),
     injection: parseRagInjection(memoryConfig.injection, configPath, warnings),
     autoCapture: parseAutoCapture(
       memoryConfig.auto_capture,
@@ -349,6 +369,7 @@ export async function loadMemoryConfig(
         root: path.join(configDir, "memory"),
         indexPaths: [],
         indexExclude: [],
+        search: defaultSearchConfig(),
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
@@ -489,6 +510,33 @@ function parseVector(
       );
     }
     config.chunkSize = value.chunk_size;
+  }
+  return config;
+}
+
+/** Parses optional search defaults. */
+function parseSearch(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): SearchConfig {
+  const config = defaultSearchConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.search must be a YAML object.`,
+    );
+  }
+  collectUnknownKeys(value, "search", `${configPath}: memory.search`, warnings);
+  if (value.default_mode !== undefined) {
+    if (!isSearchMode(value.default_mode)) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.search.default_mode must be "keyword", "semantic", or "hybrid".`,
+      );
+    }
+    config.defaultMode = value.default_mode;
   }
   return config;
 }
@@ -962,6 +1010,7 @@ const KNOWN_KEYS = {
     "tool_prefix",
     "index_paths",
     "index_exclude",
+    "search",
     "vector",
     "injection",
     "auto_capture",
@@ -969,6 +1018,7 @@ const KNOWN_KEYS = {
     "dreaming",
     "embeddings",
   ],
+  search: ["default_mode"],
   injection: ["enabled", "position", "mode", "limit", "max_chars"],
   vector: ["chunk_size"],
   auto_capture: [

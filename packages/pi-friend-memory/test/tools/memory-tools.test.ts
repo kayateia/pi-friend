@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { MemoryNodeService } from "../../src/memory/service.ts";
 import {
   formatMemoryToolName,
   registerMemoryTools,
@@ -31,4 +32,84 @@ test("manual index path is not registered as a memory tool", () => {
 
   assert.equal(names.includes("memory_index_path"), false);
   assert.equal(names.includes("memory_search"), true);
+});
+
+test("memory_search exposes corpus and passes it through", async () => {
+  const captured: unknown[] = [];
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  const stubService = {
+    store: { config: { search: { defaultMode: "keyword" } } },
+    canSearchSemantically: true,
+    async search(options: unknown) {
+      captured.push(options);
+      return [];
+    },
+  };
+
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
+
+  const definition = definitions.get("memory_search") as {
+    parameters: { properties: Record<string, unknown> };
+    execute: (id: string, params: unknown) => Promise<unknown>;
+  };
+  assert.ok("corpus" in definition.parameters.properties);
+
+  await definition.execute("call", { query: "harbour", corpus: "documents" });
+  assert.deepEqual(captured.at(-1), {
+    query: "harbour",
+    mode: undefined,
+    type: undefined,
+    corpus: "documents",
+    limit: undefined,
+  });
+
+  await assert.rejects(
+    async () =>
+      definition.execute("call", {
+        query: "harbour",
+        corpus: "documents",
+        type: "fact",
+      }),
+    /cannot be combined with corpus/,
+  );
+});
+
+test("an unavailable configured default degrades to keyword with a note", async () => {
+  const captured: Array<Record<string, unknown>> = [];
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  const stubService = {
+    store: { config: { search: { defaultMode: "hybrid" } } },
+    canSearchSemantically: false,
+    async search(options: Record<string, unknown>) {
+      captured.push(options);
+      return [];
+    },
+  };
+
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
+  const definition = definitions.get("memory_search") as {
+    execute: (
+      id: string,
+      params: unknown,
+    ) => Promise<{ content: Array<{ text: string }> }>;
+  };
+
+  // Inherited default: degrade, and say why.
+  const degraded = await definition.execute("call", { query: "harbour" });
+  assert.equal(captured.at(-1)?.mode, "keyword");
+  assert.match(degraded.content[0]?.text ?? "", /no embedding provider is available/);
+
+  // Explicit request: fail rather than silently downgrade.
+  await definition.execute("call", { query: "harbour", mode: "semantic" });
+  assert.equal(captured.at(-1)?.mode, "semantic");
 });

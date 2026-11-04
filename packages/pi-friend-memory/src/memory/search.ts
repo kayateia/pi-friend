@@ -16,6 +16,30 @@ import type {
 /** Supported search modes for the initial implementation. */
 export type MemorySearchMode = "keyword" | "semantic" | "hybrid";
 
+/**
+ * Which part of the index a search should consider.
+ *
+ * `memory` is what recall injects — nodes and staging candidates. `documents` is
+ * everything else that is searchable: imported Markdown and the store's own
+ * ordinary documents. `all` is both, and remains the default so a plain search
+ * behaves as it always has.
+ */
+export type MemorySearchCorpus = "all" | "memory" | "documents";
+
+/** Maps a corpus to the file kinds it covers. */
+export function kindsForCorpus(
+  corpus: MemorySearchCorpus,
+): readonly MemoryFileKind[] {
+  switch (corpus) {
+    case "memory":
+      return ["node", "staging-candidate"];
+    case "documents":
+      return ["document"];
+    case "all":
+      return ["node", "staging-candidate", "document"];
+  }
+}
+
 /** Input for a keyword search over indexed Markdown files. */
 export interface MemorySearchOptions {
   query: string;
@@ -23,6 +47,8 @@ export interface MemorySearchOptions {
   type?: MemoryType;
   kind?: IndexedMarkdownFile["kind"];
   kinds?: readonly MemoryFileKind[];
+  /** Convenience alternative to `kinds`; supplying both is an error. */
+  corpus?: MemorySearchCorpus;
   status?: MemoryStatus;
   statuses?: readonly MemoryStatus[];
   limit?: number;
