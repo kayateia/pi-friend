@@ -168,6 +168,7 @@ test("the created layout and the reserved prefixes agree", async () => {
     const created = (await readdir(root)).sort();
     assert.deepEqual(created, [
       "access-log",
+      "history",
       "index",
       "nodes",
       "recovery",
@@ -196,6 +197,7 @@ test("the reserved prefixes stay derived from the layout declaration", () => {
   // letting the derivation do it silently.
   assert.deepEqual(RESERVED_MEMORY_PATHS, [
     "access-log",
+    "history",
     "index",
     "nodes",
     "recovery",

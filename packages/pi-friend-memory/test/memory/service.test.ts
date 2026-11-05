@@ -15,6 +15,10 @@ import {
   slugifyTitle,
 } from "../../src/memory/service.ts";
 import { parseRecoveryRecord } from "../../src/memory/recovery.ts";
+import {
+  listHistoryVersions,
+  readHistoryEntry,
+} from "../../src/memory/history.ts";
 import { withTempDir } from "../helpers.ts";
 
 const FIXED_TIME = new Date("2026-10-19T20:00:00.000Z");
@@ -118,7 +122,7 @@ test("schema validation remains active through the service", async () => {
   });
 });
 
-test("edit preserves creation state and appends an audit entry", async () => {
+test("edit preserves creation state and archives the version it replaced", async () => {
   await withTempDir(async (agentDir) => {
     let currentTime = FIXED_TIME;
     const service = await makeService(agentDir, () => currentTime);
@@ -148,9 +152,34 @@ test("edit preserves creation state and appends an audit entry", async () => {
     assert.equal(edited.frontMatter.title, "Updated Title");
     assert.deepEqual(edited.frontMatter.tags, ["new"]);
     assert.match(edited.body, /Updated body\./);
-    assert.match(edited.body, /## audit/);
-    assert.match(edited.body, /memory_edit: Corrected the wording/);
+    assert.doesNotMatch(edited.body, /## audit/);
     assert.deepEqual(await service.read(created.slug), edited);
+
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const versions = await listHistoryVersions(
+      repository.store,
+      "edited",
+      created.slug,
+    );
+    assert.deepEqual(versions, [
+      `history/edited/${created.slug}/${currentTime.toISOString()}.md`,
+    ]);
+    const previous = await readHistoryEntry(
+      repository.store,
+      versions[0] ?? "",
+      created.slug,
+    );
+    assert.ok(previous);
+    // The file holds the memory as it was, not as it became.
+    assert.match(previous.body, /Original body\./);
+    assert.doesNotMatch(previous.body, /Updated body\./);
+    assert.equal(previous.frontMatter.title, "Original Title");
+    assert.deepEqual(previous.frontMatter.tags, ["old"]);
+    // The reason describes the edit that replaced this version.
+    assert.equal(previous.frontMatter.history_reason, "Corrected the wording");
   });
 });
 

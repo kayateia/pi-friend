@@ -17,6 +17,7 @@ import {
 } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { appendAuditEntry } from "./audit.ts";
+import { writeHistoryEntry } from "./history.ts";
 
 /**
  * Process-wide mutation queues keyed by the resolved memory root.
@@ -626,17 +627,32 @@ export class MemoryNodeService {
         }
         body = `\n${updatedBody}\n`;
       }
-      body = appendAuditEntry(
-        body,
-        timestamp,
-        input.reason ? `memory_edit: ${input.reason}` : "memory_edit",
-      );
-
       const updated: ParsedMemoryNode = {
         slug: node.slug,
         frontMatter,
         body,
       };
+
+      // The version being replaced is the only copy that exists until this
+      // write lands, so it is stored first. The reason describes the edit that
+      // ends it, which is why it belongs to the history file rather than to the
+      // node: the node is not changed by having been changed.
+      await writeHistoryEntry(this.repository.store, {
+        kind: "edited",
+        slug: node.slug,
+        timestamp,
+        node: {
+          slug: node.slug,
+          frontMatter: {
+            ...node.frontMatter,
+            ...(input.reason === undefined || input.reason.trim() === ""
+              ? {}
+              : { history_reason: input.reason.trim() }),
+          },
+          body: node.body,
+        },
+      });
+
       await this.repository.write(updated);
       return updated;
     });

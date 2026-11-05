@@ -213,6 +213,36 @@ export class MemoryStore {
     });
   }
 
+  /**
+   * Lists Markdown file names inside one directory of the store.
+   *
+   * Unlike {@link listMarkdownFiles} this ignores the searchable flag: history
+   * and sweep artefacts are meant to be read by path, and a caller that names a
+   * directory has already decided it wants what is in it.
+   */
+  async listDirectoryMarkdown(relativeDirectory: string): Promise<string[]> {
+    const absolute = resolveWithin(this.root, relativeDirectory);
+    let entries;
+    try {
+      entries = await readdir(absolute, { withFileTypes: true });
+    } catch (error) {
+      if (getErrorCode(error) === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    return entries
+      .filter(
+        (entry) =>
+          entry.isFile() &&
+          !entry.isSymbolicLink() &&
+          !entry.name.startsWith(".") &&
+          entry.name.endsWith(".md"),
+      )
+      .map((entry) => `${relativeDirectory}/${entry.name}`)
+      .sort();
+  }
+
   /** Appends text to an internal append-only file. */
   private async appendText(relativePath: string, content: string): Promise<void> {
     const target = await this.resolveMemoryPath(relativePath);
