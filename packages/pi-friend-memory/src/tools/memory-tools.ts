@@ -15,6 +15,7 @@ import {
   MEMORY_TYPES,
   serializeMemoryNode,
 } from "../memory/schema.ts";
+import { ATTRIBUTION_LABEL, formatAttribution } from "../memory/attribution.ts";
 import type {
   MemoryStatus,
   MemoryType,
@@ -652,10 +653,12 @@ function formatSearchResults(
       .filter(Boolean)
       .join(" · ");
 
+    const attribution = formatAttribution(result.speaker);
     return [
       `### ${index + 1}. ${heading}`,
       `Path: ${result.relativePath}`,
       metadata,
+      attribution === undefined ? "" : `${ATTRIBUTION_LABEL}: ${attribution}`,
       formatRetrievalExplanation(result),
       result.snippet,
     ]

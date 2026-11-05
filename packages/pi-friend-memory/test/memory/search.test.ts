@@ -239,3 +239,40 @@ test("corpus narrows a search to memory or documents", async () => {
     );
   });
 });
+
+test("search results carry speaker attribution", async () => {
+  await withTempDir(async (agentDir) => {
+    const { repository, service } = await makeService(agentDir);
+    await service.add({
+      title: "Attributed Memory",
+      type: "preference",
+      body: "Prefers being asked before being advised.",
+      speaker: [
+        { name: "Aria", confident: true, note: "stated it directly" },
+        { name: "Iri", confident: false, note: "relayed Aria's observation" },
+      ],
+    });
+    await repository.store.writeTextFile(
+      "docs/plain.md",
+      "# Plain Document\nA document with no attribution.\n",
+    );
+
+    const node = await service.search({
+      query: "Attributed Memory",
+      mode: "keyword",
+      corpus: "memory",
+    });
+    assert.deepEqual(
+      node[0]?.speaker?.map((speaker) => speaker.name),
+      ["Aria", "Iri"],
+    );
+    assert.equal(node[0]?.speaker?.[1]?.confident, false);
+
+    const document = await service.search({
+      query: "Plain Document",
+      mode: "keyword",
+      corpus: "documents",
+    });
+    assert.equal(document[0]?.speaker, undefined);
+  });
+});

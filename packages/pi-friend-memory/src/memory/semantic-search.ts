@@ -115,6 +115,7 @@ export function searchSemanticVectors(
       ...(file.decayWeight === undefined
         ? {}
         : { decayWeight: file.decayWeight }),
+      ...(file.speaker === undefined ? {} : { speaker: file.speaker }),
       ...(file.modifiedAt === undefined
         ? {}
         : { modifiedAt: file.modifiedAt }),

@@ -113,3 +113,51 @@ test("an unavailable configured default degrades to keyword with a note", async 
   await definition.execute("call", { query: "harbour", mode: "semantic" });
   assert.equal(captured.at(-1)?.mode, "semantic");
 });
+
+test("memory_search prints speaker attribution when present", async () => {
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  const stubService = {
+    store: { config: { search: { defaultMode: "keyword" } } },
+    canSearchSemantically: true,
+    async search() {
+      return [
+        {
+          relativePath: "nodes/attributed.md",
+          kind: "node",
+          slug: "attributed",
+          title: "Attributed",
+          type: "fact",
+          status: "active",
+          tags: [],
+          body: "Something Aria said.",
+          snippet: "Something Aria said.",
+          score: 200,
+          matchedFields: ["body"],
+          speaker: [
+            { name: "Aria", confident: true },
+            { name: "Iri", confident: false, note: "relayed" },
+          ],
+        },
+      ];
+    },
+  };
+
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
+  const definition = definitions.get("memory_search") as {
+    execute: (
+      id: string,
+      params: unknown,
+    ) => Promise<{ content: Array<{ text: string }> }>;
+  };
+
+  const result = await definition.execute("call", { query: "something" });
+  assert.match(
+    result.content[0]?.text ?? "",
+    /Heard from: Aria; Iri \(uncertain\) — relayed/,
+  );
+});
