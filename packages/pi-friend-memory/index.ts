@@ -36,8 +36,8 @@ import { runCaptureModel } from "./src/memory/capture-runner.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
 import {
   captureStatePath,
-  readCaptureState,
-  writeCaptureState,
+  readCaptureCursor,
+  writeCaptureCursor,
 } from "./src/memory/capture-state.ts";
 import {
   OpenRouterEmbeddingProvider,
@@ -83,7 +83,6 @@ export default async function registerPiFriend(
   const ragSessions = new Map<string, RagSessionState>();
   let injectionConfig = defaultRagInjectionConfig();
   let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
-  let captureCursor: string | undefined;
   let captureScheduler: AutoCaptureScheduler | undefined;
   let sweepConfig: SweepConfig = defaultSweepConfig();
   let dreamingConfig: DreamingConfig = defaultDreamingConfig();
@@ -115,21 +114,20 @@ export default async function registerPiFriend(
     try {
       const sessionId = ctx.sessionManager.getSessionId();
       const statePath = captureStatePath();
-      // The cursor lives in memory for the life of a process and on disk for
-      // the life of a session. A reload, resume or restart used to re-read the
-      // whole branch and stage the same material twice; the file makes that
-      // read continue instead of repeat. A cursor from another session is
-      // ignored, because entry ids are only meaningful inside their own branch.
-      let cursor = captureCursor;
-      if (cursor === undefined) {
-        const restored = await readCaptureState(statePath);
-        if (restored.warning !== undefined) {
-          reportCaptureWarning(ctx, `pi-friend auto-capture: ${restored.warning}`);
-        }
-        if (restored.state?.sessionId === sessionId) {
-          cursor = restored.state.lastEntryId;
-        }
+      // One cursor per session, read fresh on every capture: several sessions
+      // run at once and a house switches between them, so a process-wide
+      // variable would let one session's position answer for another's. A
+      // reload, resume or restart used to re-read the whole branch and stage
+      // the same material twice; the file makes that read continue instead of
+      // repeat.
+      const restored = await readCaptureCursor(statePath, sessionId);
+      if (restored.warning !== undefined) {
+        reportCaptureWarning(
+          ctx,
+          `pi-friend auto-capture: ${restored.warning}`,
+        );
       }
+      const cursor = restored.cursor?.lastEntryId;
 
       const branch = ctx.sessionManager.getBranch();
       const cursorIndex = cursor
@@ -181,10 +179,7 @@ export default async function registerPiFriend(
 
       const finalEntry = branch[branch.length - 1];
       if (finalEntry) {
-        captureCursor = finalEntry.id;
-        await writeCaptureState(statePath, {
-          version: 1,
-          sessionId,
+        await writeCaptureCursor(statePath, sessionId, {
           lastEntryId: finalEntry.id,
           lastCapturedAt: new Date().toISOString(),
         }).catch((error: unknown) => {
@@ -350,7 +345,6 @@ export default async function registerPiFriend(
     semanticSearch?.index.close();
     semanticSearch = undefined;
     autoCaptureConfig = defaultAutoCaptureConfig();
-    captureCursor = undefined;
     sweepConfig = defaultSweepConfig();
     dreamingConfig = defaultDreamingConfig();
     sweepInFlight = false;
