@@ -274,7 +274,7 @@ export function registerMemoryTools(
     label: "Memory Restore",
     description: [
       `Restore a deleted memory node from its entry under history/deleted, by slug.`,
-      "Restoration never overwrites a newer canonical node with the same slug.",
+      "A live node with the same slug is replaced, and its text is stored under history/edited first.",
       "The history entry is removed once the node is back, so a second restore reports that nothing is left to restore.",
     ].join("\n"),
     parameters: Type.Object({
@@ -299,7 +299,9 @@ export function registerMemoryTools(
         content: [
           {
             type: "text",
-            text: `Restored memory "${result.slug}" from history into nodes/${result.slug}.md.`,
+            text: result.replaced
+              ? `Restored memory "${result.slug}" from history, replacing the live node of the same name (archived under history/edited).`
+              : `Restored memory "${result.slug}" from history into nodes/${result.slug}.md.`,
           },
         ],
         details: {

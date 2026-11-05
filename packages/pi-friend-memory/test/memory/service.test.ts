@@ -289,40 +289,80 @@ test("restore copies the archived version back and consumes the entry", async ()
     assert.doesNotMatch(restored.node.body, /memory_restore/);
     assert.deepEqual(await service.read(original.slug), restored.node);
 
-    // The entry is consumed: a second restore has nothing to copy, and the
-    // canonical node is untouched.
-    await assert.rejects(() => service.restore(original.slug), /already exists/);
+    // The entry is consumed: a second restore has nothing to copy.
+    await assert.rejects(
+      () => service.restore(original.slug),
+      /No deleted memory named/,
+    );
   });
 });
 
-test("restore strips history fields and refuses a newer canonical node", async () => {
+test("restore replaces a live node with the same slug and archives it", async () => {
   await withTempDir(async (agentDir) => {
     const service = await makeService(agentDir);
     const original = await service.add({
-      title: "Protected",
+      title: "Reused Name",
       type: "fact",
       body: "Original content.",
       speaker: [{ name: "Aisling", confident: true }],
     });
     await service.delete(original.slug);
 
+    // A second memory takes the name while the first is only in history.
+    const replacement = await service.add({
+      slug: original.slug,
+      title: "Reused Name",
+      type: "fact",
+      body: "Newer content under the same name.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    assert.equal(replacement.slug, original.slug);
+
+    const restored = await service.restore(original.slug);
+    assert.equal(restored.replaced, true);
+    assert.match(restored.node.body, /Original content\./);
+    assert.doesNotMatch(restored.node.body, /Newer content/);
+
+    // The displaced text is not lost: it is stored as a version.
     const repository = await MemoryNodeRepository.open({
       agentDir,
       homeDir: agentDir,
     });
-    await repository.write({
-      ...original,
-      body: "\nNewer canonical content.\n",
-    });
+    const versions = await listHistoryVersions(
+      repository.store,
+      "edited",
+      original.slug,
+    );
+    const archived = await readHistoryEntry(
+      repository.store,
+      versions[versions.length - 1] ?? "",
+      original.slug,
+    );
+    assert.ok(archived);
+    assert.match(archived.body, /Newer content under the same name/);
+    assert.equal(
+      archived.frontMatter.history_reason,
+      "replaced by memory_restore",
+    );
+  });
+});
 
-    await assert.rejects(
-      () => service.restore(original.slug),
-      /already exists/,
-    );
-    assert.match(
-      (await service.read(original.slug))?.body ?? "",
-      /Newer canonical content/,
-    );
+test("restore strips history fields from the copy it writes back", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await makeService(agentDir);
+    const original = await service.add({
+      title: "Bare Restore",
+      type: "fact",
+      body: "Plain content.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    await service.delete(original.slug);
+
+    const restored = await service.restore(original.slug);
+    assert.equal(restored.replaced, false);
+    assert.equal(restored.node.frontMatter.history_reason, undefined);
+    assert.equal(restored.node.frontMatter.history_conflict, undefined);
+    assert.equal(restored.node.frontMatter.history_children, undefined);
   });
 });
 

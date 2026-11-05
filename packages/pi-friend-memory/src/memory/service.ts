@@ -88,6 +88,8 @@ export interface MemoryDeletionResult {
 export interface MemoryRestorationResult {
   slug: string;
   node: ParsedMemoryNode;
+  /** True when an existing canonical node was replaced and archived. */
+  replaced: boolean;
 }
 
 /** Result of staging one auto-captured candidate. */
@@ -704,12 +706,6 @@ export class MemoryNodeService {
   async restore(slug: string): Promise<MemoryRestorationResult> {
     return this.runSerialized(async () => {
       const validSlug = validateSlug(slug);
-      if ((await this.repository.read(validSlug)) !== null) {
-        throw new MemoryServiceError(
-          `Cannot restore "${validSlug}" because a canonical node with that slug already exists.`,
-        );
-      }
-
       const relativePath = historyEntryPath("deleted", validSlug);
       const archived = await readHistoryEntry(
         this.repository.store,
@@ -723,6 +719,28 @@ export class MemoryNodeService {
       }
 
       const timestamp = this.now().toISOString();
+
+      // A live node with the same slug is replaced on purpose: restoring a
+      // different memory over a reused name is the case this exists for. Its
+      // text is archived first, because restoring is deliberate but should not
+      // be the one operation that loses content without a copy.
+      const current = await this.repository.read(validSlug);
+      if (current !== null) {
+        await writeHistoryEntry(this.repository.store, {
+          kind: "edited",
+          slug: validSlug,
+          timestamp,
+          node: {
+            slug: validSlug,
+            frontMatter: {
+              ...current.frontMatter,
+              history_reason: "replaced by memory_restore",
+            },
+            body: current.body,
+          },
+        });
+      }
+
       const restored = cloneNode(archived);
       restored.frontMatter = stripHistoryFields(restored.frontMatter);
       restored.frontMatter.status = "active";
@@ -732,7 +750,7 @@ export class MemoryNodeService {
 
       await this.repository.write(restored, "canonical");
       await this.repository.store.removeTextFile(relativePath);
-      return { slug: validSlug, node: restored };
+      return { slug: validSlug, node: restored, replaced: current !== null };
     });
   }
 
@@ -793,23 +811,16 @@ export class MemoryNodeService {
   }
 
   /**
-   * Checks every place a slug can still mean something.
+   * Checks the live areas for a slug.
    *
-   * History is consulted as well as the live areas: while a deleted or dropped
-   * entry carries the slug, a new memory with the same name would share that
-   * directory's versions and could be overwritten by a restore.
+   * History is deliberately not consulted: a slug that exists only in history
+   * is available for a new memory, and restoring an older one over it is an
+   * intentional overwrite rather than a collision to prevent. That is what
+   * makes "delete this, write it again, restore the old one" work.
    */
   private async slugExists(slug: string): Promise<boolean> {
     for (const area of ["canonical", "staging"] satisfies MemoryNodeArea[]) {
       if ((await this.repository.read(slug, area)) !== null) {
-        return true;
-      }
-    }
-    for (const kind of ["deleted", "dropped"] as const) {
-      const text = await this.repository.store.readTextFileIfExists(
-        historyEntryPath(kind, slug),
-      );
-      if (text !== null) {
         return true;
       }
     }
