@@ -302,9 +302,11 @@ Pi reads the extension entry point from the `pi.extensions` field in
   `history/deleted/<slug>.md` before removing it from `nodes/`.
 - `memory_restore` copies a memory back out of history by slug, optionally
   naming a version. Without a timestamp it prefers the deletion entry, then the
-  newest stored version. A live node with the same slug is replaced, and its
-  text is archived under `history/edited/` first. Restoring a split source also
-  removes the children that split recorded.
+  newest stored version, then a dropped candidate. A live node with the same
+  slug is replaced, and its text is archived under `history/edited/` first;
+  a dropped candidate goes back to `staging/` instead, and is refused if a
+  memory or candidate already holds the name. Restoring a split source removes
+  the children that split recorded.
 - `memory_promote` promotes one staging candidate, merging semantic
   near-duplicates into an existing canonical node. Before a merge rewrites the
   target, both sides are stored under `history/merged/<slug>/`, because those

@@ -303,9 +303,11 @@ export function registerMemoryTools(
       const result = await service.restore(params.slug, params.timestamp);
 
       const lines = [
-        result.replaced
-          ? `Restored memory "${result.slug}" from ${result.restoredFrom}, replacing the live node of the same name (its text was archived under history/edited).`
-          : `Restored memory "${result.slug}" from ${result.restoredFrom} into nodes/${result.slug}.md.`,
+        result.restoredTo === "staging"
+          ? `Restored dropped candidate "${result.slug}" into staging/${result.slug}.md; the next sweep will consider it again.`
+          : result.replaced
+            ? `Restored memory "${result.slug}" from ${result.restoredFrom}, replacing the live node of the same name (its text was archived under history/edited).`
+            : `Restored memory "${result.slug}" from ${result.restoredFrom} into nodes/${result.slug}.md.`,
       ];
       if (result.removedChildren.length > 0) {
         lines.push(

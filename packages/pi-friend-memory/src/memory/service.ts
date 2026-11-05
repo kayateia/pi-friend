@@ -101,6 +101,8 @@ export interface MemoryRestorationResult {
   removedChildren: string[];
   /** Children that were recorded by the split but no longer exist. */
   missingChildren: string[];
+  /** Where the copy landed: a deleted memory comes back canonical, a drop staged. */
+  restoredTo: "canonical" | "staging";
 }
 
 /** Result of staging one auto-captured candidate. */
@@ -765,7 +767,8 @@ export class MemoryNodeService {
       const relativePath =
         timestamp === undefined
           ? ((await this.findDeletedEntry(validSlug)) ??
-            (await this.findNewestVersion(validSlug)))
+            (await this.findNewestVersion(validSlug)) ??
+            (await this.findDroppedEntry(validSlug)))
           : await this.findVersion(validSlug, timestamp);
       if (relativePath === null) {
         throw new MemoryServiceError(
@@ -784,6 +787,40 @@ export class MemoryNodeService {
         throw new MemoryServiceError(
           `History entry ${relativePath} disappeared while restoring.`,
         );
+      }
+
+      if (relativePath.startsWith("history/dropped/")) {
+        // A dropped candidate is not a memory: it goes back into staging, where
+        // the next sweep can consider it again. Replacing a live memory with an
+        // unverified draft is not what restoring a candidate should mean, so a
+        // canonical node of the same slug is a refusal rather than an overwrite.
+        if ((await this.repository.read(validSlug)) !== null) {
+          throw new MemoryServiceError(
+            `Cannot restore dropped candidate "${validSlug}" because a canonical memory with that slug exists.`,
+          );
+        }
+        if ((await this.repository.read(validSlug, "staging")) !== null) {
+          throw new MemoryServiceError(
+            `Cannot restore dropped candidate "${validSlug}" because a staging candidate with that slug exists.`,
+          );
+        }
+        const restored = cloneNode(archived);
+        restored.frontMatter = stripHistoryFields(restored.frontMatter);
+        restored.frontMatter.status = "candidate";
+        restored.frontMatter.decay_weight = 1;
+        restored.frontMatter.last_used = now;
+        restored.frontMatter.edited = now;
+        await this.repository.write(restored, "staging");
+        await this.repository.store.removeTextFile(relativePath);
+        return {
+          slug: validSlug,
+          node: restored,
+          replaced: false,
+          restoredFrom: relativePath,
+          removedChildren: [],
+          missingChildren: [],
+          restoredTo: "staging",
+        };
       }
 
       const removedChildren: string[] = [];
@@ -834,8 +871,16 @@ export class MemoryNodeService {
         restoredFrom: relativePath,
         removedChildren,
         missingChildren,
+        restoredTo: "canonical",
       };
     });
+  }
+
+  /** Returns the slug's dropped-candidate entry path when one exists. */
+  private async findDroppedEntry(slug: string): Promise<string | null> {
+    const relativePath = historyEntryPath("dropped", slug);
+    const text = await this.repository.store.readTextFileIfExists(relativePath);
+    return text === null ? null : relativePath;
   }
 
   /** Returns the slug's deleted entry path when one exists. */

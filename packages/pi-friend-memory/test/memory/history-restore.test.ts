@@ -235,3 +235,66 @@ test("a split child that was already removed is reported, not fatal", async () =
     assert.deepEqual(restored.missingChildren, ["deleted-long-ago"]);
   });
 });
+
+test("a dropped candidate comes back into staging, not nodes", async () => {
+  await withTempDir(async (agentDir) => {
+    const { service, repository } = await makeService(agentDir);
+    const staged = await service.stageCandidate({
+      title: "Dropped Candidate",
+      type: "fact",
+      body: "A candidate a sweep decided to drop.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    await service.archiveCandidate(staged.node.slug);
+    assert.equal(await service.read(staged.node.slug, "staging"), null);
+
+    const restored = await service.restore(staged.node.slug);
+    assert.equal(restored.restoredTo, "staging");
+    assert.equal(restored.replaced, false);
+    assert.match(restored.restoredFrom, /^history\/dropped\//u);
+
+    const back = await service.read(staged.node.slug, "staging");
+    assert.ok(back);
+    assert.equal(back.frontMatter.status, "candidate");
+    assert.match(back.body, /A candidate a sweep decided to drop\./);
+    assert.equal(await service.read(staged.node.slug), null);
+    // The entry is consumed, so it is not restored twice.
+    await assert.rejects(
+      () => service.restore(staged.node.slug),
+      /No deleted memory or stored version named/,
+    );
+    assert.deepEqual(
+      await repository.store.listDirectoryMarkdown("history/dropped"),
+      [],
+    );
+  });
+});
+
+test("a dropped candidate is not allowed to replace a canonical memory", async () => {
+  await withTempDir(async (agentDir) => {
+    const { service } = await makeService(agentDir);
+    const staged = await service.stageCandidate({
+      title: "Same Name",
+      type: "fact",
+      body: "Candidate text.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    await service.archiveCandidate(staged.node.slug);
+    await service.add({
+      slug: staged.node.slug,
+      title: "Same Name",
+      type: "fact",
+      body: "Canonical text.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    await assert.rejects(
+      () => service.restore(staged.node.slug),
+      /canonical memory with that slug exists/u,
+    );
+    assert.match(
+      (await service.read(staged.node.slug))?.body ?? "",
+      /Canonical text\./,
+    );
+  });
+});
