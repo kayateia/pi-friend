@@ -71,6 +71,41 @@ export function serializeCaptureTranscript(
     : joined.slice(joined.length - maxChars);
 }
 
+/**
+ * Returns the index where the most recent `turns` user turns begin.
+ *
+ * Capture normally resumes from a persisted cursor, which is exact. When the
+ * cursor is missing, belongs to another session, or names an entry that is no
+ * longer in the branch, reading from the start of the session is the wrong
+ * default: it re-sends material that was almost certainly captured already, and
+ * the transcript cap then silently keeps only its tail. Taking the most recent
+ * turns is what the cursor would have delimited in the normal case, and it
+ * bounds the cost of an unknown cursor to one capture cycle.
+ *
+ * `turns` is counted in user messages rather than in Pi agent runs: the user
+ * message is the unit a person would recognise, and a turn with ten tool calls
+ * is still one thing that was said.
+ */
+export function recentTurnStart(
+  entries: SessionEntry[],
+  turns: number,
+): number {
+  if (!Number.isInteger(turns) || turns < 1) {
+    return 0;
+  }
+  let seen = 0;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type === "message" && entry.message.role === "user") {
+      seen += 1;
+      if (seen >= turns) {
+        return index;
+      }
+    }
+  }
+  return 0;
+}
+
 /** Parses the capture model's JSON response into validated draft objects. */
 export function parseCaptureResponse(
   response: string,

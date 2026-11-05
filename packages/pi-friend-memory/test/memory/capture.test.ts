@@ -13,6 +13,7 @@ import {
   buildCapturePrompt,
   inferSpeakerName,
   parseCaptureResponse,
+  recentTurnStart,
   serializeCaptureTranscript,
 } from "../../src/memory/capture.ts";
 
@@ -47,6 +48,50 @@ test("capture transcript includes user and custom text but omits binary data", (
   assert.match(transcript, /USER: Remember the blue cup\./);
   assert.match(transcript, /CUSTOM: A custom note\./);
   assert.doesNotMatch(transcript, /binary/);
+});
+
+test("an unknown cursor is bounded to the most recent turns", () => {
+  const user = (id: string): SessionEntry => ({
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: "2026-10-20T00:00:00Z",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: id }],
+      timestamp: 1,
+    },
+  });
+  // Non-user entries are interleaved to prove only user messages count.
+  const note = (id: string): SessionEntry => ({
+    type: "custom_message",
+    id,
+    parentId: null,
+    timestamp: "2026-10-20T00:00:00Z",
+    customType: "note",
+    content: id,
+    display: false,
+  });
+  const entries: SessionEntry[] = [
+    user("u1"),
+    note("a1"),
+    user("u2"),
+    note("a2"),
+    user("u3"),
+    note("a3"),
+  ];
+
+  // Five turns requested from a six-entry, three-turn branch: everything.
+  assert.equal(recentTurnStart(entries, 5), 0);
+  // The last two turns start at the first of them, not at what follows.
+  assert.equal(recentTurnStart(entries, 2), 2);
+  assert.equal(recentTurnStart(entries, 1), 4);
+  // A single turn is the whole session.
+  assert.equal(recentTurnStart(entries.slice(0, 2), 1), 0);
+  // Degenerate limits never produce an empty window.
+  assert.equal(recentTurnStart(entries, 0), 0);
+  assert.equal(recentTurnStart(entries, Number.NaN), 0);
+  assert.equal(recentTurnStart([], 3), 0);
 });
 
 test("capture prompt carries the transcript guard and candidate limit", () => {
