@@ -24,9 +24,9 @@ import * as path from "node:path";
  * no longer owns, or indexing its own receipts.
  *
  * `searchable` is not about secrecy: it separates "this file is memory" from
- * "this file is a record of what happened to memory". Sweep logs, preimages,
+ * "this file is a record of what happened to memory". Sweep logs, history,
  * dropped candidates, the vector index and the history tree are all useful to a person reading the tree with `ls`, and none
- * of them should answer a memory search — a preimage especially, since it is a
+ * of them should answer a memory search — a stored version especially, since it is a
  * full copy of the store from before a change.
  */
 export const MEMORY_LAYOUT = {
@@ -95,7 +95,7 @@ export function createMemoryPaths(root: string, configPath: string): MemoryPaths
  *
  * Top-level directories the layout marks unsearchable are bookkeeping: their
  * Markdown is never enumerated as a node, candidate or document. Deeper paths
- * inherit their top-level segment, so `sweeps/preimages/<run>/nodes/x.md` is
+ * inherit their top-level segment, so `history/edited/<slug>/x.md` is
  * unsearchable even though it looks like a node path.
  */
 export function isSearchablePath(relativePath: string): boolean {

@@ -181,8 +181,8 @@ export class MemoryStore {
    *
    * Skips dot paths, symlinks, non-Markdown files, and every top-level path the
    * memory layout marks unsearchable — the vector index, sweep logs and
-   * preimages and history entries. Those are the extension's own bookkeeping,
-   * not memory, and indexing them made a preimage of a node indistinguishable
+   * history entries. Those are the extension's own bookkeeping, not memory, and
+   * indexing them made a stored version of a node indistinguishable
    * from the node itself in search results.
    */
   async listMarkdownFiles(): Promise<StoredMarkdownFile[]> {

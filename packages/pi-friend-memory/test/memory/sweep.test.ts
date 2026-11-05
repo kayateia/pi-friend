@@ -82,7 +82,6 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
         background: false,
         minGuardedBatchSize: 10,
         allowDrop: false,
-        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-20T05:00:00.000Z"),
@@ -99,8 +98,6 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
     assert.equal(result.ran, true);
     assert.equal(result.promoted, 1);
     assert.equal(result.error, undefined);
-    assert.ok(result.preimage);
-    await access(path.join(repository.store.paths.root, result.preimage));
     assert.equal(await service.read(candidate.node.slug, "staging"), null);
     assert.equal(
       (await service.read(candidate.node.slug))?.frontMatter.status,
@@ -130,7 +127,6 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
         background: false,
         minGuardedBatchSize: 10,
         allowDrop: false,
-        preimageKeep: 3,
       },
       { now: new Date("2026-10-20T06:00:00.000Z") },
     );
@@ -161,7 +157,6 @@ test("sweep failure still advances state and writes a failure log", async () => 
         background: false,
         minGuardedBatchSize: 10,
         allowDrop: false,
-        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-21T05:00:00.000Z"),
@@ -215,7 +210,6 @@ test("an aborted background sweep does not mutate candidates", async () => {
             background: true,
             minGuardedBatchSize: 10,
             allowDrop: false,
-            preimageKeep: 3,
           },
           { signal: controller.signal },
         ),
@@ -256,7 +250,6 @@ test("sweep creates one dream from the canonical nodes", async () => {
         background: false,
         minGuardedBatchSize: 10,
         allowDrop: false,
-        preimageKeep: 3,
       },
       {
         now: new Date("2026-02-15T05:00:00.000Z"),
@@ -304,7 +297,6 @@ test("small batches may expire more than 25% below the guard threshold", async (
         background: false,
         minGuardedBatchSize: 5,
         allowDrop: false,
-        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-22T05:00:00.000Z"),
@@ -352,7 +344,6 @@ test("the 25% guard still applies at the configured batch threshold", async () =
         background: false,
         minGuardedBatchSize: 2,
         allowDrop: false,
-        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-23T05:00:00.000Z"),
@@ -432,7 +423,6 @@ test("an allowed drop archives the candidate instead of promoting it", async () 
         background: false,
         minGuardedBatchSize: 10,
         allowDrop: true,
-        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-24T05:00:00.000Z"),
@@ -455,9 +445,9 @@ test("an allowed drop archives the candidate instead of promoting it", async () 
 
     const archived = await readFile(
       path.join(
-        repository.store.paths.sweeps,
+        repository.store.paths.root,
+        "history",
         "dropped",
-        result.runId ?? "",
         `${candidate.node.slug}.md`,
       ),
       "utf8",
@@ -492,7 +482,6 @@ test("model drops count against the 25% removal guard", async () => {
         background: false,
         minGuardedBatchSize: 2,
         allowDrop: true,
-        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-24T05:00:00.000Z"),
@@ -556,7 +545,6 @@ test("dreams are withheld from the sweep's merge targets", async () => {
         background: false,
         minGuardedBatchSize: 10,
         allowDrop: false,
-        preimageKeep: 3,
       },
       {
         now: new Date("2026-10-25T05:00:00.000Z"),
@@ -623,50 +611,6 @@ test("the service refuses a merge into a dream even when asked directly", async 
   });
 });
 
-
-test("preimages are capped, and zero disables them", async () => {
-  await withTempDir(async (agentDir) => {
-    const repository = await MemoryNodeRepository.open({
-      agentDir,
-      homeDir: agentDir,
-    });
-    const service = new MemoryNodeService(repository);
-    const base = {
-      enabled: true,
-      background: false,
-      minGuardedBatchSize: 10,
-      allowDrop: false,
-    };
-    const preimages = path.join(repository.store.paths.sweeps, "preimages");
-
-    for (const iso of [
-      "2026-11-01T05:00:00.000Z",
-      "2026-11-02T05:00:00.000Z",
-      "2026-11-03T05:00:00.000Z",
-    ]) {
-      await runDailySweep(
-        undefined,
-        service,
-        { ...base, preimageKeep: 2 },
-        { force: true, now: new Date(iso) },
-      );
-    }
-
-    const kept = (await readdir(preimages)).sort();
-    assert.equal(kept.length, 2);
-    assert.match(kept[0] ?? "", /^2026-11-02/);
-    assert.match(kept[1] ?? "", /^2026-11-03/);
-
-    const disabled = await runDailySweep(
-      undefined,
-      service,
-      { ...base, preimageKeep: 0 },
-      { force: true, now: new Date("2026-11-04T05:00:00.000Z") },
-    );
-    assert.equal(disabled.preimage, undefined);
-    assert.deepEqual(await readdir(preimages), []);
-  });
-});
 
 /** Builds a minimal sweep prompt node fixture. */
 function makeCandidate(slug: string, type: MemoryType = "fact") {

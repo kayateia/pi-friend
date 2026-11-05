@@ -563,8 +563,14 @@ export class MemoryNodeService {
     });
   }
 
-  /** Archives one dropped staging candidate under the sweep artifacts. */
-  async archiveCandidate(slug: string, sweepId: string): Promise<string> {
+  /**
+   * Moves one dropped staging candidate into history.
+   *
+   * The file is the candidate as it was, so a person can read what the sweep
+   * threw away. A slug that was staged and dropped twice keeps the newer copy:
+   * a drop is a decision about a candidate, not an accumulating record.
+   */
+  async archiveCandidate(slug: string): Promise<string> {
     return this.runSerialized(async () => {
       const candidate = await this.repository.read(slug, "staging");
       if (candidate === null) {
@@ -572,13 +578,13 @@ export class MemoryNodeService {
           `No staging candidate found for "${slug}".`,
         );
       }
-      const path = `sweeps/dropped/${sweepId}/${slug}.md`;
-      await this.repository.store.writeTextFile(
-        path,
-        serializeMemoryNode(candidate),
-      );
+      const relativePath = await writeHistoryEntry(this.repository.store, {
+        kind: "dropped",
+        slug,
+        node: cloneNode(candidate),
+      });
       await this.repository.remove(slug, "staging");
-      return path;
+      return relativePath;
     });
   }
 

@@ -40,7 +40,6 @@ interface SweepState {
   lastFailureAt?: string;
   lastError?: string;
   lastRunId?: string;
-  preimage?: string;
 }
 
 /** Summary of one daily sweep invocation. */
@@ -52,7 +51,6 @@ export interface SweepResult {
   dropped: number;
   decayUpdates: number;
   historyPruned: number;
-  preimage?: string;
   dreamSlug?: string;
   dreamError?: string;
   error?: string;
@@ -82,7 +80,7 @@ export interface RunDailySweepOptions {
 /**
  * Runs the daily consolidation pass once when it has not succeeded today.
  *
- * A preimage is captured before mutations, state advances on every attempt,
+ * State advances on every attempt,
  * and the dated sweep log records both successful and failed outcomes.
  */
 export async function runDailySweep(
@@ -119,7 +117,6 @@ async function runDailySweepLocked(
 
   const runId = timestampId(now);
   const attemptedAt = now.toISOString();
-  let preimage: string | undefined;
   let decisions: SweepDecision[] = [];
   let promoted = 0;
   let merged = 0;
@@ -188,24 +185,17 @@ async function runDailySweepLocked(
       );
     }
 
-    if (config.preimageKeep > 0) {
-      preimage = await createPreimage(service, runId);
-      options.signal?.throwIfAborted();
-    }
-    await prunePreimages(service, config.preimageKeep);
-    options.signal?.throwIfAborted();
-
     await service.applyCandidateDecay(candidateDecay.updates);
     for (const slug of candidateDecay.expiredSlugs) {
       options.signal?.throwIfAborted();
-      await service.archiveCandidate(slug, runId);
+      await service.archiveCandidate(slug);
       dropped += 1;
     }
 
     for (const decision of decisions) {
       options.signal?.throwIfAborted();
       if (decision.action === "drop") {
-        await service.archiveCandidate(decision.slug, runId);
+        await service.archiveCandidate(decision.slug);
         dropped += 1;
         continue;
       }
@@ -285,7 +275,6 @@ async function runDailySweepLocked(
       dropped,
       decayUpdates,
       historyPruned,
-      preimage,
       dreamSlug,
       dreamError,
     });
@@ -294,7 +283,6 @@ async function runDailySweepLocked(
       lastAttemptAt: attemptedAt,
       lastSuccessfulAt: attemptedAt,
       lastRunId: runId,
-      preimage,
     });
 
     return {
@@ -305,7 +293,6 @@ async function runDailySweepLocked(
       dropped,
       decayUpdates,
       historyPruned,
-      preimage,
       ...(dreamSlug === undefined ? {} : { dreamSlug }),
       ...(dreamError === undefined ? {} : { dreamError }),
     };
@@ -321,7 +308,6 @@ async function runDailySweepLocked(
       dropped,
       decayUpdates,
       historyPruned,
-      preimage,
       dreamSlug,
       dreamError,
       error: message,
@@ -334,7 +320,6 @@ async function runDailySweepLocked(
       lastFailureAt: attemptedAt,
       lastError: message,
       lastRunId: runId,
-      preimage,
     }).catch((stateError) => {
       options.reportError?.("sweep failure state", stateError);
     });
@@ -346,91 +331,11 @@ async function runDailySweepLocked(
       dropped,
       decayUpdates,
       historyPruned,
-      ...(preimage === undefined ? {} : { preimage }),
       ...(dreamSlug === undefined ? {} : { dreamSlug }),
       ...(dreamError === undefined ? {} : { dreamError }),
       error: message,
     };
   }
-}
-
-/**
- * Deletes preimages beyond the configured retention count.
- *
- * Run identifiers are ISO timestamps, so lexicographic order is chronological:
- * the newest `keep` directories survive and older ones are removed. A `keep` of
- * zero removes every preimage, which is how preimages are disabled — the caller
- * stops creating them at the same time, so this only has to clean up.
- */
-async function prunePreimages(
-  service: MemoryNodeService,
-  keep: number,
-): Promise<void> {
-  const directory = path.join(service.store.paths.sweeps, "preimages");
-  let entries;
-  try {
-    entries = await readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if (getErrorCode(error) === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-
-  const runIds = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-  const excess = runIds.slice(0, Math.max(0, runIds.length - keep));
-  for (const runId of excess) {
-    await rm(path.join(directory, runId), { recursive: true, force: true });
-  }
-}
-
-/** Returns a Node filesystem error code without relying on an any cast. */
-function getErrorCode(error: unknown): string | undefined {
-  if (typeof error !== "object" || error === null || !("code" in error)) {
-    return undefined;
-  }
-  const code = error.code;
-  return typeof code === "string" ? code : undefined;
-}
-
-/** Captures a full preimage of canonical files before sweep mutation. */
-async function createPreimage(
-  service: MemoryNodeService,
-  runId: string,
-): Promise<string> {
-  const root = service.store.paths.root;
-  const relative = `sweeps/preimages/${runId}`;
-  const destination = path.join(service.store.paths.root, relative);
-  await mkdir(destination, { recursive: true, mode: 0o700 });
-
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (entry.name === "index" || entry.name === "sweeps") {
-      continue;
-    }
-    await cp(
-      path.join(root, entry.name),
-      path.join(destination, entry.name),
-      { recursive: entry.isDirectory(), preserveTimestamps: true },
-    );
-  }
-
-  const sweepSource = service.store.paths.sweeps;
-  const sweepDestination = path.join(destination, "sweeps");
-  await mkdir(sweepDestination, { recursive: true, mode: 0o700 });
-  for (const entry of await readdir(sweepSource, { withFileTypes: true })) {
-    if (entry.name === "preimages") {
-      continue;
-    }
-    await cp(
-      path.join(sweepSource, entry.name),
-      path.join(sweepDestination, entry.name),
-      { recursive: entry.isDirectory(), preserveTimestamps: true },
-    );
-  }
-  return relative;
 }
 
 /** Appends one dated sweep section without rewriting prior sections. */
@@ -447,7 +352,6 @@ async function appendSweepLog(
     historyPruned: number;
     dreamSlug?: string;
     dreamError?: string;
-    preimage?: string;
     error?: string;
   },
 ): Promise<void> {
@@ -459,10 +363,9 @@ async function appendSweepLog(
     `## Sweep ${attemptedAt}`,
     "",
     `- Run ID: ${runId}`,
-    `- Preimage: ${summary.preimage ?? "not created"}`,
     `- Promoted: ${summary.promoted}`,
     `- Merged: ${summary.merged}`,
-    `- Dropped/archived: ${summary.dropped}`,
+    `- Dropped: ${summary.dropped}`,
     `- Decay updates: ${summary.decayUpdates}`,
     `- History pruned: ${summary.historyPruned}`,
     `- Dream: ${summary.dreamSlug ?? "none"}`,

@@ -59,7 +59,6 @@ test("missing configuration uses the default memory root", async () => {
       background: false,
       minGuardedBatchSize: 10,
       allowDrop: false,
-      preimageKeep: 3,
     });
     assert.deepEqual(config.dreaming, {
       enabled: true,
@@ -429,7 +428,6 @@ test("sweep settings are parsed and validated", () => {
     enabled: false,
     background: true,
     minGuardedBatchSize: 12,
-    preimageKeep: 3,
     allowDrop: false,
     model: "openrouter/google/gemini-2.5-flash",
     prompt: "Custom sweep prompt.",
@@ -692,32 +690,21 @@ test("a replacement sweep prompt that never mentions drop is reported", () => {
   );
 });
 
-test("preimage_keep defaults to a bounded number and accepts zero", () => {
+test("preimage_keep is no longer a sweep option", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
-  assert.equal(
-    parseMemoryConfig("memory:\n  root: ~/memory\n", configPath).sweep
-      .preimageKeep,
-    3,
+  // Removed with the preimages themselves: a config still carrying it is
+  // reported as an unknown field rather than silently accepted.
+  const config = parseMemoryConfig(
+    "memory:\n  sweep:\n    preimage_keep: 3\n",
+    configPath,
   );
   assert.equal(
-    parseMemoryConfig(
-      "memory:\n  sweep:\n    preimage_keep: 0\n",
-      configPath,
-    ).sweep.preimageKeep,
-    0,
+    (config.sweep as unknown as Record<string, unknown>).preimageKeep,
+    undefined,
   );
-  for (const invalid of ['"two"', "-1", "101", "1.5"]) {
-    assert.throws(
-      () =>
-        parseMemoryConfig(
-          `memory:\n  sweep:\n    preimage_keep: ${invalid}\n`,
-          configPath,
-        ),
-      MemoryConfigError,
-      invalid,
-    );
-  }
+  assert.match(config.warnings.join("\n"), /preimage_keep/);
 });
+
 test("memory.search.default_mode is hybrid unless configured", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   assert.equal(

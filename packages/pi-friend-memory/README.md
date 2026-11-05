@@ -347,16 +347,10 @@ and audit history.
 ## Daily sweep and decay
 
 The daily sweep runs at most once per local calendar day after an agent run
-settles. Before mutation it writes a full canonical preimage under
-`sweeps/preimages/`. It always advances `sweeps/state.json`, including failed
-attempts, and appends a dated decision log under `sweeps/`.
-
-`memory.sweep.preimage_keep` bounds those snapshots: the newest *n* are kept and
-older runs are pruned, so a full store copy per sweep cannot grow without limit.
-`0` disables preimages entirely — none is taken and existing ones are removed at
-the next sweep. Preimages are on their way out: `history/` already keeps the
-previous wording of an edited memory, and dropped candidates keep their own
-copies under `history/dropped/`.
+settles. It always advances `sweeps/state.json`, including failed attempts, and
+appends a dated decision log under `sweeps/`. Before the history tree it also
+took a full canonical snapshot under `sweeps/preimages/`; that is gone, because
+every operation it was protecting now stores its own previous version.
 
 `memory.history.keep_days` (default `30`, `0` keeps everything) bounds how long
 previous versions survive. Pruning runs twice, both bounded: the sweep walks
@@ -365,6 +359,8 @@ so an edit never pays for the size of the tree. Retention is per file, which
 means a memory that lives for a year loses its oldest versions while keeping the
 recent ones — "the version before the most recent edit" is really "the newest one
 still on disk".
+
+
 
 Set `memory.sweep.background: true` to schedule the sweep on the next event-loop
 task instead of making agent settlement wait for its model calls. The sweep
@@ -388,9 +384,8 @@ The 25% removal guard applies only when a sweep has at least
 `min_guarded_batch_size` candidates. Smaller batches can remove or consolidate
 above that ratio without deadlocking on a tiny working set.
 
-Superseded tombstones older than `tombstone_grace_days` are archived under
-`sweeps/archived/<run-id>/`. They remain searchable and are not irreversibly
-deleted.
+Tombstones no longer exist: a deletion copies the node to `history/deleted/`
+and the entry is what `memory_restore` reads.
 
 ## Dreaming
 
