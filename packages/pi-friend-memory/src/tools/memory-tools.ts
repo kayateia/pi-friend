@@ -71,6 +71,7 @@ interface MemoryDeleteDetails {
 interface MemoryRestoreDetails {
   slug: string;
   path: string;
+  restoredFrom: string;
 }
 
 /** Structured details returned by promotion of a staging candidate. */
@@ -279,8 +280,14 @@ export function registerMemoryTools(
     ].join("\n"),
     parameters: Type.Object({
       slug: Type.String({
-        description: `Slug of the deleted memory, as returned by ${toolName("memory_delete")}.`,
+        description: `Slug of the memory to restore from history.`,
       }),
+      timestamp: Type.Optional(
+        Type.String({
+          description:
+            "Version to restore, as listed under history/<kind>/<slug>/. Ignored for deletions; omit to take the deleted entry, or the newest stored version when there is none.",
+        }),
+      ),
     }),
     annotations: {
       readOnlyHint: false,
@@ -293,20 +300,30 @@ export function registerMemoryTools(
       params,
     ): Promise<AgentToolResult<MemoryRestoreDetails>> {
       const service = requireService(getService);
-      const result = await service.restore(params.slug);
+      const result = await service.restore(params.slug, params.timestamp);
+
+      const lines = [
+        result.replaced
+          ? `Restored memory "${result.slug}" from ${result.restoredFrom}, replacing the live node of the same name (its text was archived under history/edited).`
+          : `Restored memory "${result.slug}" from ${result.restoredFrom} into nodes/${result.slug}.md.`,
+      ];
+      if (result.removedChildren.length > 0) {
+        lines.push(
+          `Removed split children: ${result.removedChildren.join(", ")}.`,
+        );
+      }
+      if (result.missingChildren.length > 0) {
+        lines.push(
+          `Split children already absent: ${result.missingChildren.join(", ")}.`,
+        );
+      }
 
       return {
-        content: [
-          {
-            type: "text",
-            text: result.replaced
-              ? `Restored memory "${result.slug}" from history, replacing the live node of the same name (archived under history/edited).`
-              : `Restored memory "${result.slug}" from history into nodes/${result.slug}.md.`,
-          },
-        ],
+        content: [{ type: "text", text: lines.join("\n") }],
         details: {
           slug: result.slug,
           path: `nodes/${result.slug}.md`,
+          restoredFrom: result.restoredFrom,
         },
       };
     },

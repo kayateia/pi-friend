@@ -26,6 +26,24 @@ export type HistoryKind =
   | "merged"
   | "split";
 
+/** Kinds that keep a directory of timestamped versions per slug. */
+export const VERSIONED_HISTORY_KINDS: readonly HistoryKind[] = [
+  "edited",
+  "merged",
+  "split",
+];
+
+/**
+ * Returns the sortable part of a version path.
+ *
+ * Version files are named `…/<slug>/<timestamp>.md`, so the file name is the
+ * ordering key and lexical comparison is chronological.
+ */
+export function versionTimestamp(relativePath: string): string {
+  const name = relativePath.split("/").pop() ?? "";
+  return name.endsWith(".md") ? name.slice(0, -3) : name;
+}
+
 /** Kinds that keep a single file named after the slug. */
 const SINGLE_FILE_KINDS: ReadonlySet<HistoryKind> = new Set([
   "deleted",

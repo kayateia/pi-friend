@@ -292,7 +292,7 @@ test("restore copies the archived version back and consumes the entry", async ()
     // The entry is consumed: a second restore has nothing to copy.
     await assert.rejects(
       () => service.restore(original.slug),
-      /No deleted memory named/,
+      /No deleted memory or stored version named/,
     );
   });
 });
@@ -371,7 +371,7 @@ test("restoring a slug with no history entry reports it", async () => {
     const service = await makeService(agentDir);
     await assert.rejects(
       () => service.restore("never-existed"),
-      /No deleted memory named/,
+      /No deleted memory or stored version named/,
     );
   });
 });

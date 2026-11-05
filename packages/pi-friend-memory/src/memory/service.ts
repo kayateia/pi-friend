@@ -17,9 +17,12 @@ import {
 import { validateSlug } from "./paths.ts";
 import { appendAuditEntry } from "./audit.ts";
 import {
+  VERSIONED_HISTORY_KINDS,
   historyEntryPath,
+  listHistoryVersions,
   readHistoryEntry,
   stripHistoryFields,
+  versionTimestamp,
   writeHistoryEntry,
 } from "./history.ts";
 
@@ -90,6 +93,12 @@ export interface MemoryRestorationResult {
   node: ParsedMemoryNode;
   /** True when an existing canonical node was replaced and archived. */
   replaced: boolean;
+  /** Whatever the restored entry recorded as having been restored. */
+  restoredFrom: string;
+  /** Children removed because the restored entry was a split source. */
+  removedChildren: string[];
+  /** Children that were recorded by the split but no longer exist. */
+  missingChildren: string[];
 }
 
 /** Result of staging one auto-captured candidate. */
@@ -467,6 +476,7 @@ export class MemoryNodeService {
   async promoteCandidate(
     slug: string,
     preferredTarget?: string,
+    options: { conflict?: string } = {},
   ): Promise<MemoryPromotionResult> {
     return this.runSerialized(async () => {
       const candidate = await this.repository.read(slug, "staging");
@@ -495,6 +505,32 @@ export class MemoryNodeService {
       }
 
       if (target !== null) {
+        // Both sides are stored before the write. A merge is the one operation
+        // whose inputs stop existing afterwards: the target is rewritten in
+        // place and the candidate leaves staging.
+        const conflict = options.conflict?.trim();
+        await writeHistoryEntry(this.repository.store, {
+          kind: "merged",
+          slug: target.slug,
+          timestamp: now,
+          node: {
+            slug: target.slug,
+            frontMatter: {
+              ...target.frontMatter,
+              ...(conflict === undefined || conflict === ""
+                ? {}
+                : { history_conflict: conflict }),
+            },
+            body: target.body,
+          },
+        });
+        await writeHistoryEntry(this.repository.store, {
+          kind: "merged",
+          slug: candidate.slug,
+          timestamp: now,
+          node: cloneNode(candidate),
+        });
+
         const merged = mergeCandidate(target, candidate, now);
         await this.repository.write(merged, "canonical");
         await this.repository.remove(candidate.slug, "staging");
@@ -703,10 +739,31 @@ export class MemoryNodeService {
    * longer deleted. A newer canonical node with the same slug wins — restoring
    * must not overwrite work done since.
    */
-  async restore(slug: string): Promise<MemoryRestorationResult> {
+  async restore(
+    slug: string,
+    timestamp?: string,
+  ): Promise<MemoryRestorationResult> {
     return this.runSerialized(async () => {
       const validSlug = validateSlug(slug);
-      const relativePath = historyEntryPath("deleted", validSlug);
+      const now = this.now().toISOString();
+
+      // A deleted entry is the default target: it is the one history entry a
+      // memory has after it leaves nodes/. A named timestamp selects a version
+      // instead, and without one the newest version across the versioned kinds
+      // wins, which is what "put it back how it was" means in practice.
+      const relativePath =
+        timestamp === undefined
+          ? ((await this.findDeletedEntry(validSlug)) ??
+            (await this.findNewestVersion(validSlug)))
+          : await this.findVersion(validSlug, timestamp);
+      if (relativePath === null) {
+        throw new MemoryServiceError(
+          timestamp === undefined
+            ? `No deleted memory or stored version named "${validSlug}" is in history.`
+            : `No stored version of "${validSlug}" from ${timestamp} is in history.`,
+        );
+      }
+
       const archived = await readHistoryEntry(
         this.repository.store,
         relativePath,
@@ -714,11 +771,20 @@ export class MemoryNodeService {
       );
       if (archived === null) {
         throw new MemoryServiceError(
-          `No deleted memory named "${validSlug}" is in history.`,
+          `History entry ${relativePath} disappeared while restoring.`,
         );
       }
 
-      const timestamp = this.now().toISOString();
+      const removedChildren: string[] = [];
+      const missingChildren: string[] = [];
+      for (const child of archived.frontMatter.history_children ?? []) {
+        if ((await this.repository.read(child)) === null) {
+          missingChildren.push(child);
+          continue;
+        }
+        await this.repository.remove(child, "canonical");
+        removedChildren.push(child);
+      }
 
       // A live node with the same slug is replaced on purpose: restoring a
       // different memory over a reused name is the case this exists for. Its
@@ -729,7 +795,7 @@ export class MemoryNodeService {
         await writeHistoryEntry(this.repository.store, {
           kind: "edited",
           slug: validSlug,
-          timestamp,
+          timestamp: now,
           node: {
             slug: validSlug,
             frontMatter: {
@@ -745,13 +811,60 @@ export class MemoryNodeService {
       restored.frontMatter = stripHistoryFields(restored.frontMatter);
       restored.frontMatter.status = "active";
       restored.frontMatter.decay_weight = 1;
-      restored.frontMatter.last_used = timestamp;
-      restored.frontMatter.edited = timestamp;
+      restored.frontMatter.last_used = now;
+      restored.frontMatter.edited = now;
 
       await this.repository.write(restored, "canonical");
       await this.repository.store.removeTextFile(relativePath);
-      return { slug: validSlug, node: restored, replaced: current !== null };
+      return {
+        slug: validSlug,
+        node: restored,
+        replaced: current !== null,
+        restoredFrom: relativePath,
+        removedChildren,
+        missingChildren,
+      };
     });
+  }
+
+  /** Returns the slug's deleted entry path when one exists. */
+  private async findDeletedEntry(slug: string): Promise<string | null> {
+    const relativePath = historyEntryPath("deleted", slug);
+    const text = await this.repository.store.readTextFileIfExists(relativePath);
+    return text === null ? null : relativePath;
+  }
+
+  /** Returns the newest stored version across the versioned kinds. */
+  private async findNewestVersion(slug: string): Promise<string | null> {
+    let newest: string | null = null;
+    for (const kind of VERSIONED_HISTORY_KINDS) {
+      const versions = await listHistoryVersions(
+        this.repository.store,
+        kind,
+        slug,
+      );
+      for (const version of versions) {
+        if (newest === null || versionTimestamp(version) > versionTimestamp(newest)) {
+          newest = version;
+        }
+      }
+    }
+    return newest;
+  }
+
+  /** Returns one stored version by timestamp, across the versioned kinds. */
+  private async findVersion(
+    slug: string,
+    timestamp: string,
+  ): Promise<string | null> {
+    for (const kind of VERSIONED_HISTORY_KINDS) {
+      const relativePath = historyEntryPath(kind, slug, timestamp);
+      const text = await this.repository.store.readTextFileIfExists(relativePath);
+      if (text !== null) {
+        return relativePath;
+      }
+    }
+    return null;
   }
 
   /** Serializes state-changing operations, except when already inside a lock. */
