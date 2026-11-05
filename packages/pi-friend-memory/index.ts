@@ -31,7 +31,7 @@ import {
   defaultDreamingConfig,
   type DreamingConfig,
 } from "./src/memory/config.ts";
-import { serializeCaptureTranscript } from "./src/memory/capture.ts";
+import { recentTurnStart, serializeCaptureTranscript } from "./src/memory/capture.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
 import {
@@ -135,13 +135,23 @@ export default async function registerPiFriend(
       const cursorIndex = cursor
         ? branch.findIndex((entry) => entry.id === cursor)
         : -1;
-      if (cursor !== undefined && cursorIndex < 0) {
-        reportCaptureWarning(
-          ctx,
-          "pi-friend auto-capture: the saved capture cursor is not in this session branch; reading from its start.",
-        );
+      // A known cursor is exact. An unknown one is bounded to the most recent
+      // turns rather than to the whole session: the previous capture almost
+      // certainly covered the older material, and the 24,000-character cap
+      // would drop it anyway — after paying to send it.
+      let startIndex: number;
+      if (cursorIndex >= 0) {
+        startIndex = cursorIndex + 1;
+      } else {
+        if (cursor !== undefined) {
+          reportCaptureWarning(
+            ctx,
+            "pi-friend auto-capture: the saved capture cursor is not in this session branch; capturing only the most recent turns.",
+          );
+        }
+        startIndex = recentTurnStart(branch, config.everyTurns);
       }
-      const entries = branch.slice(cursorIndex + 1);
+      const entries = branch.slice(startIndex);
       const transcript = serializeCaptureTranscript(entries);
       if (transcript.trim() === "") {
         return;
