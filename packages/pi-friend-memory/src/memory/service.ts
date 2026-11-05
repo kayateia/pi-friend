@@ -7,7 +7,6 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
 import { formatErrorChain, logError } from "../debug/log.ts";
 import type { MemorySpeaker, MemoryType, ParsedMemoryNode } from "./schema.ts";
 import {
@@ -17,7 +16,12 @@ import {
 } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { appendAuditEntry } from "./audit.ts";
-import { writeHistoryEntry } from "./history.ts";
+import {
+  historyEntryPath,
+  readHistoryEntry,
+  stripHistoryFields,
+  writeHistoryEntry,
+} from "./history.ts";
 
 /**
  * Process-wide mutation queues keyed by the resolved memory root.
@@ -29,8 +33,6 @@ import { writeHistoryEntry } from "./history.ts";
  * all memory services in this process.
  */
 const mutationQueues = new Map<string, Promise<void>>();
-import type { NodeRecoveryRecord } from "./recovery.ts";
-import { parseRecoveryRecord, RecoveryRecordError } from "./recovery.ts";
 import { buildMemoryDocumentIndex } from "./indexer.ts";
 import type { IndexedMarkdownFile } from "./indexer.ts";
 import { searchHybrid } from "./hybrid-search.ts";
@@ -74,18 +76,18 @@ export interface MemoryEditInput {
   reason?: string;
 }
 
-/** Result of moving one canonical node into superseded storage. */
+/** Result of moving one canonical node into the history tree. */
 export interface MemoryDeletionResult {
-  recoveryId: string;
+  slug: string;
+  /** Path of the archived copy, relative to the memory root. */
+  historyPath: string;
   original: ParsedMemoryNode;
-  tombstone: ParsedMemoryNode;
 }
 
-/** Result of restoring a node from a durable recovery record. */
+/** Result of copying one memory back out of the history tree. */
 export interface MemoryRestorationResult {
-  recoveryId: string;
+  slug: string;
   node: ParsedMemoryNode;
-  alreadyRestored: boolean;
 }
 
 /** Result of staging one auto-captured candidate. */
@@ -175,40 +177,6 @@ export class MemoryNodeService {
    */
   async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
     return this.runSerialized(() => this.lockContext.run(true, operation));
-  }
-
-  /** Archives superseded tombstones whose grace period has elapsed. */
-  async archiveExpiredTombstones(
-    graceDays: number,
-    runId: string,
-    now: Date = new Date(),
-  ): Promise<{
-    archived: Array<{ slug: string; path: string }>;
-    retained: number;
-  }> {
-    return this.runSerialized(async () => {
-      const tombstones = await this.repository.list("superseded");
-      const archived: Array<{ slug: string; path: string }> = [];
-      let retained = 0;
-      const threshold = now.getTime() - graceDays * 24 * 60 * 60 * 1_000;
-
-      for (const node of tombstones) {
-        const timestamp = node.frontMatter.edited ?? node.frontMatter.created;
-        const parsed = Date.parse(timestamp);
-        if (!Number.isFinite(parsed) || parsed > threshold) {
-          retained += 1;
-          continue;
-        }
-        const path = `sweeps/archived/${runId}/${node.slug}.md`;
-        await this.repository.store.writeTextFile(
-          path,
-          serializeMemoryNode(node),
-        );
-        await this.repository.remove(node.slug, "superseded");
-        archived.push({ slug: node.slug, path });
-      }
-      return { archived, retained };
-    });
   }
 
   /** Creates a dream node linked to its canonical source memories. */
@@ -659,11 +627,12 @@ export class MemoryNodeService {
   }
 
   /**
-   * Moves exactly one matching canonical node into superseded storage.
+   * Moves exactly one matching canonical node into the history tree.
    *
-   * The recovery record is persisted before the canonical file is removed.
-   * Ambiguous substring matches are rejected so a broad request cannot delete
-   * multiple memories accidentally.
+   * The archived copy is written before the canonical file is removed, and it
+   * is the node exactly as it was, so restoring is a copy rather than a
+   * reconstruction. Ambiguous substring matches are rejected so a broad request
+   * cannot delete several memories by accident.
    */
   async delete(match: string): Promise<MemoryDeletionResult> {
     return this.runSerialized(async () => {
@@ -704,135 +673,66 @@ export class MemoryNodeService {
         target = matches[0];
       }
 
-      if (await this.repository.read(target.slug, "superseded")) {
-        throw new MemoryServiceError(
-          `A superseded memory already exists for "${target.slug}".`,
-        );
-      }
-
-      const timestamp = this.now().toISOString();
-      const recoveryId = randomUUID();
-      const originalText = await this.repository.store.readNodeText(
-        target.slug,
-      );
-      const originalPath = `nodes/${target.slug}.md`;
-      const tombstonePath = `nodes/superseded/${target.slug}.md`;
-      const recoveryRecord: NodeRecoveryRecord = {
-        version: 1,
-        id: recoveryId,
-        createdAt: timestamp,
-        action: "delete-node",
+      const original = cloneNode(target);
+      const historyPath = await writeHistoryEntry(this.repository.store, {
+        kind: "deleted",
         slug: target.slug,
-        originalPath,
-        tombstonePath,
-        originalText,
-      };
-
-      await this.repository.store.writeRecoveryRecord(
-        recoveryId,
-        `${JSON.stringify(recoveryRecord, null, 2)}\n`,
-      );
-
-      const tombstone = cloneNode(target);
-      tombstone.frontMatter.status = "superseded";
-      tombstone.frontMatter.decay_weight = 0;
-      tombstone.frontMatter.edited = timestamp;
-      tombstone.body = appendAuditEntry(
-        tombstone.body,
-        timestamp,
-        `memory_delete: moved to superseded; recovery ${recoveryId}`,
-      );
-
-      await this.repository.write(tombstone, "superseded");
+        node: cloneNode(target),
+      });
       try {
         await this.repository.remove(target.slug, "canonical");
       } catch (error) {
-        // The canonical file still exists, so remove the duplicate tombstone.
-        // The recovery record is harmless and preserves the original payload.
-        try {
-          await this.repository.remove(target.slug, "superseded");
-        } catch (cleanupError) {
-          throw new MemoryServiceError(
-            `Deletion of "${target.slug}" partially failed; both canonical and tombstone files may exist.`,
-            {
-              cause: new Error(
-                `Tombstone cleanup also failed: ${formatErrorChain(cleanupError)}`,
-                { cause: error },
-              ),
-            },
-          );
-        }
+        // The node is still canonical, so the archive would claim a deletion
+        // that did not happen. Drop it and let the failure stand.
+        await this.repository.store.removeTextFile(historyPath).catch(() => {});
         throw error;
       }
 
-      return {
-        recoveryId,
-        original: target,
-        tombstone,
-      };
+      return { slug: target.slug, historyPath, original };
     });
   }
 
-  /** Restores a deleted node without overwriting a newer canonical node. */
-  async restore(recoveryId: string): Promise<MemoryRestorationResult> {
+  /**
+   * Restores a deleted memory from its history entry.
+   *
+   * Restoring is a copy with the edits a live node needs: the archived file is
+   * the node as it was, so only the `edited` timestamp is stamped, the history
+   * fields are stripped, and the entry is removed because the memory is no
+   * longer deleted. A newer canonical node with the same slug wins — restoring
+   * must not overwrite work done since.
+   */
+  async restore(slug: string): Promise<MemoryRestorationResult> {
     return this.runSerialized(async () => {
-      const record = await this.readRecoveryRecord(recoveryId);
-      const canonical = await this.repository.read(record.slug);
-
-      if (record.restoredAt !== undefined) {
-        if (canonical === null) {
-          throw new MemoryServiceError(
-            `Recovery ${recoveryId} is marked restored, but its canonical node is missing.`,
-          );
-        }
-        return {
-          recoveryId,
-          node: canonical,
-          alreadyRestored: true,
-        };
+      const validSlug = validateSlug(slug);
+      if ((await this.repository.read(validSlug)) !== null) {
+        throw new MemoryServiceError(
+          `Cannot restore "${validSlug}" because a canonical node with that slug already exists.`,
+        );
       }
 
-      if (canonical !== null) {
-        if (canonical.body.includes(`memory_restore: recovery ${recoveryId}`)) {
-          await this.removeTombstoneIfPresent(record);
-          await this.markRestored(
-            record,
-            canonical.frontMatter.edited ?? this.now().toISOString(),
-          );
-          return {
-            recoveryId,
-            node: canonical,
-            alreadyRestored: true,
-          };
-        }
-
+      const relativePath = historyEntryPath("deleted", validSlug);
+      const archived = await readHistoryEntry(
+        this.repository.store,
+        relativePath,
+        validSlug,
+      );
+      if (archived === null) {
         throw new MemoryServiceError(
-          `Cannot restore "${record.slug}" because a newer canonical node already exists.`,
+          `No deleted memory named "${validSlug}" is in history.`,
         );
       }
 
       const timestamp = this.now().toISOString();
-      const original = parseMemoryNode(record.originalText, record.slug, {
-        kind: "node",
-        relativePath: record.originalPath,
-      });
-      const restored = cloneNode(original);
+      const restored = cloneNode(archived);
+      restored.frontMatter = stripHistoryFields(restored.frontMatter);
+      restored.frontMatter.status = "active";
+      restored.frontMatter.decay_weight = 1;
+      restored.frontMatter.last_used = timestamp;
       restored.frontMatter.edited = timestamp;
-      restored.body = appendAuditEntry(
-        restored.body,
-        timestamp,
-        `memory_restore: recovery ${recoveryId}`,
-      );
 
       await this.repository.write(restored, "canonical");
-      await this.removeTombstoneIfPresent(record);
-      await this.markRestored(record, timestamp);
-
-      return {
-        recoveryId,
-        node: restored,
-        alreadyRestored: false,
-      };
+      await this.repository.store.removeTextFile(relativePath);
+      return { slug: validSlug, node: restored };
     });
   }
 
@@ -892,14 +792,24 @@ export class MemoryNodeService {
     );
   }
 
-  /** Checks all lifecycle areas before considering a slug available. */
+  /**
+   * Checks every place a slug can still mean something.
+   *
+   * History is consulted as well as the live areas: while a deleted or dropped
+   * entry carries the slug, a new memory with the same name would share that
+   * directory's versions and could be overwritten by a restore.
+   */
   private async slugExists(slug: string): Promise<boolean> {
-    for (const area of [
-      "canonical",
-      "superseded",
-      "staging",
-    ] satisfies MemoryNodeArea[]) {
+    for (const area of ["canonical", "staging"] satisfies MemoryNodeArea[]) {
       if ((await this.repository.read(slug, area)) !== null) {
+        return true;
+      }
+    }
+    for (const kind of ["deleted", "dropped"] as const) {
+      const text = await this.repository.store.readTextFileIfExists(
+        historyEntryPath(kind, slug),
+      );
+      if (text !== null) {
         return true;
       }
     }
@@ -979,69 +889,6 @@ export class MemoryNodeService {
     );
   }
 
-  /** Reads and validates one recovery record. */
-  private async readRecoveryRecord(
-    recoveryId: string,
-  ): Promise<NodeRecoveryRecord> {
-    let source: string | null;
-    try {
-      source = await this.repository.store.readRecoveryRecord(recoveryId);
-    } catch (error) {
-      throw new MemoryServiceError(`Invalid recovery ID "${recoveryId}".`, {
-        cause: error,
-      });
-    }
-
-    if (source === null) {
-      throw new MemoryServiceError(
-        `No recovery record found for "${recoveryId}".`,
-      );
-    }
-
-    let value: unknown;
-    try {
-      value = JSON.parse(source);
-    } catch (error) {
-      throw new MemoryServiceError(
-        `Recovery ${recoveryId} is not valid JSON.`,
-        { cause: error },
-      );
-    }
-
-    try {
-      return parseRecoveryRecord(value, recoveryId);
-    } catch (error) {
-      if (error instanceof RecoveryRecordError) {
-        throw new MemoryServiceError(error.message, { cause: error });
-      }
-      throw error;
-    }
-  }
-
-  /** Removes a tombstone when present during restore/idempotency recovery. */
-  private async removeTombstoneIfPresent(
-    record: NodeRecoveryRecord,
-  ): Promise<void> {
-    if (await this.repository.read(record.slug, "superseded")) {
-      await this.repository.remove(record.slug, "superseded");
-    }
-  }
-
-  /** Marks a recovery record as completed after the node is restored. */
-  private async markRestored(
-    record: NodeRecoveryRecord,
-    timestamp: string,
-  ): Promise<void> {
-    const updated: NodeRecoveryRecord = {
-      ...record,
-      restoredAt: timestamp,
-      restoredPath: record.originalPath,
-    };
-    await this.repository.store.writeRecoveryRecord(
-      record.id,
-      `${JSON.stringify(updated, null, 2)}\n`,
-    );
-  }
 }
 
 /** Deeply clones mutable node fields before a lifecycle mutation. */

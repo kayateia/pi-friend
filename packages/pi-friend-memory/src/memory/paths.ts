@@ -25,23 +25,26 @@ import * as path from "node:path";
  *
  * `searchable` is not about secrecy: it separates "this file is memory" from
  * "this file is a record of what happened to memory". Sweep logs, preimages,
- * dropped and archived candidates, the vector index, recovery records and the
- * history tree are all useful to a person reading the tree with `ls`, and none
+ * dropped candidates, the vector index and the history tree are all useful to a person reading the tree with `ls`, and none
  * of them should answer a memory search — a preimage especially, since it is a
  * full copy of the store from before a change.
  */
 export const MEMORY_LAYOUT = {
   nodes: { relativePath: "nodes", kind: "directory", searchable: true },
+  /**
+   * Obsolete: tombstoned nodes were stored here before the history tree. Kept
+   * unsearchable so an unmigrated store does not index the copies as memories;
+   * remove this entry once the migration deletes the directory.
+   */
   supersededNodes: {
     relativePath: "nodes/superseded",
     kind: "directory",
-    searchable: true,
+    searchable: false,
   },
   staging: { relativePath: "staging", kind: "directory", searchable: true },
   history: { relativePath: "history", kind: "directory", searchable: false },
   sweeps: { relativePath: "sweeps", kind: "directory", searchable: false },
   index: { relativePath: "index", kind: "directory", searchable: false },
-  recovery: { relativePath: "recovery", kind: "directory", searchable: false },
   accessLog: { relativePath: "access-log", kind: "file", searchable: false },
 } as const satisfies Record<
   string,

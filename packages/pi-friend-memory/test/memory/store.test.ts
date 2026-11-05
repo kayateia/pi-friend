@@ -81,11 +81,10 @@ test("file inventory classifies memory and skips bookkeeping", async () => {
       "docs/reference.md",
       "MEMORY.md",
       // Bookkeeping, none of which is memory: a sweep log, a preimage copy of a
-      // real node, a dropped candidate, a recovery record, and the vector index.
+      // real node, a dropped candidate, and the vector index.
       "sweeps/2026-10-19.md",
       "sweeps/preimages/2026-10-19T00-00-00-000Z/nodes/topic.md",
       "sweeps/dropped/2026-10-19/discarded.md",
-      "recovery/0f0f.json.md",
       "index/state.md",
     ]) {
       await store.writeTextFile(relativePath, relativePath);

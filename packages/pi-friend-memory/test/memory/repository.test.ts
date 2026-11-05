@@ -15,7 +15,10 @@ import type {
   MemoryStatus,
   MemoryType,
 } from "../../src/memory/schema.ts";
-import { MemorySchemaError } from "../../src/memory/schema.ts";
+import {
+  MemorySchemaError,
+  serializeMemoryNode,
+} from "../../src/memory/schema.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { withTempDir } from "../helpers.ts";
 
@@ -88,13 +91,17 @@ test("repository lists only files belonging to the requested area", async () => 
       }),
       "staging",
     );
-    await repository.write(
-      makeNode({
-        slug: "old-one",
-        status: "superseded",
-        supersededBy: "active-one",
-      }),
-      "superseded",
+    // A tombstone from before the history tree: written by hand because
+    // nothing in the code can produce one any more.
+    await repository.store.writeTextFile(
+      "nodes/superseded/old-one.md",
+      serializeMemoryNode(
+        makeNode({
+          slug: "old-one",
+          status: "superseded",
+          supersededBy: "active-one",
+        }),
+      ),
     );
     await repository.store.writeTextFile("docs/reference.md", "plain\n");
 
@@ -106,9 +113,10 @@ test("repository lists only files belonging to the requested area", async () => 
       (await repository.list("staging")).map((node) => node.slug),
       ["candidate-one"],
     );
+    // Legacy tombstones stay out of the canonical listing.
     assert.deepEqual(
-      (await repository.list("superseded")).map((node) => node.slug),
-      ["old-one"],
+      (await repository.list("canonical")).map((node) => node.slug),
+      ["active-one"],
     );
   });
 });

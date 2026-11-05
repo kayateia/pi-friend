@@ -59,6 +59,27 @@ export function historyEntryPath(
   return `history/${kind}/${validSlug}/${timestamp}.md`;
 }
 
+/**
+ * Removes the history-only fields from a front-matter record.
+ *
+ * Used by restore: the file is a copy of a live node plus what happened to it,
+ * and the "what happened" part must not come back with it.
+ */
+export function stripHistoryFields<
+  T extends {
+    history_reason?: string;
+    history_conflict?: string;
+    history_children?: string[];
+  },
+>(frontMatter: T): T {
+  const { history_reason, history_conflict, history_children, ...rest } =
+    frontMatter;
+  void history_reason;
+  void history_conflict;
+  void history_children;
+  return rest as T;
+}
+
 /** Writes one previous version and returns its relative path. */
 export async function writeHistoryEntry(
   store: MemoryStore,

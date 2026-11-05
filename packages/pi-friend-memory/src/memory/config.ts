@@ -70,7 +70,6 @@ export interface SweepConfig {
    * configurable rather than the default changed on someone else's behalf.
    */
   allowDrop: boolean;
-  tombstoneGraceDays: number;
   /** Batches smaller than this bypass the 25% removal guard. */
   minGuardedBatchSize: number;
 }
@@ -194,7 +193,6 @@ export function defaultSweepConfig(): SweepConfig {
   return {
     enabled: true,
     background: false,
-    tombstoneGraceDays: 30,
     minGuardedBatchSize: 10,
     preimageKeep: 3,
     allowDrop: false,
@@ -804,19 +802,6 @@ function parseSweep(
     }
     config.preimageKeep = value.preimage_keep;
   }
-  if (value.tombstone_grace_days !== undefined) {
-    if (
-      typeof value.tombstone_grace_days !== "number" ||
-      !Number.isInteger(value.tombstone_grace_days) ||
-      value.tombstone_grace_days < 1 ||
-      value.tombstone_grace_days > 3650
-    ) {
-      throw new MemoryConfigError(
-        `${configPath}: memory.sweep.tombstone_grace_days must be an integer from 1 to 3650.`,
-      );
-    }
-    config.tombstoneGraceDays = value.tombstone_grace_days;
-  }
   if (value.min_guarded_batch_size !== undefined) {
     if (
       typeof value.min_guarded_batch_size !== "number" ||
@@ -1038,7 +1023,6 @@ const KNOWN_KEYS = {
     "prompt_append",
     "allow_drop",
     "preimage_keep",
-    "tombstone_grace_days",
     "min_guarded_batch_size",
   ],
   dreaming: ["enabled", "max_nodes", "model", "prompt", "prompt_append"],

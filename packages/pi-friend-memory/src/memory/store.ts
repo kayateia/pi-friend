@@ -40,9 +40,6 @@ import {
   validateSlug,
 } from "./paths.ts";
 
-const RECOVERY_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 /** Stable description of a discoverable Markdown file. */
 export interface StoredMarkdownFile {
   absolutePath: string;
@@ -133,19 +130,6 @@ export class MemoryStore {
     await this.replaceFile(relativePath, content);
   }
 
-  /** Reads one recovery record as raw JSON text, or null when it is absent. */
-  async readRecoveryRecord(recoveryId: string): Promise<string | null> {
-    return this.readTextFileIfExists(recoveryRelativePath(recoveryId));
-  }
-
-  /** Atomically writes one validated recovery record. */
-  async writeRecoveryRecord(
-    recoveryId: string,
-    content: string,
-  ): Promise<void> {
-    await this.replaceFile(recoveryRelativePath(recoveryId), content);
-  }
-
   /** Atomically writes one UTF-8 JSON auxiliary file. */
   async writeJsonFile(relativePath: string, content: string): Promise<void> {
     if (!relativePath.endsWith(".json")) {
@@ -195,7 +179,7 @@ export class MemoryStore {
    *
    * Skips dot paths, symlinks, non-Markdown files, and every top-level path the
    * memory layout marks unsearchable — the vector index, sweep logs and
-   * preimages, and recovery records. Those are the extension's own bookkeeping,
+   * preimages and history entries. Those are the extension's own bookkeeping,
    * not memory, and indexing them made a preimage of a node indistinguishable
    * from the node itself in search results.
    */
@@ -342,13 +326,6 @@ function nodeRelativePath(slug: string): string {
   return `nodes/${validateSlug(slug)}.md`;
 }
 
-/** Builds and validates a recovery record filename. */
-function recoveryRelativePath(recoveryId: string): string {
-  if (!RECOVERY_ID_PATTERN.test(recoveryId)) {
-    throw new MemoryStoreError("Recovery ID must be a valid UUID.");
-  }
-  return `recovery/${recoveryId}.json`;
-}
 
 /** Writes a same-directory temporary file, syncs it, then renames it. */
 async function writeFileAtomically(

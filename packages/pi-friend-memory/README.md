@@ -25,20 +25,24 @@ The default tree is:
 ```text
 ~/.pi/agent/pi-friend/memory/
 ├── nodes/
-│   └── superseded/
 ├── staging/
+├── history/
+│   ├── deleted/
+│   ├── dropped/
+│   ├── edited/
+│   ├── merged/
+│   └── split/
 ├── access-log
 ├── sweeps/
-├── index/
-└── recovery/
+└── index/
 ```
 
-`nodes/` and `staging/` are memory and are searchable. `sweeps/`, `index/`,
-`recovery/` and `access-log` are the extension's own bookkeeping — run logs,
-preimages, dropped and archived candidates, the vector index, recovery records —
-and are never enumerated for search, even though they are Markdown. A preimage is
-a full copy of the store from before a change, so indexing it would let an
-outdated version of a memory answer a search as though it were current.
+`nodes/` and `staging/` are memory and are searchable. `history/`, `sweeps/`,
+`index/` and `access-log` are the extension's own bookkeeping — the vector index,
+run logs, and every previous version of a memory — and are never enumerated for
+search, even though they are Markdown. A history entry is a copy of a memory as
+it was, so indexing one would let an outdated version answer a search as though
+it were current.
 
 Override the root in `~/.pi/agent/pi-friend/pi-friend-memory.yml`:
 
@@ -192,7 +196,7 @@ memories. Debug-disabled runs inject nothing in that case.
 decide what is skipped.
 
 The paths the extension owns inside its root are never imported, even when a
-configured path contains them: `nodes/`, `staging/`, `sweeps/`, `recovery/`,
+configured path contains them: `nodes/`, `staging/`, `history/`, `sweeps/`,
 `index/`, and `access-log`. Without that, pointing `index_paths` at a directory
 that contains the store — `~/identity`, when the store lives at
 `~/identity/pi-friend-memory` — would index every memory file a second time as a
@@ -267,15 +271,15 @@ Pi reads the extension entry point from the `pi.extensions` field in
 - `memory_add` creates a canonical active node, derives a unique slug unless one
   is supplied, and records speaker attribution.
 - `memory_edit` updates an existing node while preserving creation and usage
-  metadata and appending a dated audit entry.
-- `memory_delete` moves exactly one matched node into superseded storage after
-  writing a durable recovery record.
-- `memory_restore` restores a deleted node from its recovery ID without
-  overwriting newer canonical content.
+  metadata, and stores the version it replaces under `history/edited/<slug>/`
+  with the edit's reason.
+- `memory_delete` copies exactly one matched node into
+  `history/deleted/<slug>.md` before removing it from `nodes/`.
+- `memory_restore` copies a deleted node back out of history by slug, without
+  overwriting newer canonical content, and removes the history entry.
 - `memory_promote` promotes one staging candidate, merging semantic
   near-duplicates into an existing canonical node.
-- `memory_read` reads a complete node from canonical, staging, or superseded
-  storage.
+- `memory_read` reads a complete node from canonical or staging storage.
 - Search results and recalled blocks both carry attribution — `Heard from: Aria; Iri
   (uncertain) — relayed` — because in a plural system who said something is part of
   what the memory means, and it should not cost a second tool call.
@@ -320,10 +324,9 @@ attempts, and appends a dated decision log under `sweeps/`.
 `memory.sweep.preimage_keep` bounds those snapshots: the newest *n* are kept and
 older runs are pruned, so a full store copy per sweep cannot grow without limit.
 `0` disables preimages entirely — none is taken and existing ones are removed at
-the next sweep. The trade-off is narrow: recovery records and the superseded
-tombstones cover deletions, and dropped or archived candidates keep their own
-copies, so what preimages uniquely preserve is the *previous wording* of an edited
-or merged memory.
+the next sweep. Preimages are on their way out: `history/` already keeps the
+previous wording of an edited memory, and dropped candidates keep their own
+copies under `history/dropped/`.
 
 Set `memory.sweep.background: true` to schedule the sweep on the next event-loop
 task instead of making agent settlement wait for its model calls. The sweep

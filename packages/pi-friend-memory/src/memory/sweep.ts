@@ -50,7 +50,6 @@ export interface SweepResult {
   merged: number;
   dropped: number;
   decayUpdates: number;
-  archivedTombstones: number;
   preimage?: string;
   dreamSlug?: string;
   dreamError?: string;
@@ -124,7 +123,6 @@ async function runDailySweepLocked(
   let merged = 0;
   let dropped = 0;
   let decayUpdates = 0;
-  let archivedTombstones = 0;
   let dreamSlug: string | undefined;
   let dreamError: string | undefined;
 
@@ -220,12 +218,6 @@ async function runDailySweepLocked(
     }
 
     options.signal?.throwIfAborted();
-    const tombstoneResult = await service.archiveExpiredTombstones(
-      config.tombstoneGraceDays,
-      runId,
-      now,
-    );
-    archivedTombstones = tombstoneResult.archived.length;
     decayUpdates = (await service.recomputeDecay()).length;
     options.signal?.throwIfAborted();
 
@@ -283,7 +275,6 @@ async function runDailySweepLocked(
       dropped,
       decayUpdates,
       preimage,
-      archivedTombstones,
       dreamSlug,
       dreamError,
     });
@@ -302,7 +293,6 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
-      archivedTombstones,
       preimage,
       ...(dreamSlug === undefined ? {} : { dreamSlug }),
       ...(dreamError === undefined ? {} : { dreamError }),
@@ -319,7 +309,6 @@ async function runDailySweepLocked(
       dropped,
       decayUpdates,
       preimage,
-      archivedTombstones,
       dreamSlug,
       dreamError,
       error: message,
@@ -343,7 +332,6 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
-      archivedTombstones,
       ...(preimage === undefined ? {} : { preimage }),
       ...(dreamSlug === undefined ? {} : { dreamSlug }),
       ...(dreamError === undefined ? {} : { dreamError }),
@@ -442,7 +430,6 @@ async function appendSweepLog(
     merged: number;
     dropped: number;
     decayUpdates: number;
-    archivedTombstones: number;
     dreamSlug?: string;
     dreamError?: string;
     preimage?: string;
@@ -462,7 +449,6 @@ async function appendSweepLog(
     `- Merged: ${summary.merged}`,
     `- Dropped/archived: ${summary.dropped}`,
     `- Decay updates: ${summary.decayUpdates}`,
-    `- Expired tombstones archived: ${summary.archivedTombstones}`,
     `- Dream: ${summary.dreamSlug ?? "none"}`,
     ...(summary.dreamError ? [`- Dream error: ${summary.dreamError}`] : []),
     ...(summary.error ? [`- Error: ${summary.error}`] : []),
@@ -547,7 +533,6 @@ function emptyResult(ran: boolean): SweepResult {
     merged: 0,
     dropped: 0,
     decayUpdates: 0,
-    archivedTombstones: 0,
   };
 }
 

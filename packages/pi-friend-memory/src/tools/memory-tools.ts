@@ -37,7 +37,6 @@ import { DEFAULT_MEMORY_TOOL_PREFIX } from "../memory/config.ts";
 const MEMORY_AREAS = [
   "canonical",
   "staging",
-  "superseded",
 ] as const satisfies readonly MemoryNodeArea[];
 
 /** Structured details shared by successful and failed memory reads. */
@@ -61,19 +60,17 @@ interface MemoryEditDetails extends MemoryAddDetails {
   edited: string;
 }
 
-/** Structured details returned by a recoverable deletion. */
+/** Structured details returned by a deletion. */
 interface MemoryDeleteDetails {
   slug: string;
-  recoveryId: string;
-  canonicalPath: string;
-  tombstonePath: string;
+  /** Archived copy, readable by hand and restorable by slug. */
+  historyPath: string;
 }
 
-/** Structured details returned by a recovery operation. */
+/** Structured details returned by a restore. */
 interface MemoryRestoreDetails {
   slug: string;
-  recoveryId: string;
-  alreadyRestored: boolean;
+  path: string;
 }
 
 /** Structured details returned by promotion of a staging candidate. */
@@ -232,10 +229,10 @@ export function registerMemoryTools(
     name: toolName("memory_delete"),
     label: "Memory Delete",
     description: [
-      "Move one canonical memory node into superseded storage without hard-deleting it.",
+      "Move one canonical memory node into history without hard-deleting it.",
       "The match may be an exact slug or a case-insensitive substring of its title, tags, or body.",
-      "Ambiguous matches are rejected. A durable recovery record is written before the node moves.",
-      `Use ${toolName("memory_restore")} with the returned recovery ID to undo the deletion.`,
+      "Ambiguous matches are rejected. The node is copied to history/deleted/<slug>.md before it leaves nodes/.",
+      `Use ${toolName("memory_restore")} with the slug to undo the deletion, while the history entry is retained.`,
     ].join("\n"),
     parameters: Type.Object({
       match: Type.String({
@@ -254,24 +251,19 @@ export function registerMemoryTools(
     ): Promise<AgentToolResult<MemoryDeleteDetails>> {
       const service = requireService(getService);
       const result = await service.delete(params.match);
-      const canonicalPath = `nodes/${result.original.slug}.md`;
-      const tombstonePath = `nodes/superseded/${result.tombstone.slug}.md`;
 
       return {
         content: [
           {
             type: "text",
             text:
-              `Moved memory "${result.original.slug}" to superseded storage.\n` +
-              `Recovery ID: ${result.recoveryId}\n` +
-              `Use ${toolName("memory_restore")} with this ID to undo the deletion.`,
+              `Moved memory "${result.slug}" to ${result.historyPath}.\n` +
+              `Use ${toolName("memory_restore")} with the slug to undo the deletion while the history entry is retained.`,
           },
         ],
         details: {
-          slug: result.original.slug,
-          recoveryId: result.recoveryId,
-          canonicalPath,
-          tombstonePath,
+          slug: result.slug,
+          historyPath: result.historyPath,
         },
       };
     },
@@ -281,13 +273,13 @@ export function registerMemoryTools(
     name: toolName("memory_restore"),
     label: "Memory Restore",
     description: [
-      `Restore a deleted memory node using the recovery ID returned by ${toolName("memory_delete")}.`,
-      "Restoration never overwrites a newer canonical node.",
-      "Repeated restoration is idempotent.",
+      `Restore a deleted memory node from its entry under history/deleted, by slug.`,
+      "Restoration never overwrites a newer canonical node with the same slug.",
+      "The history entry is removed once the node is back, so a second restore reports that nothing is left to restore.",
     ].join("\n"),
     parameters: Type.Object({
-      recoveryId: Type.String({
-        description: `UUID recovery ID returned by ${toolName("memory_delete")}.`,
+      slug: Type.String({
+        description: `Slug of the deleted memory, as returned by ${toolName("memory_delete")}.`,
       }),
     }),
     annotations: {
@@ -301,21 +293,18 @@ export function registerMemoryTools(
       params,
     ): Promise<AgentToolResult<MemoryRestoreDetails>> {
       const service = requireService(getService);
-      const result = await service.restore(params.recoveryId);
+      const result = await service.restore(params.slug);
 
       return {
         content: [
           {
             type: "text",
-            text: result.alreadyRestored
-              ? `Memory "${result.node.slug}" was already restored from recovery ${result.recoveryId}.`
-              : `Restored memory "${result.node.slug}" from recovery ${result.recoveryId}.`,
+            text: `Restored memory "${result.slug}" from history into nodes/${result.slug}.md.`,
           },
         ],
         details: {
-          slug: result.node.slug,
-          recoveryId: result.recoveryId,
-          alreadyRestored: result.alreadyRestored,
+          slug: result.slug,
+          path: `nodes/${result.slug}.md`,
         },
       };
     },

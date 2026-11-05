@@ -83,7 +83,6 @@ test("only the extension's own paths under the root are reserved", () => {
     "staging/c.md",
     "sweeps/2026-11-03.md",
     "sweeps/dropped/run/x.md",
-    "recovery/0f0f.json",
     "index/vectors.sqlite",
     "access-log",
   ]) {
@@ -171,7 +170,6 @@ test("the created layout and the reserved prefixes agree", async () => {
       "history",
       "index",
       "nodes",
-      "recovery",
       "staging",
       "sweeps",
     ]);
@@ -200,7 +198,6 @@ test("the reserved prefixes stay derived from the layout declaration", () => {
     "history",
     "index",
     "nodes",
-    "recovery",
     "staging",
     "sweeps",
   ]);

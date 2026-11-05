@@ -80,7 +80,6 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
         preimageKeep: 3,
@@ -129,7 +128,6 @@ test("daily sweep writes preimage, state, log, and promotes candidates", async (
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
         preimageKeep: 3,
@@ -161,7 +159,6 @@ test("sweep failure still advances state and writes a failure log", async () => 
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
         preimageKeep: 3,
@@ -216,7 +213,6 @@ test("an aborted background sweep does not mutate candidates", async () => {
           {
             enabled: true,
             background: true,
-            tombstoneGraceDays: 30,
             minGuardedBatchSize: 10,
             allowDrop: false,
             preimageKeep: 3,
@@ -229,7 +225,7 @@ test("an aborted background sweep does not mutate candidates", async () => {
   });
 });
 
-test("sweep archives expired tombstones and creates one dream", async () => {
+test("sweep creates one dream from the canonical nodes", async () => {
   await withTempDir(async (agentDir) => {
     const repository = await MemoryNodeRepository.open({
       agentDir,
@@ -251,13 +247,6 @@ test("sweep archives expired tombstones and creates one dream", async () => {
       body: "Second source for dreaming.",
       speaker: [{ name: "Aisling", confident: true }],
     });
-    const deleted = await service.add({
-      title: "Expired Tombstone",
-      type: "fact",
-      body: "This tombstone is old.",
-      speaker: [{ name: "Aisling", confident: true }],
-    });
-    await service.delete(deleted.slug);
 
     const result = await runDailySweep(
       undefined,
@@ -265,7 +254,6 @@ test("sweep archives expired tombstones and creates one dream", async () => {
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
         preimageKeep: 3,
@@ -282,22 +270,6 @@ test("sweep archives expired tombstones and creates one dream", async () => {
       },
     );
 
-    assert.equal(result.archivedTombstones, 1);
-    assert.equal(
-      await service.read(deleted.slug, "superseded"),
-      null,
-    );
-    assert.ok(
-      await readFile(
-        path.join(
-          repository.store.paths.sweeps,
-          "archived",
-          result.runId ?? "",
-          `${deleted.slug}.md`,
-        ),
-        "utf8",
-      ),
-    );
     assert.ok(result.dreamSlug);
     const dream = await service.read(result.dreamSlug);
     assert.equal(dream?.frontMatter.type, "dream");
@@ -330,7 +302,6 @@ test("small batches may expire more than 25% below the guard threshold", async (
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 5,
         allowDrop: false,
         preimageKeep: 3,
@@ -379,7 +350,6 @@ test("the 25% guard still applies at the configured batch threshold", async () =
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 2,
         allowDrop: false,
         preimageKeep: 3,
@@ -460,7 +430,6 @@ test("an allowed drop archives the candidate instead of promoting it", async () 
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: true,
         preimageKeep: 3,
@@ -521,7 +490,6 @@ test("model drops count against the 25% removal guard", async () => {
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 2,
         allowDrop: true,
         preimageKeep: 3,
@@ -586,7 +554,6 @@ test("dreams are withheld from the sweep's merge targets", async () => {
       {
         enabled: true,
         background: false,
-        tombstoneGraceDays: 30,
         minGuardedBatchSize: 10,
         allowDrop: false,
         preimageKeep: 3,
@@ -667,7 +634,6 @@ test("preimages are capped, and zero disables them", async () => {
     const base = {
       enabled: true,
       background: false,
-      tombstoneGraceDays: 30,
       minGuardedBatchSize: 10,
       allowDrop: false,
     };

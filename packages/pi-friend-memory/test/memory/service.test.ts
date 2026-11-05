@@ -14,7 +14,6 @@ import {
   MemoryServiceError,
   slugifyTitle,
 } from "../../src/memory/service.ts";
-import { parseRecoveryRecord } from "../../src/memory/recovery.ts";
 import {
   listHistoryVersions,
   readHistoryEntry,
@@ -204,7 +203,7 @@ test("edit requires an existing node and at least one changed field", async () =
   });
 });
 
-test("delete writes recovery first, moves to superseded, and audits the tombstone", async () => {
+test("delete archives the node as it was, then removes it from nodes", async () => {
   await withTempDir(async (agentDir) => {
     const service = await makeService(agentDir);
     const original = await service.add({
@@ -216,30 +215,26 @@ test("delete writes recovery first, moves to superseded, and audits the tombston
 
     const deleted = await service.delete(original.slug);
 
+    assert.equal(deleted.slug, original.slug);
+    assert.equal(deleted.historyPath, `history/deleted/${original.slug}.md`);
     assert.equal(await service.read(original.slug), null);
-    const tombstone = await service.read(original.slug, "superseded");
-    assert.ok(tombstone);
-    assert.equal(tombstone.frontMatter.status, "superseded");
-    assert.equal(tombstone.frontMatter.decay_weight, 0);
-    assert.match(tombstone.body, /memory_delete/);
-    assert.match(tombstone.body, new RegExp(deleted.recoveryId));
 
     const repository = await MemoryNodeRepository.open({
       agentDir,
       homeDir: agentDir,
     });
-    const recoveryText = await repository.store.readRecoveryRecord(
-      deleted.recoveryId,
+    const archived = await readHistoryEntry(
+      repository.store,
+      deleted.historyPath,
+      original.slug,
     );
-    assert.ok(recoveryText);
-    const record = parseRecoveryRecord(
-      JSON.parse(recoveryText) as unknown,
-      deleted.recoveryId,
-    );
-    assert.equal(record.slug, original.slug);
-    assert.match(record.originalText, /This fact will be deleted\./);
-    assert.equal(record.originalPath, `nodes/${original.slug}.md`);
-    assert.equal(record.tombstonePath, `nodes/superseded/${original.slug}.md`);
+    assert.ok(archived);
+    // Content as it was: active, its own weight, its own body, no tombstone
+    // markers and no audit line describing the deletion.
+    assert.equal(archived.frontMatter.status, "active");
+    assert.equal(archived.frontMatter.decay_weight, 1);
+    assert.match(archived.body, /This fact will be deleted\./);
+    assert.doesNotMatch(archived.body, /superseded|memory_delete/);
   });
 });
 
@@ -272,31 +267,35 @@ test("delete rejects ambiguous substring matches but accepts an exact slug", asy
   });
 });
 
-test("restore recreates the canonical node, removes the tombstone, and is idempotent", async () => {
+test("restore copies the archived version back and consumes the entry", async () => {
   await withTempDir(async (agentDir) => {
-    const service = await makeService(agentDir);
+    let currentTime = FIXED_TIME;
+    const service = await makeService(agentDir, () => currentTime);
     const original = await service.add({
       title: "Restore Me",
       type: "preference",
       body: "A restorable preference.",
       speaker: [{ name: "Aisling", confident: true }],
     });
-    const deleted = await service.delete(original.slug);
+    await service.delete(original.slug);
 
-    const restored = await service.restore(deleted.recoveryId);
-    assert.equal(restored.alreadyRestored, false);
-    assert.equal(restored.node.slug, original.slug);
+    currentTime = new Date("2026-10-20T22:00:00.000Z");
+    const restored = await service.restore(original.slug);
+    assert.equal(restored.slug, original.slug);
     assert.equal(restored.node.frontMatter.status, "active");
-    assert.match(restored.node.body, /memory_restore/);
-    assert.equal(await service.read(original.slug, "superseded"), null);
+    assert.equal(restored.node.frontMatter.decay_weight, 1);
+    assert.equal(restored.node.frontMatter.edited, currentTime.toISOString());
+    assert.match(restored.node.body, /A restorable preference\./);
+    assert.doesNotMatch(restored.node.body, /memory_restore/);
+    assert.deepEqual(await service.read(original.slug), restored.node);
 
-    const again = await service.restore(deleted.recoveryId);
-    assert.equal(again.alreadyRestored, true);
-    assert.deepEqual(again.node, restored.node);
+    // The entry is consumed: a second restore has nothing to copy, and the
+    // canonical node is untouched.
+    await assert.rejects(() => service.restore(original.slug), /already exists/);
   });
 });
 
-test("restore refuses to overwrite a newer canonical node", async () => {
+test("restore strips history fields and refuses a newer canonical node", async () => {
   await withTempDir(async (agentDir) => {
     const service = await makeService(agentDir);
     const original = await service.add({
@@ -305,7 +304,7 @@ test("restore refuses to overwrite a newer canonical node", async () => {
       body: "Original content.",
       speaker: [{ name: "Aisling", confident: true }],
     });
-    const deleted = await service.delete(original.slug);
+    await service.delete(original.slug);
 
     const repository = await MemoryNodeRepository.open({
       agentDir,
@@ -317,8 +316,8 @@ test("restore refuses to overwrite a newer canonical node", async () => {
     });
 
     await assert.rejects(
-      () => service.restore(deleted.recoveryId),
-      /newer canonical node already exists/,
+      () => service.restore(original.slug),
+      /already exists/,
     );
     assert.match(
       (await service.read(original.slug))?.body ?? "",
@@ -327,12 +326,12 @@ test("restore refuses to overwrite a newer canonical node", async () => {
   });
 });
 
-test("restore rejects invalid recovery IDs", async () => {
+test("restoring a slug with no history entry reports it", async () => {
   await withTempDir(async (agentDir) => {
     const service = await makeService(agentDir);
     await assert.rejects(
-      () => service.restore("not-a-uuid"),
-      /Invalid recovery ID/,
+      () => service.restore("never-existed"),
+      /No deleted memory named/,
     );
   });
 });
