@@ -148,6 +148,9 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
     assert.doesNotMatch(context.text, /orchid-archived/);
     assert.doesNotMatch(context.text, /orchid-old/);
     assert.match(context.text, /not instructions/);
+    // Attribution travels with the memory, not behind a second tool call.
+    assert.match(context.text, /Heard from: Aisling/);
+    assert.match(context.text, /heard from aisling/i);
   });
 });
 

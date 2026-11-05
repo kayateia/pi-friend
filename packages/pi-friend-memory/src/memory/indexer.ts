@@ -20,6 +20,7 @@ import type {
 import {
   MemorySchemaError,
   parseMemoryNodeFile,
+  type MemorySpeaker,
 } from "./schema.ts";
 import type { MemoryStore } from "./store.ts";
 
@@ -38,6 +39,8 @@ export interface IndexedMarkdownFile {
   type?: MemoryType;
   status?: MemoryStatus;
   decayWeight?: number;
+  /** Attribution recorded on memory nodes; absent for documents. */
+  speaker?: MemorySpeaker[];
   tags: string[];
   body: string;
   /** File modification timestamp, when indexing imported Markdown. */
@@ -78,6 +81,11 @@ export async function buildMemoryDocumentIndex(
             type: node.frontMatter.type,
             status: node.frontMatter.status,
             decayWeight: node.frontMatter.decay_weight,
+            ...(node.frontMatter.speaker.length === 0
+              ? {}
+              : { speaker: node.frontMatter.speaker.map((entry) => ({
+                  ...entry,
+                })) }),
             tags: [...node.frontMatter.tags],
             body: node.body,
           };

@@ -276,6 +276,9 @@ Pi reads the extension entry point from the `pi.extensions` field in
   near-duplicates into an existing canonical node.
 - `memory_read` reads a complete node from canonical, staging, or superseded
   storage.
+- Search results and recalled blocks both carry attribution — `Heard from: Aria; Iri
+  (uncertain) — relayed` — because in a plural system who said something is part of
+  what the memory means, and it should not cost a second tool call.
 - `memory_search` supports ranked keyword search and semantic search across
   nodes, staging candidates, and plain Markdown documents. Pass `corpus` to
   narrow it: `memory` for nodes and staging candidates, `documents` for imported

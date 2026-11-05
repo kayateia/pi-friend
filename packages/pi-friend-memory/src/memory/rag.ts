@@ -10,6 +10,7 @@ import type { RagInjectionConfig } from "./config.ts";
 import type { MemoryNodeService } from "./service.ts";
 import type { MemoryNodeArea } from "./repository.ts";
 import type { MemorySearchResult } from "./search.ts";
+import { ATTRIBUTION_LABEL, formatAttribution } from "./attribution.ts";
 import { formatRetrievalExplanation } from "./search.ts";
 import type { ParsedMemoryNode } from "./schema.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
@@ -223,12 +224,16 @@ function formatMemoryNode(
   const tier = getTier(node.frontMatter.decay_weight);
   const link = `nodes/${node.slug}.md`;
   const explanation = formatRetrievalExplanation(result);
+  const attribution = formatAttribution(node.frontMatter.speaker);
+  const attributionLine =
+    attribution === undefined ? [] : [`${ATTRIBUTION_LABEL}: ${attribution}`];
   if (area === "staging") {
     const excerpt = summarizeBody(node.body, 1, 280);
     return [
       "Candidate - unverified",
       `### ${node.frontMatter.title}`,
       `Tier: candidate · staging/${node.slug}.md`,
+      ...attributionLine,
       explanation,
       excerpt,
     ].join("\n");
@@ -239,7 +244,9 @@ function formatMemoryNode(
         ? node.frontMatter.tags.slice(0, 5).join(", ")
         : node.frontMatter.emotional_flavor || "no keywords";
     return [
-      `- see also: ${node.frontMatter.title} — ${keywords} (${link})`,
+      `- see also: ${node.frontMatter.title} — ${keywords} (${link})${
+        attribution === undefined ? "" : ` · ${ATTRIBUTION_LABEL.toLowerCase()} ${attribution}`
+      }`,
       `  ${explanation}`,
     ].join("\n");
   }
@@ -250,6 +257,7 @@ function formatMemoryNode(
   return [
     `### ${node.frontMatter.title}`,
     `Tier: ${tier} · ${link}`,
+    ...attributionLine,
     explanation,
     excerpt,
   ].join("\n");

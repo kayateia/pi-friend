@@ -8,6 +8,7 @@
 
 import type { IndexedMarkdownFile } from "./indexer.ts";
 import type { MemoryFileKind } from "./paths.ts";
+import type { MemorySpeaker } from "./schema.ts";
 import type {
   MemoryStatus,
   MemoryType,
@@ -65,6 +66,8 @@ export interface MemorySearchResult {
   type?: MemoryType;
   status?: MemoryStatus;
   decayWeight?: number;
+  /** Attribution recorded on the node; absent for documents. */
+  speaker?: readonly MemorySpeaker[];
   modifiedAt?: string;
   provenance?: string;
   snippet: string;
@@ -147,6 +150,7 @@ export function searchIndexedFiles(
       ...(file.decayWeight === undefined
         ? {}
         : { decayWeight: file.decayWeight }),
+      ...(file.speaker === undefined ? {} : { speaker: file.speaker }),
       ...(file.modifiedAt === undefined
         ? {}
         : { modifiedAt: file.modifiedAt }),
