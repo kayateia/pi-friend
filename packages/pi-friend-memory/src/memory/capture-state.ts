@@ -10,32 +10,41 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
-/** File name of the persisted capture cursor inside the pi-friend state dir. */
+/** File name of the persisted capture cursors beside the extension config. */
 export const CAPTURE_STATE_FILENAME = "capture-state.json";
 
+/** Current on-disk shape. Version 1 held a single session's cursor. */
+export const CAPTURE_STATE_VERSION = 2;
+
+/** Cursors older than this are pruned on write. */
+export const CAPTURE_STATE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
+
 /**
- * Durable record of how far auto-capture has read in one session.
+ * Where auto-capture had read to in one session.
  *
  * `lastEntryId` is a Pi transcript entry id, not a byte offset: Pi's session
  * format owns that identity and the extension only remembers it. Nothing is
  * written back to the transcript.
  */
-export interface CaptureState {
-  version: 1;
-  /** Session the cursor belongs to; a different session starts fresh. */
-  sessionId: string;
+export interface CaptureCursor {
   /** Transcript entry the last successful capture ended at. */
   lastEntryId: string;
-  /** ISO timestamp of that capture, for diagnostics only. */
+  /** ISO timestamp of that capture, for diagnostics and pruning. */
   lastCapturedAt: string;
 }
 
-/** Result of reading the state file, which may be absent or unusable. */
-export interface CaptureStateReadResult {
-  state?: CaptureState;
+/** The whole state file: one cursor per session, keyed by session id. */
+export interface CaptureStateFile {
+  version: 2;
+  sessions: Record<string, CaptureCursor>;
+}
+
+/** Result of reading one session's cursor. */
+export interface CaptureCursorReadResult {
+  cursor?: CaptureCursor;
   /**
-   * Set when the file exists but could not be used. Capture starts from the
-   * beginning of the branch, and the caller is expected to surface this rather
+   * Set when the file exists but entries could not be used. Capture falls back
+   * to the most recent turns, and the caller is expected to surface this rather
    * than let a stale or corrupt cursor pass as a clean session.
    */
   warning?: string;
@@ -52,21 +61,80 @@ export function captureStatePath(agentDir: string = getAgentDir()): string {
   return path.join(agentDir, "pi-friend", "memory", CAPTURE_STATE_FILENAME);
 }
 
-/** Reads the persisted cursor, treating absence as "no state yet". */
-export async function readCaptureState(
+/**
+ * Reads one session's cursor.
+ *
+ * Several sessions can run concurrently and a house switches between them, so
+ * the file holds a map rather than one position. A session that is not in the
+ * map has no cursor, which is a normal first-capture state.
+ */
+export async function readCaptureCursor(
   filePath: string,
-): Promise<CaptureStateReadResult> {
+  sessionId: string,
+): Promise<CaptureCursorReadResult> {
+  const { state, warning } = await readStateFile(filePath);
+  const cursor = state.sessions[sessionId];
+  return {
+    ...(cursor === undefined ? {} : { cursor: { ...cursor } }),
+    ...(warning === undefined ? {} : { warning }),
+  };
+}
+
+/**
+ * Records one session's cursor, leaving every other session untouched.
+ *
+ * The read-modify-write is serialised through a module-level queue because two
+ * captures can interleave at an `await`, and last-writer-wins would silently
+ * drop the other session's entry — the exact failure this map exists to avoid.
+ */
+export async function writeCaptureCursor(
+  filePath: string,
+  sessionId: string,
+  cursor: CaptureCursor,
+  now: Date = new Date(),
+): Promise<void> {
+  await serialize(async () => {
+    const { state } = await readStateFile(filePath);
+    state.sessions[sessionId] = { ...cursor };
+    const current = now.getTime();
+    for (const [id, entry] of Object.entries(state.sessions)) {
+      if (id === sessionId) {
+        continue;
+      }
+      const captured = Date.parse(entry.lastCapturedAt);
+      if (!Number.isFinite(captured) || current - captured > CAPTURE_STATE_MAX_AGE_MS) {
+        delete state.sessions[id];
+      }
+    }
+
+    await mkdir(path.dirname(filePath), { recursive: true });
+    const temporary = `${filePath}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    await rename(temporary, filePath);
+  });
+}
+
+/** Reads and validates the state file, translating the version 1 shape. */
+async function readStateFile(
+  filePath: string,
+): Promise<{ state: CaptureStateFile; warning?: string }> {
+  const empty: CaptureStateFile = {
+    version: CAPTURE_STATE_VERSION,
+    sessions: {},
+  };
+
   let source: string;
   try {
     source = await readFile(filePath, "utf8");
   } catch (error) {
     if (getErrorCode(error) === "ENOENT") {
-      return {};
+      return { state: empty };
     }
     return {
+      state: empty,
       warning: `capture state ${filePath} could not be read (${
         getErrorCode(error) ?? "unknown error"
-      }); starting a fresh cursor.`,
+      }); ignoring saved cursors.`,
     };
   }
 
@@ -75,51 +143,93 @@ export async function readCaptureState(
     value = JSON.parse(source);
   } catch {
     return {
-      warning: `capture state ${filePath} is not valid JSON; starting a fresh cursor.`,
+      state: empty,
+      warning: `capture state ${filePath} is not valid JSON; ignoring saved cursors.`,
     };
   }
   if (!isRecord(value)) {
     return {
-      warning: `capture state ${filePath} is not a JSON object; starting a fresh cursor.`,
+      state: empty,
+      warning: `capture state ${filePath} is not a JSON object; ignoring saved cursors.`,
     };
   }
-  if (value.version !== 1) {
+
+  if (value.version === 1) {
+    const migrated = migrateVersionOne(value);
+    return migrated === undefined
+      ? {
+          state: empty,
+          warning: `capture state ${filePath} is an unusable version 1 file; ignoring saved cursors.`,
+        }
+      : { state: { version: CAPTURE_STATE_VERSION, sessions: migrated } };
+  }
+
+  if (value.version !== CAPTURE_STATE_VERSION) {
     return {
+      state: empty,
       warning: `capture state ${filePath} has version ${String(
         value.version,
-      )}; this build writes version 1 and starts a fresh cursor.`,
+      )}; this build reads version ${CAPTURE_STATE_VERSION} and ignores saved cursors.`,
     };
   }
-  const { sessionId, lastEntryId, lastCapturedAt } = value;
+
+  const sessions: Record<string, CaptureCursor> = {};
+  let dropped = 0;
+  const rawSessions = isRecord(value.sessions) ? value.sessions : {};
+  for (const [sessionId, entry] of Object.entries(rawSessions)) {
+    const cursor = parseCursor(entry);
+    if (cursor === undefined) {
+      dropped += 1;
+      continue;
+    }
+    sessions[sessionId] = cursor;
+  }
+  if (dropped > 0) {
+    return {
+      state: { version: CAPTURE_STATE_VERSION, sessions },
+      warning: `capture state ${filePath} holds ${dropped} unusable session ${
+        dropped === 1 ? "entry" : "entries"
+      }; ignoring ${dropped === 1 ? "it" : "them"}.`,
+    };
+  }
+  return { state: { version: CAPTURE_STATE_VERSION, sessions } };
+}
+
+/** Translates one version 1 record into the version 2 map. */
+function migrateVersionOne(
+  value: Record<string, unknown>,
+): Record<string, CaptureCursor> | undefined {
+  const { sessionId } = value;
+  const cursor = parseCursor(value);
+  if (typeof sessionId !== "string" || sessionId === "" || cursor === undefined) {
+    return undefined;
+  }
+  return { [sessionId]: cursor };
+}
+
+/** Validates one cursor entry. */
+function parseCursor(value: unknown): CaptureCursor | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { lastEntryId, lastCapturedAt } = value;
   if (
-    typeof sessionId !== "string" ||
-    sessionId === "" ||
     typeof lastEntryId !== "string" ||
     lastEntryId === "" ||
     typeof lastCapturedAt !== "string"
   ) {
-    return {
-      warning: `capture state ${filePath} is missing sessionId, lastEntryId or lastCapturedAt; starting a fresh cursor.`,
-    };
+    return undefined;
   }
-  return { state: { version: 1, sessionId, lastEntryId, lastCapturedAt } };
+  return { lastEntryId, lastCapturedAt };
 }
 
-/**
- * Writes the cursor atomically, so a crash mid-write leaves the previous file.
- *
- * The temporary file sits beside the target rather than in the OS temp
- * directory: rename is only atomic within one filesystem.
- */
-export async function writeCaptureState(
-  filePath: string,
-  state: CaptureState,
-): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const temporary = `${filePath}.tmp`;
-  const serialized = `${JSON.stringify(state, null, 2)}\n`;
-  await writeFile(temporary, serialized, "utf8");
-  await rename(temporary, filePath);
+/** Runs state writes one at a time, so concurrent captures cannot clobber. */
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(work: () => Promise<T>): Promise<T> {
+  const result = writeQueue.then(work, work);
+  writeQueue = result.catch(() => undefined);
+  return result;
 }
 
 /** Narrows unknown JSON values to string-keyed records. */
