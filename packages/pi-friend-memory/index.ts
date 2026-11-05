@@ -35,6 +35,11 @@ import { serializeCaptureTranscript } from "./src/memory/capture.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
 import {
+  captureStatePath,
+  readCaptureState,
+  writeCaptureState,
+} from "./src/memory/capture-state.ts";
+import {
   OpenRouterEmbeddingProvider,
   resolveOpenRouterApiKey,
 } from "./src/memory/embedding.ts";
@@ -108,10 +113,34 @@ export default async function registerPiFriend(
     config: AutoCaptureConfig,
   ): Promise<void> => {
     try {
+      const sessionId = ctx.sessionManager.getSessionId();
+      const statePath = captureStatePath();
+      // The cursor lives in memory for the life of a process and on disk for
+      // the life of a session. A reload, resume or restart used to re-read the
+      // whole branch and stage the same material twice; the file makes that
+      // read continue instead of repeat. A cursor from another session is
+      // ignored, because entry ids are only meaningful inside their own branch.
+      let cursor = captureCursor;
+      if (cursor === undefined) {
+        const restored = await readCaptureState(statePath);
+        if (restored.warning !== undefined) {
+          reportCaptureWarning(ctx, `pi-friend auto-capture: ${restored.warning}`);
+        }
+        if (restored.state?.sessionId === sessionId) {
+          cursor = restored.state.lastEntryId;
+        }
+      }
+
       const branch = ctx.sessionManager.getBranch();
-      const cursorIndex = captureCursor
-        ? branch.findIndex((entry) => entry.id === captureCursor)
+      const cursorIndex = cursor
+        ? branch.findIndex((entry) => entry.id === cursor)
         : -1;
+      if (cursor !== undefined && cursorIndex < 0) {
+        reportCaptureWarning(
+          ctx,
+          "pi-friend auto-capture: the saved capture cursor is not in this session branch; reading from its start.",
+        );
+      }
       const entries = branch.slice(cursorIndex + 1);
       const transcript = serializeCaptureTranscript(entries);
       if (transcript.trim() === "") {
@@ -143,6 +172,19 @@ export default async function registerPiFriend(
       const finalEntry = branch[branch.length - 1];
       if (finalEntry) {
         captureCursor = finalEntry.id;
+        await writeCaptureState(statePath, {
+          version: 1,
+          sessionId,
+          lastEntryId: finalEntry.id,
+          lastCapturedAt: new Date().toISOString(),
+        }).catch((error: unknown) => {
+          reportCaptureWarning(
+            ctx,
+            `pi-friend auto-capture: could not save the capture cursor (${
+              formatErrorChain(error)
+            }).`,
+          );
+        });
       }
       debugRag("capture", {
         candidates: drafts.length,
