@@ -44,6 +44,31 @@ search, even though they are Markdown. A history entry is a copy of a memory as
 it was, so indexing one would let an outdated version answer a search as though
 it were current.
 
+### Migrating a store written before `history/`
+
+Older stores kept the same material in five places — tombstones under
+`nodes/superseded/`, recovery records, sweep preimages, archived tombstones, and
+dropped candidates — and node bodies carried a `## audit` section. Run the
+migration once, after upgrading:
+
+```sh
+python3 scripts/migrate-history.py            # prompts, then reports each step
+python3 scripts/migrate-history.py --dry-run  # counts only, changes nothing
+```
+
+It reads the store location from the configuration, moves tombstones into
+`history/deleted/` as the nodes they were before deletion, moves dropped
+candidates into `history/dropped/`, strips `## audit` from `nodes/` and
+`staging/`, removes the five old locations, and drops configuration options that
+no longer exist. Every step prints what it did or why it was skipped. A file it
+cannot convert is left exactly where it is, and the directory around it is not
+removed while that file remains, so a partial failure is visible rather than
+silently destructive.
+
+Audit sections cannot be reconstructed into history, and preimages are the only
+remaining copy of versions written before `history/` existed; the confirmation
+prompt says both, because both are lost.
+
 Override the root in `~/.pi/agent/pi-friend/pi-friend-memory.yml`:
 
 ```yaml
