@@ -16,6 +16,8 @@ import {
   recentTurnStart,
   serializeCaptureTranscript,
 } from "../../src/memory/capture.ts";
+import { CAPTURE_SYSTEM_PROMPT } from "../../src/memory/prompts.ts";
+import { MEMORY_TYPES, isQuarantinedMemoryType } from "../../src/memory/schema.ts";
 
 test("capture transcript includes user and custom text but omits binary data", () => {
   const entries: SessionEntry[] = [
@@ -92,6 +94,20 @@ test("an unknown cursor is bounded to the most recent turns", () => {
   assert.equal(recentTurnStart(entries, 0), 0);
   assert.equal(recentTurnStart(entries, Number.NaN), 0);
   assert.equal(recentTurnStart([], 3), 0);
+});
+
+test("the capture prompt offers exactly the capture-capable memory types", () => {
+  const line = CAPTURE_SYSTEM_PROMPT.split("\n").find((entry) =>
+    entry.includes("`type` must be exactly one of"),
+  );
+  assert.ok(line, "the capture prompt must name its type vocabulary");
+  const offered = [...line.matchAll(/`([a-z-]+)`/gu)]
+    .map((match) => match[1])
+    .filter((value) => value !== "type");
+  const expected = MEMORY_TYPES.filter(
+    (type) => !isQuarantinedMemoryType(type),
+  );
+  assert.deepEqual(offered, expected);
 });
 
 test("capture prompt carries the transcript guard and candidate limit", () => {
