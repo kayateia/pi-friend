@@ -15,6 +15,20 @@ import { SWEEP_SYSTEM_PROMPT } from "./prompts.ts";
 /** One action a sweep decision may request. `drop` needs `allow_drop`. */
 export type SweepAction = "promote" | "merge" | "drop";
 
+/**
+ * Response budget for one sweep request.
+ *
+ * The prompt asks for one decision per candidate and does not cap how many
+ * candidates it sends, so the budget has to fit the largest realistic batch: a
+ * decision with its reason runs 30-50 tokens, and a store with 200 staged
+ * candidates needs far more than the 3,000 this used to allow. The previous
+ * value truncated the JSON mid-array on a 70-candidate queue, which reaches
+ * `parseSweepResponse` as "must contain a decisions array" and fails the whole
+ * run. A model that stops early for quality reasons costs nothing here; a model
+ * cut off mid-object costs the entire sweep.
+ */
+export const SWEEP_MAX_TOKENS = 15_000;
+
 /** One model judgment for a staging candidate. */
 export interface SweepDecision {
   slug: string;
@@ -151,7 +165,7 @@ export async function runSweepModel(
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
         : AbortSignal.timeout(30_000),
-      maxTokens: 3_000,
+      maxTokens: SWEEP_MAX_TOKENS,
     },
   );
 
