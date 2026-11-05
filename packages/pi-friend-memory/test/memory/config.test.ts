@@ -375,6 +375,40 @@ test("invalid auto-capture settings fail closed", () => {
   }
 });
 
+test("history retention is parsed and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  assert.equal(
+    parseMemoryConfig("memory: {}\n", configPath).history.keepDays,
+    30,
+  );
+  assert.equal(
+    parseMemoryConfig(
+      "memory:\n  history:\n    keep_days: 7\n",
+      configPath,
+    ).history.keepDays,
+    7,
+  );
+  // Zero is a real setting: keep every version.
+  assert.equal(
+    parseMemoryConfig(
+      "memory:\n  history:\n    keep_days: 0\n",
+      configPath,
+    ).history.keepDays,
+    0,
+  );
+  for (const bad of ["-1", "1.5", '"7"', "36501"]) {
+    assert.throws(
+      () =>
+        parseMemoryConfig(
+          `memory:\n  history:\n    keep_days: ${bad}\n`,
+          configPath,
+        ),
+      MemoryConfigError,
+      bad,
+    );
+  }
+});
+
 test("sweep settings are parsed and validated", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(

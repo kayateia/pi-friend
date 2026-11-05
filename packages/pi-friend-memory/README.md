@@ -358,6 +358,14 @@ the next sweep. Preimages are on their way out: `history/` already keeps the
 previous wording of an edited memory, and dropped candidates keep their own
 copies under `history/dropped/`.
 
+`memory.history.keep_days` (default `30`, `0` keeps everything) bounds how long
+previous versions survive. Pruning runs twice, both bounded: the sweep walks
+`history/` once a day, and writing a version prunes only that slug's directory,
+so an edit never pays for the size of the tree. Retention is per file, which
+means a memory that lives for a year loses its oldest versions while keeping the
+recent ones — "the version before the most recent edit" is really "the newest one
+still on disk".
+
 Set `memory.sweep.background: true` to schedule the sweep on the next event-loop
 task instead of making agent settlement wait for its model calls. The sweep
 holds an exclusive memory-mutation lock while it runs, so interactive memory

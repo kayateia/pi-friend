@@ -15,6 +15,8 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
+  stat,
   unlink,
 } from "node:fs/promises";
 import * as path from "node:path";
@@ -225,6 +227,62 @@ export class MemoryStore {
       )
       .map((entry) => `${relativeDirectory}/${entry.name}`)
       .sort();
+  }
+
+  /**
+   * Lists immediate subdirectories of one directory in the store.
+   *
+   * Used by history retention, which prunes inside a named directory and needs
+   * to know which slugs have one.
+   */
+  async listDirectories(relativeDirectory: string): Promise<string[]> {
+    const absolute = resolveWithin(this.root, relativeDirectory);
+    let entries;
+    try {
+      entries = await readdir(absolute, { withFileTypes: true });
+    } catch (error) {
+      if (getErrorCode(error) === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    return entries
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+      .map((entry) => `${relativeDirectory}/${entry.name}`)
+      .sort();
+  }
+
+  /** Returns a file's modification time, or null when it is absent. */
+  async fileModifiedAt(relativePath: string): Promise<Date | null> {
+    const target = resolveWithin(this.root, relativePath);
+    try {
+      const stats = await stat(target);
+      return stats.mtime;
+    } catch (error) {
+      if (getErrorCode(error) === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** Removes a directory only when it is empty; returns whether it did. */
+  async removeDirectoryIfEmpty(relativeDirectory: string): Promise<boolean> {
+    const absolute = resolveWithin(this.root, relativeDirectory);
+    try {
+      const entries = await readdir(absolute);
+      if (entries.length > 0) {
+        return false;
+      }
+      await rmdir(absolute);
+      return true;
+    } catch (error) {
+      const code = getErrorCode(error);
+      if (code === "ENOENT" || code === "ENOTEMPTY" || code === "EEXIST") {
+        return false;
+      }
+      throw error;
+    }
   }
 
   /** Appends text to an internal append-only file. */

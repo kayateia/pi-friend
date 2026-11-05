@@ -153,3 +153,123 @@ export async function listHistoryVersions(
   }
   return store.listDirectoryMarkdown(`history/${kind}/${validSlug}`);
 }
+
+/** What one retention pass removed, and what it could not remove. */
+export interface HistoryPruneResult {
+  removed: number;
+  failed: string[];
+}
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+
+/**
+ * Deletes history files older than `memory.history.keep_days`.
+ *
+ * Runs at sweep time rather than on every message: a sweep already walks the
+ * store once a day, and retention is not urgent enough to scan directories on a
+ * chat turn. Writes prune their own slug as they go, which is one directory
+ * lookup rather than a tree walk.
+ *
+ * `keepDays` of 0 keeps everything. The returned count is what the sweep log
+ * reports; individual failures are collected rather than thrown, so one
+ * unreadable file does not stop the rest of the pass.
+ */
+export async function pruneHistory(
+  store: MemoryStore,
+  now: Date = new Date(),
+): Promise<HistoryPruneResult> {
+  const keepDays = store.config.history.keepDays;
+  if (keepDays <= 0) {
+    return { removed: 0, failed: [] };
+  }
+  const cutoff = now.getTime() - keepDays * DAY_MS;
+  const result: HistoryPruneResult = { removed: 0, failed: [] };
+
+  for (const kind of VERSIONED_HISTORY_KINDS) {
+    for (const directory of await store.listDirectories(`history/${kind}`)) {
+      const pruned = await pruneVersionsIn(store, directory, cutoff);
+      result.removed += pruned.removed;
+      result.failed.push(...pruned.failed);
+      if (pruned.removed > 0) {
+        await store.removeDirectoryIfEmpty(directory).catch(() => false);
+      }
+    }
+  }
+
+  for (const kind of ["deleted", "dropped"] as const) {
+    for (const relativePath of await store.listDirectoryMarkdown(
+      `history/${kind}`,
+    )) {
+      try {
+        const modified = await store.fileModifiedAt(relativePath);
+        if (modified !== null && modified.getTime() < cutoff) {
+          await store.removeTextFile(relativePath);
+          result.removed += 1;
+        }
+      } catch (error) {
+        result.failed.push(`${relativePath}: ${describeError(error)}`);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Prunes one slug's stored versions, called after a version is written.
+ *
+ * Only that slug's directory is read, so editing a memory does not pay for the
+ * size of `history/`.
+ */
+export async function pruneHistorySlug(
+  store: MemoryStore,
+  kind: HistoryKind,
+  slug: string,
+  now: Date = new Date(),
+): Promise<number> {
+  const keepDays = store.config.history.keepDays;
+  if (keepDays <= 0 || !VERSIONED_HISTORY_KINDS.includes(kind)) {
+    return 0;
+  }
+  const directory = `history/${kind}/${validateSlug(slug)}`;
+  const cutoff = now.getTime() - keepDays * DAY_MS;
+  const pruned = await pruneVersionsIn(store, directory, cutoff);
+  if (pruned.removed > 0) {
+    await store.removeDirectoryIfEmpty(directory).catch(() => false);
+  }
+  return pruned.removed;
+}
+
+/** Removes expired version files inside one slug directory. */
+async function pruneVersionsIn(
+  store: MemoryStore,
+  directory: string,
+  cutoff: number,
+): Promise<{ removed: number; failed: string[] }> {
+  let removed = 0;
+  const failed: string[] = [];
+  let files: string[];
+  try {
+    files = await store.listDirectoryMarkdown(directory);
+  } catch (error) {
+    return { removed, failed: [`${directory}: ${describeError(error)}`] };
+  }
+  for (const relativePath of files) {
+    const captured = Date.parse(versionTimestamp(relativePath));
+    if (!Number.isFinite(captured) || captured >= cutoff) {
+      continue;
+    }
+    try {
+      await store.removeTextFile(relativePath);
+      removed += 1;
+    } catch (error) {
+      failed.push(`${relativePath}: ${describeError(error)}`);
+    }
+  }
+  return { removed, failed };
+}
+
+/** Formats an error's message without assuming its shape. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

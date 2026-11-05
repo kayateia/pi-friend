@@ -139,6 +139,7 @@ export interface MemoryConfig {
   injection: RagInjectionConfig;
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
+  history: HistoryConfig;
   dreaming: DreamingConfig;
   search: SearchConfig;
   vector: VectorConfig;
@@ -189,6 +190,55 @@ export function defaultAutoCaptureConfig(): AutoCaptureConfig {
 }
 
 /** Returns the default daily-sweep policy. */
+/** How long previous versions are kept under `history/`. */
+export interface HistoryConfig {
+  /**
+   * Age in days after which a history file is pruned. `0` keeps everything.
+   *
+   * History is invisible to search, RAG and the model, so this bounds disk use
+   * rather than ranking quality: an edit from last year costs an inode, not a
+   * prompt. Pruning is per file, so a long-lived memory loses its oldest
+   * versions while keeping the recent ones.
+   */
+  keepDays: number;
+}
+
+/** History retention used when the configuration says nothing. */
+export function defaultHistoryConfig(): HistoryConfig {
+  return { keepDays: 30 };
+}
+
+function parseHistory(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): HistoryConfig {
+  const config = defaultHistoryConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.history must be a YAML object.`,
+    );
+  }
+  collectUnknownKeys(value, "history", `${configPath}: memory.history`, warnings);
+  if (value.keep_days !== undefined) {
+    if (
+      typeof value.keep_days !== "number" ||
+      !Number.isInteger(value.keep_days) ||
+      value.keep_days < 0 ||
+      value.keep_days > 36500
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.history.keep_days must be an integer from 0 to 36500 (0 keeps everything).`,
+      );
+    }
+    config.keepDays = value.keep_days;
+  }
+  return config;
+}
+
 export function defaultSweepConfig(): SweepConfig {
   return {
     enabled: true,
@@ -277,6 +327,7 @@ export function parseMemoryConfig(
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
+      history: defaultHistoryConfig(),
       dreaming: defaultDreamingConfig(),
       vector: defaultVectorConfig(),
       embeddings: defaultEmbeddingsConfig(),
@@ -337,6 +388,7 @@ export function parseMemoryConfig(
       warnings,
     ),
     sweep: parseSweep(memoryConfig.sweep, configPath, warnings),
+    history: parseHistory(memoryConfig.history, configPath, warnings),
     dreaming: parseDreaming(memoryConfig.dreaming, configPath, warnings),
     vector: parseVector(memoryConfig.vector, configPath, warnings),
     embeddings: parseEmbeddings(memoryConfig.embeddings, configPath, warnings),
@@ -371,6 +423,7 @@ export async function loadMemoryConfig(
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
+        history: defaultHistoryConfig(),
         dreaming: defaultDreamingConfig(),
         vector: defaultVectorConfig(),
         embeddings: defaultEmbeddingsConfig(),
@@ -1000,6 +1053,7 @@ const KNOWN_KEYS = {
     "injection",
     "auto_capture",
     "sweep",
+    "history",
     "dreaming",
     "embeddings",
   ],
@@ -1025,6 +1079,7 @@ const KNOWN_KEYS = {
     "preimage_keep",
     "min_guarded_batch_size",
   ],
+  history: ["keep_days"],
   dreaming: ["enabled", "max_nodes", "model", "prompt", "prompt_append"],
   embeddings: ["model"],
 } as const;

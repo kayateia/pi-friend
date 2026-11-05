@@ -95,6 +95,13 @@ memory:
     # prompt_append: |
     #   Prefer promoting a distinct new fact over merging it into a broad node.
 
+  # Previous versions live under history/ and are invisible to search, RAG and
+  # the model. This bounds the disk they take. Pruning runs at sweep time, and
+  # prunes one slug's directory whenever a version is written. `0` keeps every
+  # version forever.
+  history:
+    keep_days: 30
+
   dreaming:
     enabled: true
     max_nodes: 4

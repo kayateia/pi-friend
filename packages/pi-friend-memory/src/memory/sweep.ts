@@ -16,6 +16,7 @@ import type {
 import type { MemoryNodeService } from "./service.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
 import { planCandidateDecay } from "./decay.ts";
+import { pruneHistory } from "./history.ts";
 import {
   DREAM_SYSTEM_PROMPT,
   resolveSweepSystemPrompt,
@@ -50,6 +51,7 @@ export interface SweepResult {
   merged: number;
   dropped: number;
   decayUpdates: number;
+  historyPruned: number;
   preimage?: string;
   dreamSlug?: string;
   dreamError?: string;
@@ -123,6 +125,7 @@ async function runDailySweepLocked(
   let merged = 0;
   let dropped = 0;
   let decayUpdates = 0;
+  let historyPruned = 0;
   let dreamSlug: string | undefined;
   let dreamError: string | undefined;
 
@@ -219,6 +222,13 @@ async function runDailySweepLocked(
 
     options.signal?.throwIfAborted();
     decayUpdates = (await service.recomputeDecay()).length;
+    // Retention runs here rather than on a chat turn: one directory walk a day
+    // is enough for a bound on disk, and a sweep already holds the lock.
+    const pruned = await pruneHistory(service.store);
+    historyPruned = pruned.removed;
+    for (const failure of pruned.failed) {
+      options.reportError?.("history retention", new Error(failure));
+    }
     options.signal?.throwIfAborted();
 
     if (options.dreaming?.enabled) {
@@ -274,6 +284,7 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
+      historyPruned,
       preimage,
       dreamSlug,
       dreamError,
@@ -293,6 +304,7 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
+      historyPruned,
       preimage,
       ...(dreamSlug === undefined ? {} : { dreamSlug }),
       ...(dreamError === undefined ? {} : { dreamError }),
@@ -308,6 +320,7 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
+      historyPruned,
       preimage,
       dreamSlug,
       dreamError,
@@ -332,6 +345,7 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
+      historyPruned,
       ...(preimage === undefined ? {} : { preimage }),
       ...(dreamSlug === undefined ? {} : { dreamSlug }),
       ...(dreamError === undefined ? {} : { dreamError }),
@@ -430,6 +444,7 @@ async function appendSweepLog(
     merged: number;
     dropped: number;
     decayUpdates: number;
+    historyPruned: number;
     dreamSlug?: string;
     dreamError?: string;
     preimage?: string;
@@ -449,6 +464,7 @@ async function appendSweepLog(
     `- Merged: ${summary.merged}`,
     `- Dropped/archived: ${summary.dropped}`,
     `- Decay updates: ${summary.decayUpdates}`,
+    `- History pruned: ${summary.historyPruned}`,
     `- Dream: ${summary.dreamSlug ?? "none"}`,
     ...(summary.dreamError ? [`- Dream error: ${summary.dreamError}`] : []),
     ...(summary.error ? [`- Error: ${summary.error}`] : []),
@@ -533,6 +549,7 @@ function emptyResult(ran: boolean): SweepResult {
     merged: 0,
     dropped: 0,
     decayUpdates: 0,
+    historyPruned: 0,
   };
 }
 

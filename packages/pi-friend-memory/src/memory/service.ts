@@ -16,10 +16,12 @@ import {
 } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { appendAuditEntry } from "./audit.ts";
+import type { HistoryKind } from "./history.ts";
 import {
   VERSIONED_HISTORY_KINDS,
   historyEntryPath,
   listHistoryVersions,
+  pruneHistorySlug,
   readHistoryEntry,
   stripHistoryFields,
   versionTimestamp,
@@ -530,6 +532,8 @@ export class MemoryNodeService {
           timestamp: now,
           node: cloneNode(candidate),
         });
+        await this.pruneHistoryFor("merged", target.slug);
+        await this.pruneHistoryFor("merged", candidate.slug);
 
         const merged = mergeCandidate(target, candidate, now);
         await this.repository.write(merged, "canonical");
@@ -658,6 +662,7 @@ export class MemoryNodeService {
           body: node.body,
         },
       });
+      await this.pruneHistoryFor("edited", node.slug);
 
       await this.repository.write(updated);
       return updated;
@@ -920,6 +925,18 @@ export class MemoryNodeService {
 
     throw new MemoryServiceError(
       `Could not allocate a slug for "${input.title}".`,
+    );
+  }
+
+  /**
+   * Applies retention to one slug after a version is written.
+   *
+   * Per-slug rather than whole-tree: an edit should not pay for the size of
+   * `history/`, and the sweep's daily pass catches anything this misses.
+   */
+  private async pruneHistoryFor(kind: HistoryKind, slug: string): Promise<void> {
+    await pruneHistorySlug(this.repository.store, kind, slug).catch(
+      (error: unknown) => logError("history retention", error),
     );
   }
 
