@@ -6,12 +6,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ParsedMemoryNode } from "./schema.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { DREAM_SYSTEM_PROMPT } from "./prompts.ts";
+import { resolveConfiguredModel, runNestedModel } from "./model-call.ts";
 
 /** Model-produced dream narrative and selected source nodes. */
 export interface DreamDraft {
@@ -131,48 +132,26 @@ export async function runDreamModel(
   reportWarning: (message: string) => void,
   signal?: AbortSignal,
   systemPrompt: string = DREAM_SYSTEM_PROMPT,
+  thinkingLevel?: ThinkingLevel,
 ): Promise<DreamDraft> {
-  const model = resolveDreamModel(ctx, configuredModel, reportWarning);
+  const model = resolveConfiguredModel(
+    ctx,
+    configuredModel,
+    "memory.dreaming.model",
+    reportWarning,
+  );
   if (!model) {
     throw new Error("No model is available for dreaming.");
   }
 
-  const stream = ctx.modelRegistry.streamSimple(
-    model,
-    {
-      systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: buildDreamPrompt(shortlist, maxNodes),
-          timestamp: Date.now(),
-        },
-      ],
-    },
-    {
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-        : AbortSignal.timeout(30_000),
-      maxTokens: 2_000,
-    },
-  );
-
-  let finalMessage: AssistantMessage | undefined;
-  for await (const event of stream) {
-    if (event.type === "done") {
-      finalMessage = event.message;
-    } else if (event.type === "error") {
-      throw new Error(
-        event.error.errorMessage ?? "Dream model request failed.",
-      );
-    }
-  }
-  if (!finalMessage) {
-    throw new Error("Dream model returned no final message.");
-  }
-  const response = finalMessage.content
-    .flatMap((block) => (block.type === "text" ? [block.text] : []))
-    .join("\n");
+  const response = await runNestedModel(ctx, model, {
+    systemPrompt,
+    userContent: buildDreamPrompt(shortlist, maxNodes),
+    maxTokens: 2_000,
+    timeoutMs: 30_000,
+    ...(signal === undefined ? {} : { signal }),
+    ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+  });
   const parsed = parseDreamResponse(
     response,
     shortlist.map((node) => node.slug),
@@ -182,33 +161,6 @@ export async function runDreamModel(
     ...parsed,
     agents: [model.id],
   };
-}
-
-/** Resolves the configured dream model or falls back to the session model. */
-function resolveDreamModel(
-  ctx: ExtensionContext,
-  configuredModel: string | undefined,
-  reportWarning: (message: string) => void,
-): ExtensionContext["model"] {
-  if (!configuredModel) return ctx.model;
-  const slash = configuredModel.indexOf("/");
-  if (slash <= 0 || slash === configuredModel.length - 1) {
-    reportWarning(
-      `pi-friend memory.dreaming.model "${configuredModel}" must use provider/model-id; using the session model.`,
-    );
-    return ctx.model;
-  }
-  const found = ctx.modelRegistry.find(
-    configuredModel.slice(0, slash),
-    configuredModel.slice(slash + 1),
-  );
-  if (!found) {
-    reportWarning(
-      `pi-friend memory.dreaming.model "${configuredModel}" was not found; using the session model.`,
-    );
-    return ctx.model;
-  }
-  return found;
 }
 
 /** Extracts one JSON object from text or a fenced code block. */
