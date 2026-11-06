@@ -62,7 +62,6 @@ test("staging is idempotent and promotion creates an active canonical node", asy
     const promoted = await service.promoteCandidate(first.node.slug);
     assert.equal(promoted.merged, false);
     assert.equal(promoted.node.frontMatter.status, "active");
-    assert.match(promoted.node.body, /promoted from staging/);
     assert.equal(await service.read(first.node.slug, "staging"), null);
     assert.equal(
       (await service.read(first.node.slug))?.frontMatter.status,
@@ -117,7 +116,6 @@ test("promotion merges semantic near-duplicates and preserves links", async () =
       assert.equal(promoted.node.slug, canonical.slug);
       assert.match(promoted.node.body, /The kitchen has warm light\./);
       assert.match(promoted.node.body, /The cozy kitchen is a favourite place\./);
-      assert.match(promoted.node.body, /merged staging candidate cozy-kitchen/);
       assert.deepEqual(promoted.node.frontMatter.tags, [
         "home",
         "comfort",

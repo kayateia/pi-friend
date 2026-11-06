@@ -6,11 +6,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ParsedMemoryNode } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { SWEEP_SYSTEM_PROMPT } from "./prompts.ts";
+import { resolveConfiguredModel, runNestedModel } from "./model-call.ts";
 
 /** One action a sweep decision may request. `drop` needs `allow_drop`. */
 export type SweepAction = "promote" | "merge" | "drop";
@@ -143,83 +144,34 @@ export async function runSweepModel(
   signal?: AbortSignal,
   systemPrompt: string = SWEEP_SYSTEM_PROMPT,
   allowDrop = false,
+  thinkingLevel?: ThinkingLevel,
 ): Promise<SweepDecision[]> {
-  const model = resolveSweepModel(ctx, configuredModel, reportWarning);
+  const model = resolveConfiguredModel(
+    ctx,
+    configuredModel,
+    "memory.sweep.model",
+    reportWarning,
+  );
   if (!model) {
     throw new Error("No model is available for sweep decisions.");
   }
 
-  const stream = ctx.modelRegistry.streamSimple(
-    model,
-    {
-      systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: buildSweepPrompt(candidates, canonical, allowDrop),
-          timestamp: Date.now(),
-        },
-      ],
-    },
-    {
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-        : AbortSignal.timeout(30_000),
-      maxTokens: SWEEP_MAX_TOKENS,
-    },
-  );
-
-  let finalMessage: AssistantMessage | undefined;
-  for await (const event of stream) {
-    if (event.type === "done") {
-      finalMessage = event.message;
-    } else if (event.type === "error") {
-      throw new Error(
-        event.error.errorMessage ?? "Sweep model request failed.",
-      );
-    }
-  }
-  if (!finalMessage) {
-    throw new Error("Sweep model returned no final message.");
-  }
-  const response = finalMessage.content
-    .flatMap((block) => (block.type === "text" ? [block.text] : []))
-    .join("\n");
+  const response = await runNestedModel(ctx, model, {
+    systemPrompt,
+    userContent: buildSweepPrompt(candidates, canonical, allowDrop),
+    maxTokens: SWEEP_MAX_TOKENS,
+    timeoutMs: 30_000,
+    label: "sweep",
+    reportWarning,
+    ...(signal === undefined ? {} : { signal }),
+    ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+  });
   return parseSweepResponse(
     response,
     candidates.map((node) => node.slug),
     canonical.map((node) => node.slug),
     allowDrop,
   );
-}
-
-/** Resolves the configured sweep model or falls back to the session model. */
-function resolveSweepModel(
-  ctx: ExtensionContext,
-  configuredModel: string | undefined,
-  reportWarning: (message: string) => void,
-): ExtensionContext["model"] {
-  if (!configuredModel) {
-    return ctx.model;
-  }
-  const slash = configuredModel.indexOf("/");
-  if (slash <= 0 || slash === configuredModel.length - 1) {
-    reportWarning(
-      `pi-friend memory.sweep.model "${configuredModel}" must use provider/model-id; using the session model.`,
-    );
-    return ctx.model;
-  }
-  const found = ctx.modelRegistry.find(
-    configuredModel.slice(0, slash),
-    configuredModel.slice(slash + 1),
-  );
-  if (!found) {
-    reportWarning(
-      `pi-friend memory.sweep.model "${configuredModel}" was not found; using the session model.`,
-    );
-    return ctx.model;
-  }
-  return found;
 }
 
 /** Extracts one JSON object from text or a fenced code block. */

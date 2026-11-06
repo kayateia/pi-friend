@@ -8,6 +8,7 @@
 
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import * as path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parse } from "yaml";
@@ -38,6 +39,13 @@ export interface AutoCaptureConfig {
   maxCandidates: number;
   /** Optional provider/model-id override for the capture model. */
   model?: string;
+  /**
+   * Thinking level to request from the configured model. Providers accept
+   * different levels, so a rejected level is retried once without it; leaving
+   * this out uses the provider default.
+   */
+  thinkingLevel?: ThinkingLevel;
+
   /** Optional replacement for the capture model's system prompt. */
   prompt?: string;
   /** Optional text appended after the built-in capture system prompt. */
@@ -51,6 +59,13 @@ export interface SweepConfig {
   background: boolean;
   /** Optional provider/model-id override for candidate decisions. */
   model?: string;
+  /**
+   * Thinking level to request from the configured model. Providers accept
+   * different levels, so a rejected level is retried once without it; leaving
+   * this out uses the provider default.
+   */
+  thinkingLevel?: ThinkingLevel;
+
   /** Optional replacement for the sweep model's system prompt. */
   prompt?: string;
   /** Optional text appended after the built-in sweep system prompt. */
@@ -72,10 +87,70 @@ export interface DreamingConfig {
   maxNodes: number;
   /** Optional provider/model-id override for dream selection and writing. */
   model?: string;
+  /**
+   * Thinking level to request from the configured model. Providers accept
+   * different levels, so a rejected level is retried once without it; leaving
+   * this out uses the provider default.
+   */
+  thinkingLevel?: ThinkingLevel;
+
   /** Optional replacement for the dream model's system prompt. */
   prompt?: string;
   /** Optional text appended after the built-in dream system prompt. */
   promptAppend?: string;
+}
+
+/** Configuration for the pass that writes a consolidated memory body. */
+export interface MergeConfig {
+  /** Optional provider/model-id override for the merge writer. */
+  model?: string;
+  /**
+   * Thinking level to request from the configured model. Providers accept
+   * different levels, so a rejected level is retried once without it; leaving
+   * this out uses the provider default.
+   */
+  thinkingLevel?: ThinkingLevel;
+  /** Optional replacement for the merge writer's system prompt. */
+  prompt?: string;
+  /** Optional text appended after the built-in merge system prompt. */
+  promptAppend?: string;
+}
+
+/** Merge writer settings used when the configuration says nothing. */
+export function defaultMergeConfig(): MergeConfig {
+  return {};
+}
+
+function parseMerge(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): MergeConfig {
+  const config = defaultMergeConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.merge must be a YAML object.`,
+    );
+  }
+  collectUnknownKeys(value, "merge", `${configPath}: memory.merge`, warnings);
+  if (value.model !== undefined) {
+    if (
+      typeof value.model !== "string" ||
+      !value.model.includes("/") ||
+      value.model.trim().startsWith("/") ||
+      value.model.trim().endsWith("/")
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.merge.model must be a provider/model-id string.`,
+      );
+    }
+    config.model = value.model.trim();
+  }
+  applyModelPrompt(config, value, configPath, "memory.merge", "merge", warnings);
+  return config;
 }
 
 /** Configuration for search defaults shared by tools and retrieval. */
@@ -131,6 +206,7 @@ export interface MemoryConfig {
   injection: RagInjectionConfig;
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
+  merge: MergeConfig;
   history: HistoryConfig;
   dreaming: DreamingConfig;
   search: SearchConfig;
@@ -318,6 +394,7 @@ export function parseMemoryConfig(
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
+      merge: defaultMergeConfig(),
       history: defaultHistoryConfig(),
       dreaming: defaultDreamingConfig(),
       vector: defaultVectorConfig(),
@@ -379,6 +456,7 @@ export function parseMemoryConfig(
       warnings,
     ),
     sweep: parseSweep(memoryConfig.sweep, configPath, warnings),
+    merge: parseMerge(memoryConfig.merge, configPath, warnings),
     history: parseHistory(memoryConfig.history, configPath, warnings),
     dreaming: parseDreaming(memoryConfig.dreaming, configPath, warnings),
     vector: parseVector(memoryConfig.vector, configPath, warnings),
@@ -414,6 +492,7 @@ export async function loadMemoryConfig(
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
+        merge: defaultMergeConfig(),
         history: defaultHistoryConfig(),
         dreaming: defaultDreamingConfig(),
         vector: defaultVectorConfig(),
@@ -967,7 +1046,7 @@ function parseEmbeddings(
 }
 
 /** Sections whose system prompt can be replaced or extended by config. */
-type PromptSection = "capture" | "sweep" | "dream";
+type PromptSection = "capture" | "sweep" | "dream" | "merge";
 
 /**
  * Reads `prompt` and `prompt_append` for one internal model section.
@@ -976,8 +1055,22 @@ type PromptSection = "capture" | "sweep" | "dream";
  * never combined with appending, because the result would depend on an implicit
  * precedence rule nobody can see in the file.
  */
+/** Thinking levels a model request may ask for, in pi's own vocabulary. */
+export const CONFIG_THINKING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const satisfies readonly ThinkingLevel[];
+
 function applyModelPrompt(
-  config: { prompt?: string; promptAppend?: string },
+  config: {
+    prompt?: string;
+    promptAppend?: string;
+    thinkingLevel?: ThinkingLevel;
+  },
   value: Record<string, unknown>,
   configPath: string,
   field: string,
@@ -985,6 +1078,18 @@ function applyModelPrompt(
   warnings: string[],
   options: { allowDrop?: boolean } = {},
 ): void {
+  if (value.thinking_level !== undefined) {
+    const level = value.thinking_level;
+    if (
+      typeof level !== "string" ||
+      !(CONFIG_THINKING_LEVELS as readonly string[]).includes(level)
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: ${field}.thinking_level must be one of ${CONFIG_THINKING_LEVELS.join(", ")}.`,
+      );
+    }
+    config.thinkingLevel = level as ThinkingLevel;
+  }
   const prompt = parseModelPrompt(value.prompt, configPath, `${field}.prompt`);
   const promptAppend = parseModelPrompt(
     value.prompt_append,
@@ -1031,6 +1136,7 @@ const KNOWN_KEYS = {
     "injection",
     "auto_capture",
     "sweep",
+    "merge",
     "history",
     "dreaming",
     "embeddings",
@@ -1046,6 +1152,7 @@ const KNOWN_KEYS = {
     "model",
     "prompt",
     "prompt_append",
+    "thinking_level",
   ],
   sweep: [
     "enabled",
@@ -1055,9 +1162,18 @@ const KNOWN_KEYS = {
     "prompt_append",
     "allow_drop",
     "min_guarded_batch_size",
+    "thinking_level",
   ],
   history: ["keep_days"],
-  dreaming: ["enabled", "max_nodes", "model", "prompt", "prompt_append"],
+  merge: ["model", "prompt", "prompt_append", "thinking_level"],
+  dreaming: [
+    "enabled",
+    "max_nodes",
+    "model",
+    "prompt",
+    "prompt_append",
+    "thinking_level",
+  ],
   embeddings: ["model"],
 } as const;
 

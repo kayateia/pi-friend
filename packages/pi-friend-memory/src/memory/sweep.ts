@@ -161,6 +161,7 @@ async function runDailySweepLocked(
           options.signal,
           resolveSweepSystemPrompt(config, config.allowDrop),
           config.allowDrop,
+          config.thinkingLevel,
         );
       }
       options.signal?.throwIfAborted();
@@ -193,16 +194,47 @@ async function runDailySweepLocked(
     }
 
     for (const decision of decisions) {
-      options.signal?.throwIfAborted();
       if (decision.action === "drop") {
+        options.signal?.throwIfAborted();
         await service.archiveCandidate(decision.slug);
         dropped += 1;
+      }
+    }
+
+    // Merges are grouped by target: several candidates landing in one memory are
+    // one consolidation, and the writer should see all of them at once rather
+    // than rewrite the target once per candidate.
+    const mergesByTarget = new Map<string, string[]>();
+    for (const decision of decisions) {
+      if (decision.action !== "merge" || decision.target === undefined) {
         continue;
       }
-      const result = await service.promoteCandidate(
-        decision.slug,
-        decision.action === "merge" ? decision.target : undefined,
-      );
+      const group = mergesByTarget.get(decision.target) ?? [];
+      group.push(decision.slug);
+      mergesByTarget.set(decision.target, group);
+    }
+    for (const [target, slugs] of mergesByTarget) {
+      options.signal?.throwIfAborted();
+      await service.mergeCandidates(target, slugs, {
+        ...(options.reportWarning === undefined
+          ? {}
+          : { reportWarning: options.reportWarning }),
+      });
+      merged += slugs.length;
+    }
+
+    for (const decision of decisions) {
+      if (decision.action !== "promote") {
+        continue;
+      }
+      options.signal?.throwIfAborted();
+      // A promotion can still become a merge: the near-duplicate path runs
+      // inside the service and goes through the same writer.
+      const result = await service.promoteCandidate(decision.slug, undefined, {
+        ...(options.reportWarning === undefined
+          ? {}
+          : { reportWarning: options.reportWarning }),
+      });
       if (result.merged) {
         merged += 1;
       } else {
@@ -249,6 +281,7 @@ async function runDailySweepLocked(
                   options.reportWarning ?? (() => {}),
                   options.signal,
                   resolveSystemPrompt(DREAM_SYSTEM_PROMPT, options.dreaming),
+                  options.dreaming.thinkingLevel,
                 )
               : (() => {
                   throw new Error("Dream model context is unavailable.");
