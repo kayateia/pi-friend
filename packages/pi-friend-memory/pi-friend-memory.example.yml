@@ -69,16 +69,12 @@ memory:
     enabled: true
     background: false
     # Offer the sweep model a `drop` action, which archives a candidate under
-    # sweeps/dropped/<run>/ instead of promoting or merging it. Off by default:
+    # history/dropped/ instead of promoting or merging it. Off by default:
     # the consolidation pass only ever adds to canonical memory unless you ask
     # for the ability to discard. Dropped candidates count against the same 25%
     # removal guard as decay, so a model cannot empty staging in one pass.
     # allow_drop: false
-    tombstone_grace_days: 30
     min_guarded_batch_size: 10
-    # Full store snapshots kept before each sweep, newest first. 0 disables
-    # preimages and prunes any existing ones at the next sweep.
-    preimage_keep: 3
     # model: openrouter/google/gemini-2.5-flash
     #
     # `prompt` replaces, `prompt_append` extends; set at most one. The parser
@@ -95,6 +91,13 @@ memory:
       Return only strict JSON.
     # prompt_append: |
     #   Prefer promoting a distinct new fact over merging it into a broad node.
+
+  # Previous versions live under history/ and are invisible to search, RAG and
+  # the model. This bounds the disk they take. Pruning runs at sweep time, and
+  # prunes one slug's directory whenever a version is written. `0` keeps every
+  # version forever.
+  history:
+    keep_days: 30
 
   dreaming:
     enabled: true

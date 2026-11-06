@@ -25,20 +25,49 @@ The default tree is:
 ```text
 ~/.pi/agent/pi-friend/memory/
 ├── nodes/
-│   └── superseded/
 ├── staging/
+├── history/
+│   ├── deleted/
+│   ├── dropped/
+│   ├── edited/
+│   ├── merged/
+│   └── split/
 ├── access-log
 ├── sweeps/
-├── index/
-└── recovery/
+└── index/
 ```
 
-`nodes/` and `staging/` are memory and are searchable. `sweeps/`, `index/`,
-`recovery/` and `access-log` are the extension's own bookkeeping — run logs,
-preimages, dropped and archived candidates, the vector index, recovery records —
-and are never enumerated for search, even though they are Markdown. A preimage is
-a full copy of the store from before a change, so indexing it would let an
-outdated version of a memory answer a search as though it were current.
+`nodes/` and `staging/` are memory and are searchable. `history/`, `sweeps/`,
+`index/` and `access-log` are the extension's own bookkeeping — the vector index,
+run logs, and every previous version of a memory — and are never enumerated for
+search, even though they are Markdown. A history entry is a copy of a memory as
+it was, so indexing one would let an outdated version answer a search as though
+it were current.
+
+### Migrating a store written before `history/`
+
+Older stores kept the same material in five places — tombstones under
+`nodes/superseded/`, recovery records, sweep preimages, archived tombstones, and
+dropped candidates — and node bodies carried a `## audit` section. Run the
+migration once, after upgrading:
+
+```sh
+python3 scripts/migrate-history.py            # prompts, then reports each step
+python3 scripts/migrate-history.py --dry-run  # counts only, changes nothing
+```
+
+It reads the store location from the configuration, moves tombstones into
+`history/deleted/` as the nodes they were before deletion, moves dropped
+candidates into `history/dropped/`, strips `## audit` from `nodes/` and
+`staging/`, removes the five old locations, and drops configuration options that
+no longer exist. Every step prints what it did or why it was skipped. A file it
+cannot convert is left exactly where it is, and the directory around it is not
+removed while that file remains, so a partial failure is visible rather than
+silently destructive.
+
+Audit sections cannot be reconstructed into history, and preimages are the only
+remaining copy of versions written before `history/` existed; the confirmation
+prompt says both, because both are lost.
 
 Override the root in `~/.pi/agent/pi-friend/pi-friend-memory.yml`:
 
@@ -192,7 +221,7 @@ memories. Debug-disabled runs inject nothing in that case.
 decide what is skipped.
 
 The paths the extension owns inside its root are never imported, even when a
-configured path contains them: `nodes/`, `staging/`, `sweeps/`, `recovery/`,
+configured path contains them: `nodes/`, `staging/`, `history/`, `sweeps/`,
 `index/`, and `access-log`. Without that, pointing `index_paths` at a directory
 that contains the store — `~/identity`, when the store lives at
 `~/identity/pi-friend-memory` — would index every memory file a second time as a
@@ -267,15 +296,22 @@ Pi reads the extension entry point from the `pi.extensions` field in
 - `memory_add` creates a canonical active node, derives a unique slug unless one
   is supplied, and records speaker attribution.
 - `memory_edit` updates an existing node while preserving creation and usage
-  metadata and appending a dated audit entry.
-- `memory_delete` moves exactly one matched node into superseded storage after
-  writing a durable recovery record.
-- `memory_restore` restores a deleted node from its recovery ID without
-  overwriting newer canonical content.
+  metadata, and stores the version it replaces under `history/edited/<slug>/`
+  with the edit's reason.
+- `memory_delete` copies exactly one matched node into
+  `history/deleted/<slug>.md` before removing it from `nodes/`.
+- `memory_restore` copies a memory back out of history by slug, optionally
+  naming a version. Without a timestamp it prefers the deletion entry, then the
+  newest stored version, then a dropped candidate. A live node with the same
+  slug is replaced, and its text is archived under `history/edited/` first;
+  a dropped candidate goes back to `staging/` instead, and is refused if a
+  memory or candidate already holds the name. Restoring a split source removes
+  the children that split recorded.
 - `memory_promote` promotes one staging candidate, merging semantic
-  near-duplicates into an existing canonical node.
-- `memory_read` reads a complete node from canonical, staging, or superseded
-  storage.
+  near-duplicates into an existing canonical node. Before a merge rewrites the
+  target, both sides are stored under `history/merged/<slug>/`, because those
+  are the only copies that will not exist afterwards.
+- `memory_read` reads a complete node from canonical or staging storage.
 - Search results and recalled blocks both carry attribution — `Heard from: Aria; Iri
   (uncertain) — relayed` — because in a plural system who said something is part of
   what the memory means, and it should not cost a second tool call.
@@ -313,17 +349,20 @@ and audit history.
 ## Daily sweep and decay
 
 The daily sweep runs at most once per local calendar day after an agent run
-settles. Before mutation it writes a full canonical preimage under
-`sweeps/preimages/`. It always advances `sweeps/state.json`, including failed
-attempts, and appends a dated decision log under `sweeps/`.
+settles. It always advances `sweeps/state.json`, including failed attempts, and
+appends a dated decision log under `sweeps/`. Before the history tree it also
+took a full canonical snapshot under `sweeps/preimages/`; that is gone, because
+every operation it was protecting now stores its own previous version.
 
-`memory.sweep.preimage_keep` bounds those snapshots: the newest *n* are kept and
-older runs are pruned, so a full store copy per sweep cannot grow without limit.
-`0` disables preimages entirely — none is taken and existing ones are removed at
-the next sweep. The trade-off is narrow: recovery records and the superseded
-tombstones cover deletions, and dropped or archived candidates keep their own
-copies, so what preimages uniquely preserve is the *previous wording* of an edited
-or merged memory.
+`memory.history.keep_days` (default `30`, `0` keeps everything) bounds how long
+previous versions survive. Pruning runs twice, both bounded: the sweep walks
+`history/` once a day, and writing a version prunes only that slug's directory,
+so an edit never pays for the size of the tree. Retention is per file, which
+means a memory that lives for a year loses its oldest versions while keeping the
+recent ones — "the version before the most recent edit" is really "the newest one
+still on disk".
+
+
 
 Set `memory.sweep.background: true` to schedule the sweep on the next event-loop
 task instead of making agent settlement wait for its model calls. The sweep
@@ -347,9 +386,8 @@ The 25% removal guard applies only when a sweep has at least
 `min_guarded_batch_size` candidates. Smaller batches can remove or consolidate
 above that ratio without deadlocking on a tiny working set.
 
-Superseded tombstones older than `tombstone_grace_days` are archived under
-`sweeps/archived/<run-id>/`. They remain searchable and are not irreversibly
-deleted.
+Tombstones no longer exist: a deletion copies the node to `history/deleted/`
+and the entry is what `memory_restore` reads.
 
 ## Dreaming
 

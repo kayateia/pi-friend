@@ -18,7 +18,14 @@ import { validateSlug } from "./paths.ts";
 import { MemoryStore } from "./store.ts";
 
 /** Node areas that have different lifecycle and location rules. */
-export type MemoryNodeArea = "canonical" | "superseded" | "staging";
+export type MemoryNodeArea = "canonical" | "staging";
+
+/**
+ * Tombstoned nodes from before the history tree still live here. They are not
+ * an area any more — nothing reads or writes them — but they must stay out of
+ * the canonical listing until the migration deletes them.
+ */
+const LEGACY_TOMBSTONE_PREFIX = "nodes/superseded/";
 
 /** One resolved node location. */
 interface NodeLocation {
@@ -64,7 +71,7 @@ export class MemoryNodeRepository {
    * Validates and atomically writes one node into its lifecycle area.
    *
    * Moving a node between areas remains a separate operation so callers can
-   * add the required recovery records and sweep logs.
+   * add the required history entries and sweep logs.
    */
   async write(
     node: ParsedMemoryNode,
@@ -124,11 +131,6 @@ function nodeLocation(slug: string, area: MemoryNodeArea): NodeLocation {
         kind: "node",
         relativePath: `nodes/${validSlug}.md`,
       };
-    case "superseded":
-      return {
-        kind: "node",
-        relativePath: `nodes/superseded/${validSlug}.md`,
-      };
     case "staging":
       return {
         kind: "staging-candidate",
@@ -146,10 +148,8 @@ function belongsToArea(
     case "canonical":
       return (
         relativePath.startsWith("nodes/") &&
-        !relativePath.startsWith("nodes/superseded/")
+        !relativePath.startsWith(LEGACY_TOMBSTONE_PREFIX)
       );
-    case "superseded":
-      return relativePath.startsWith("nodes/superseded/");
     case "staging":
       return relativePath.startsWith("staging/");
   }

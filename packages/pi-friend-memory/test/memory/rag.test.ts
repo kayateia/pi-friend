@@ -102,16 +102,6 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
         status: "archived",
       }),
     );
-    await repository.write(
-      makeNode({
-        slug: "orchid-old",
-        title: "Orchid Old",
-        body: "Old orchid.",
-        decayWeight: 0,
-        status: "superseded",
-      }),
-      "superseded",
-    );
 
     const config = {
       ...defaultRagInjectionConfig(),

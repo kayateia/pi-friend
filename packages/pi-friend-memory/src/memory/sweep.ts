@@ -16,6 +16,7 @@ import type {
 import type { MemoryNodeService } from "./service.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
 import { planCandidateDecay } from "./decay.ts";
+import { pruneHistory } from "./history.ts";
 import {
   DREAM_SYSTEM_PROMPT,
   resolveSweepSystemPrompt,
@@ -39,7 +40,6 @@ interface SweepState {
   lastFailureAt?: string;
   lastError?: string;
   lastRunId?: string;
-  preimage?: string;
 }
 
 /** Summary of one daily sweep invocation. */
@@ -50,8 +50,7 @@ export interface SweepResult {
   merged: number;
   dropped: number;
   decayUpdates: number;
-  archivedTombstones: number;
-  preimage?: string;
+  historyPruned: number;
   dreamSlug?: string;
   dreamError?: string;
   error?: string;
@@ -81,7 +80,7 @@ export interface RunDailySweepOptions {
 /**
  * Runs the daily consolidation pass once when it has not succeeded today.
  *
- * A preimage is captured before mutations, state advances on every attempt,
+ * State advances on every attempt,
  * and the dated sweep log records both successful and failed outcomes.
  */
 export async function runDailySweep(
@@ -118,13 +117,12 @@ async function runDailySweepLocked(
 
   const runId = timestampId(now);
   const attemptedAt = now.toISOString();
-  let preimage: string | undefined;
   let decisions: SweepDecision[] = [];
   let promoted = 0;
   let merged = 0;
   let dropped = 0;
   let decayUpdates = 0;
-  let archivedTombstones = 0;
+  let historyPruned = 0;
   let dreamSlug: string | undefined;
   let dreamError: string | undefined;
 
@@ -187,24 +185,17 @@ async function runDailySweepLocked(
       );
     }
 
-    if (config.preimageKeep > 0) {
-      preimage = await createPreimage(service, runId);
-      options.signal?.throwIfAborted();
-    }
-    await prunePreimages(service, config.preimageKeep);
-    options.signal?.throwIfAborted();
-
     await service.applyCandidateDecay(candidateDecay.updates);
     for (const slug of candidateDecay.expiredSlugs) {
       options.signal?.throwIfAborted();
-      await service.archiveCandidate(slug, runId);
+      await service.archiveCandidate(slug);
       dropped += 1;
     }
 
     for (const decision of decisions) {
       options.signal?.throwIfAborted();
       if (decision.action === "drop") {
-        await service.archiveCandidate(decision.slug, runId);
+        await service.archiveCandidate(decision.slug);
         dropped += 1;
         continue;
       }
@@ -220,13 +211,14 @@ async function runDailySweepLocked(
     }
 
     options.signal?.throwIfAborted();
-    const tombstoneResult = await service.archiveExpiredTombstones(
-      config.tombstoneGraceDays,
-      runId,
-      now,
-    );
-    archivedTombstones = tombstoneResult.archived.length;
     decayUpdates = (await service.recomputeDecay()).length;
+    // Retention runs here rather than on a chat turn: one directory walk a day
+    // is enough for a bound on disk, and a sweep already holds the lock.
+    const pruned = await pruneHistory(service.store);
+    historyPruned = pruned.removed;
+    for (const failure of pruned.failed) {
+      options.reportError?.("history retention", new Error(failure));
+    }
     options.signal?.throwIfAborted();
 
     if (options.dreaming?.enabled) {
@@ -282,8 +274,7 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
-      preimage,
-      archivedTombstones,
+      historyPruned,
       dreamSlug,
       dreamError,
     });
@@ -292,7 +283,6 @@ async function runDailySweepLocked(
       lastAttemptAt: attemptedAt,
       lastSuccessfulAt: attemptedAt,
       lastRunId: runId,
-      preimage,
     });
 
     return {
@@ -302,8 +292,7 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
-      archivedTombstones,
-      preimage,
+      historyPruned,
       ...(dreamSlug === undefined ? {} : { dreamSlug }),
       ...(dreamError === undefined ? {} : { dreamError }),
     };
@@ -318,8 +307,7 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
-      preimage,
-      archivedTombstones,
+      historyPruned,
       dreamSlug,
       dreamError,
       error: message,
@@ -332,7 +320,6 @@ async function runDailySweepLocked(
       lastFailureAt: attemptedAt,
       lastError: message,
       lastRunId: runId,
-      preimage,
     }).catch((stateError) => {
       options.reportError?.("sweep failure state", stateError);
     });
@@ -343,92 +330,12 @@ async function runDailySweepLocked(
       merged,
       dropped,
       decayUpdates,
-      archivedTombstones,
-      ...(preimage === undefined ? {} : { preimage }),
+      historyPruned,
       ...(dreamSlug === undefined ? {} : { dreamSlug }),
       ...(dreamError === undefined ? {} : { dreamError }),
       error: message,
     };
   }
-}
-
-/**
- * Deletes preimages beyond the configured retention count.
- *
- * Run identifiers are ISO timestamps, so lexicographic order is chronological:
- * the newest `keep` directories survive and older ones are removed. A `keep` of
- * zero removes every preimage, which is how preimages are disabled — the caller
- * stops creating them at the same time, so this only has to clean up.
- */
-async function prunePreimages(
-  service: MemoryNodeService,
-  keep: number,
-): Promise<void> {
-  const directory = path.join(service.store.paths.sweeps, "preimages");
-  let entries;
-  try {
-    entries = await readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if (getErrorCode(error) === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-
-  const runIds = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-  const excess = runIds.slice(0, Math.max(0, runIds.length - keep));
-  for (const runId of excess) {
-    await rm(path.join(directory, runId), { recursive: true, force: true });
-  }
-}
-
-/** Returns a Node filesystem error code without relying on an any cast. */
-function getErrorCode(error: unknown): string | undefined {
-  if (typeof error !== "object" || error === null || !("code" in error)) {
-    return undefined;
-  }
-  const code = error.code;
-  return typeof code === "string" ? code : undefined;
-}
-
-/** Captures a full preimage of canonical files before sweep mutation. */
-async function createPreimage(
-  service: MemoryNodeService,
-  runId: string,
-): Promise<string> {
-  const root = service.store.paths.root;
-  const relative = `sweeps/preimages/${runId}`;
-  const destination = path.join(service.store.paths.root, relative);
-  await mkdir(destination, { recursive: true, mode: 0o700 });
-
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (entry.name === "index" || entry.name === "sweeps") {
-      continue;
-    }
-    await cp(
-      path.join(root, entry.name),
-      path.join(destination, entry.name),
-      { recursive: entry.isDirectory(), preserveTimestamps: true },
-    );
-  }
-
-  const sweepSource = service.store.paths.sweeps;
-  const sweepDestination = path.join(destination, "sweeps");
-  await mkdir(sweepDestination, { recursive: true, mode: 0o700 });
-  for (const entry of await readdir(sweepSource, { withFileTypes: true })) {
-    if (entry.name === "preimages") {
-      continue;
-    }
-    await cp(
-      path.join(sweepSource, entry.name),
-      path.join(sweepDestination, entry.name),
-      { recursive: entry.isDirectory(), preserveTimestamps: true },
-    );
-  }
-  return relative;
 }
 
 /** Appends one dated sweep section without rewriting prior sections. */
@@ -442,10 +349,9 @@ async function appendSweepLog(
     merged: number;
     dropped: number;
     decayUpdates: number;
-    archivedTombstones: number;
+    historyPruned: number;
     dreamSlug?: string;
     dreamError?: string;
-    preimage?: string;
     error?: string;
   },
 ): Promise<void> {
@@ -457,12 +363,11 @@ async function appendSweepLog(
     `## Sweep ${attemptedAt}`,
     "",
     `- Run ID: ${runId}`,
-    `- Preimage: ${summary.preimage ?? "not created"}`,
     `- Promoted: ${summary.promoted}`,
     `- Merged: ${summary.merged}`,
-    `- Dropped/archived: ${summary.dropped}`,
+    `- Dropped: ${summary.dropped}`,
     `- Decay updates: ${summary.decayUpdates}`,
-    `- Expired tombstones archived: ${summary.archivedTombstones}`,
+    `- History pruned: ${summary.historyPruned}`,
     `- Dream: ${summary.dreamSlug ?? "none"}`,
     ...(summary.dreamError ? [`- Dream error: ${summary.dreamError}`] : []),
     ...(summary.error ? [`- Error: ${summary.error}`] : []),
@@ -547,7 +452,7 @@ function emptyResult(ran: boolean): SweepResult {
     merged: 0,
     dropped: 0,
     decayUpdates: 0,
-    archivedTombstones: 0,
+    historyPruned: 0,
   };
 }
 

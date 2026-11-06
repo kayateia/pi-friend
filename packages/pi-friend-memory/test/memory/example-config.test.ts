@@ -33,10 +33,10 @@ test("the example configuration matches supported defaults", async () => {
   assert.equal(config.autoCapture.everyTurns, 5);
   assert.equal(config.autoCapture.idleTimeout, 600);
   assert.equal(config.autoCapture.prompt, CAPTURE_SYSTEM_PROMPT);
-  assert.equal(config.sweep.tombstoneGraceDays, 30);
   assert.equal(config.sweep.minGuardedBatchSize, 10);
   assert.equal(config.sweep.background, false);
   assert.equal(config.sweep.prompt, SWEEP_SYSTEM_PROMPT);
+  assert.equal(config.history.keepDays, 30);
   assert.equal(config.dreaming.maxNodes, 4);
   assert.equal(config.dreaming.prompt, DREAM_SYSTEM_PROMPT);
   assert.equal(config.vector.chunkSize, 4_000);

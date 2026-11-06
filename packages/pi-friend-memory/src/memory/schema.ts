@@ -71,6 +71,13 @@ export interface MemoryNodeFrontMatter {
   links: string[];
   source: string;
   edited?: string;
+  /**
+   * History-only fields, present in files under `history/` and never expected
+   * on a live node. See {@link HISTORY_FRONT_MATTER_KEYS}.
+   */
+  history_reason?: string;
+  history_conflict?: string;
+  history_children?: string[];
 }
 
 /** A fully parsed memory node, including its exact Markdown body. */
@@ -123,6 +130,20 @@ const FRONT_MATTER_KEYS = new Set([
   "edited",
 ]);
 
+/**
+ * Front-matter keys that only a history entry carries.
+ *
+ * A history file is a memory as it was, plus what the operation that ended that
+ * version knew: why it was edited, whether a merge found a conflict, which nodes
+ * a split produced. They are accepted only under `history/`, so a live node
+ * carrying one is a defect rather than a style choice.
+ */
+export const HISTORY_FRONT_MATTER_KEYS = [
+  "history_reason",
+  "history_conflict",
+  "history_children",
+] as const;
+
 const REQUIRED_FRONT_MATTER_KEYS = [
   "title",
   "type",
@@ -151,6 +172,7 @@ export function parseMemoryNode(
   text: string,
   slug: string,
   location?: MemoryNodeLocation,
+  options: { allowHistoryFields?: boolean } = {},
 ): ParsedMemoryNode {
   const validSlug = validateSlugForSchema(slug, "slug");
   const sections = splitFrontMatter(text, validSlug);
@@ -161,10 +183,11 @@ export function parseMemoryNode(
     );
   }
 
-  const frontMatter = validateMemoryNodeFrontMatter(
-    parsedYaml.value,
-    validSlug,
-  );
+  const frontMatter = validateMemoryNodeFrontMatter(parsedYaml.value, validSlug, {
+    allowHistoryFields:
+      options.allowHistoryFields === true ||
+      (location !== undefined && location.relativePath.startsWith("history/")),
+  });
   const node: ParsedMemoryNode = {
     slug: validSlug,
     frontMatter,
@@ -202,6 +225,7 @@ export function parseMemoryNodeFile(
 export function validateMemoryNodeFrontMatter(
   value: unknown,
   slug: string,
+  options: { allowHistoryFields?: boolean } = {},
 ): MemoryNodeFrontMatter {
   validateSlugForSchema(slug, "slug");
 
@@ -211,8 +235,11 @@ export function validateMemoryNodeFrontMatter(
     );
   }
 
+  const allowed = options.allowHistoryFields === true
+    ? new Set<string>([...FRONT_MATTER_KEYS, ...HISTORY_FRONT_MATTER_KEYS])
+    : FRONT_MATTER_KEYS;
   for (const key of Object.keys(value)) {
-    if (!FRONT_MATTER_KEYS.has(key)) {
+    if (!allowed.has(key)) {
       throw new MemorySchemaError(
         `Unknown front-matter field "${key}" in ${slug}.`,
         { field: key },
@@ -259,6 +286,18 @@ export function validateMemoryNodeFrontMatter(
     value.edited === undefined
       ? undefined
       : requireTimestamp(value.edited, "edited", slug);
+  const historyReason =
+    value.history_reason === undefined
+      ? undefined
+      : requireString(value.history_reason, "history_reason", slug).trim();
+  const historyConflict =
+    value.history_conflict === undefined
+      ? undefined
+      : requireString(value.history_conflict, "history_conflict", slug).trim();
+  const historyChildren =
+    value.history_children === undefined
+      ? undefined
+      : parseSlugList(value.history_children, "history_children", slug);
 
   if (Date.parse(lastUsed) < Date.parse(created)) {
     throw new MemorySchemaError(
@@ -317,6 +356,13 @@ export function validateMemoryNodeFrontMatter(
     links,
     source,
     ...(edited === undefined ? {} : { edited }),
+    ...(historyReason === undefined ? {} : { history_reason: historyReason }),
+    ...(historyConflict === undefined
+      ? {}
+      : { history_conflict: historyConflict }),
+    ...(historyChildren === undefined
+      ? {}
+      : { history_children: historyChildren }),
   };
 }
 
@@ -383,6 +429,19 @@ export function validateMemoryNodeLocation(
     );
   }
 
+  // History fields describe what ended a version. On a live node they are a
+  // leaked record, and a restore that forgot to strip them should fail here
+  // rather than store them silently.
+  const carriesHistoryFields =
+    node.frontMatter.history_reason !== undefined ||
+    node.frontMatter.history_conflict !== undefined ||
+    node.frontMatter.history_children !== undefined;
+  if (carriesHistoryFields && !normalizedPath.startsWith("history/")) {
+    throw new MemorySchemaError(
+      `${node.slug} carries history-only front matter outside history/.`,
+    );
+  }
+
   if (
     normalizedPath.startsWith("nodes/superseded/") &&
     node.frontMatter.status !== "superseded"
@@ -397,7 +456,9 @@ export function validateMemoryNodeLocation(
 /** Serializes a parsed node with deterministic front matter and exact body. */
 export function serializeMemoryNode(node: ParsedMemoryNode): string {
   const validSlug = validateSlugForSchema(node.slug, "slug");
-  const frontMatter = validateMemoryNodeFrontMatter(node.frontMatter, validSlug);
+  const frontMatter = validateMemoryNodeFrontMatter(node.frontMatter, validSlug, {
+    allowHistoryFields: true,
+  });
   if (node.body.trim() === "") {
     throw new MemorySchemaError(`Memory node ${validSlug} must have a body.`, {
       field: "body",
@@ -421,6 +482,15 @@ export function serializeMemoryNode(node: ParsedMemoryNode): string {
     links: frontMatter.links,
     source: frontMatter.source,
     ...(frontMatter.edited === undefined ? {} : { edited: frontMatter.edited }),
+    ...(frontMatter.history_reason === undefined
+      ? {}
+      : { history_reason: frontMatter.history_reason }),
+    ...(frontMatter.history_conflict === undefined
+      ? {}
+      : { history_conflict: frontMatter.history_conflict }),
+    ...(frontMatter.history_children === undefined
+      ? {}
+      : { history_children: frontMatter.history_children }),
   };
 
   const yamlSource = stringify(orderedFrontMatter, {

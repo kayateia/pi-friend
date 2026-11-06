@@ -14,7 +14,10 @@ import {
   MemoryServiceError,
   slugifyTitle,
 } from "../../src/memory/service.ts";
-import { parseRecoveryRecord } from "../../src/memory/recovery.ts";
+import {
+  listHistoryVersions,
+  readHistoryEntry,
+} from "../../src/memory/history.ts";
 import { withTempDir } from "../helpers.ts";
 
 const FIXED_TIME = new Date("2026-10-19T20:00:00.000Z");
@@ -118,7 +121,7 @@ test("schema validation remains active through the service", async () => {
   });
 });
 
-test("edit preserves creation state and appends an audit entry", async () => {
+test("edit preserves creation state and archives the version it replaced", async () => {
   await withTempDir(async (agentDir) => {
     let currentTime = FIXED_TIME;
     const service = await makeService(agentDir, () => currentTime);
@@ -148,9 +151,34 @@ test("edit preserves creation state and appends an audit entry", async () => {
     assert.equal(edited.frontMatter.title, "Updated Title");
     assert.deepEqual(edited.frontMatter.tags, ["new"]);
     assert.match(edited.body, /Updated body\./);
-    assert.match(edited.body, /## audit/);
-    assert.match(edited.body, /memory_edit: Corrected the wording/);
+    assert.doesNotMatch(edited.body, /## audit/);
     assert.deepEqual(await service.read(created.slug), edited);
+
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const versions = await listHistoryVersions(
+      repository.store,
+      "edited",
+      created.slug,
+    );
+    assert.deepEqual(versions, [
+      `history/edited/${created.slug}/${currentTime.toISOString()}.md`,
+    ]);
+    const previous = await readHistoryEntry(
+      repository.store,
+      versions[0] ?? "",
+      created.slug,
+    );
+    assert.ok(previous);
+    // The file holds the memory as it was, not as it became.
+    assert.match(previous.body, /Original body\./);
+    assert.doesNotMatch(previous.body, /Updated body\./);
+    assert.equal(previous.frontMatter.title, "Original Title");
+    assert.deepEqual(previous.frontMatter.tags, ["old"]);
+    // The reason describes the edit that replaced this version.
+    assert.equal(previous.frontMatter.history_reason, "Corrected the wording");
   });
 });
 
@@ -175,7 +203,7 @@ test("edit requires an existing node and at least one changed field", async () =
   });
 });
 
-test("delete writes recovery first, moves to superseded, and audits the tombstone", async () => {
+test("delete archives the node as it was, then removes it from nodes", async () => {
   await withTempDir(async (agentDir) => {
     const service = await makeService(agentDir);
     const original = await service.add({
@@ -187,30 +215,26 @@ test("delete writes recovery first, moves to superseded, and audits the tombston
 
     const deleted = await service.delete(original.slug);
 
+    assert.equal(deleted.slug, original.slug);
+    assert.equal(deleted.historyPath, `history/deleted/${original.slug}.md`);
     assert.equal(await service.read(original.slug), null);
-    const tombstone = await service.read(original.slug, "superseded");
-    assert.ok(tombstone);
-    assert.equal(tombstone.frontMatter.status, "superseded");
-    assert.equal(tombstone.frontMatter.decay_weight, 0);
-    assert.match(tombstone.body, /memory_delete/);
-    assert.match(tombstone.body, new RegExp(deleted.recoveryId));
 
     const repository = await MemoryNodeRepository.open({
       agentDir,
       homeDir: agentDir,
     });
-    const recoveryText = await repository.store.readRecoveryRecord(
-      deleted.recoveryId,
+    const archived = await readHistoryEntry(
+      repository.store,
+      deleted.historyPath,
+      original.slug,
     );
-    assert.ok(recoveryText);
-    const record = parseRecoveryRecord(
-      JSON.parse(recoveryText) as unknown,
-      deleted.recoveryId,
-    );
-    assert.equal(record.slug, original.slug);
-    assert.match(record.originalText, /This fact will be deleted\./);
-    assert.equal(record.originalPath, `nodes/${original.slug}.md`);
-    assert.equal(record.tombstonePath, `nodes/superseded/${original.slug}.md`);
+    assert.ok(archived);
+    // Content as it was: active, its own weight, its own body, no tombstone
+    // markers and no audit line describing the deletion.
+    assert.equal(archived.frontMatter.status, "active");
+    assert.equal(archived.frontMatter.decay_weight, 1);
+    assert.match(archived.body, /This fact will be deleted\./);
+    assert.doesNotMatch(archived.body, /superseded|memory_delete/);
   });
 });
 
@@ -243,67 +267,111 @@ test("delete rejects ambiguous substring matches but accepts an exact slug", asy
   });
 });
 
-test("restore recreates the canonical node, removes the tombstone, and is idempotent", async () => {
+test("restore copies the archived version back and consumes the entry", async () => {
   await withTempDir(async (agentDir) => {
-    const service = await makeService(agentDir);
+    let currentTime = FIXED_TIME;
+    const service = await makeService(agentDir, () => currentTime);
     const original = await service.add({
       title: "Restore Me",
       type: "preference",
       body: "A restorable preference.",
       speaker: [{ name: "Aisling", confident: true }],
     });
-    const deleted = await service.delete(original.slug);
+    await service.delete(original.slug);
 
-    const restored = await service.restore(deleted.recoveryId);
-    assert.equal(restored.alreadyRestored, false);
-    assert.equal(restored.node.slug, original.slug);
+    currentTime = new Date("2026-10-20T22:00:00.000Z");
+    const restored = await service.restore(original.slug);
+    assert.equal(restored.slug, original.slug);
     assert.equal(restored.node.frontMatter.status, "active");
-    assert.match(restored.node.body, /memory_restore/);
-    assert.equal(await service.read(original.slug, "superseded"), null);
+    assert.equal(restored.node.frontMatter.decay_weight, 1);
+    assert.equal(restored.node.frontMatter.edited, currentTime.toISOString());
+    assert.match(restored.node.body, /A restorable preference\./);
+    assert.doesNotMatch(restored.node.body, /memory_restore/);
+    assert.deepEqual(await service.read(original.slug), restored.node);
 
-    const again = await service.restore(deleted.recoveryId);
-    assert.equal(again.alreadyRestored, true);
-    assert.deepEqual(again.node, restored.node);
+    // The entry is consumed: a second restore has nothing to copy.
+    await assert.rejects(
+      () => service.restore(original.slug),
+      /No deleted memory or stored version named/,
+    );
   });
 });
 
-test("restore refuses to overwrite a newer canonical node", async () => {
+test("restore replaces a live node with the same slug and archives it", async () => {
   await withTempDir(async (agentDir) => {
     const service = await makeService(agentDir);
     const original = await service.add({
-      title: "Protected",
+      title: "Reused Name",
       type: "fact",
       body: "Original content.",
       speaker: [{ name: "Aisling", confident: true }],
     });
-    const deleted = await service.delete(original.slug);
+    await service.delete(original.slug);
 
+    // A second memory takes the name while the first is only in history.
+    const replacement = await service.add({
+      slug: original.slug,
+      title: "Reused Name",
+      type: "fact",
+      body: "Newer content under the same name.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    assert.equal(replacement.slug, original.slug);
+
+    const restored = await service.restore(original.slug);
+    assert.equal(restored.replaced, true);
+    assert.match(restored.node.body, /Original content\./);
+    assert.doesNotMatch(restored.node.body, /Newer content/);
+
+    // The displaced text is not lost: it is stored as a version.
     const repository = await MemoryNodeRepository.open({
       agentDir,
       homeDir: agentDir,
     });
-    await repository.write({
-      ...original,
-      body: "\nNewer canonical content.\n",
-    });
-
-    await assert.rejects(
-      () => service.restore(deleted.recoveryId),
-      /newer canonical node already exists/,
+    const versions = await listHistoryVersions(
+      repository.store,
+      "edited",
+      original.slug,
     );
-    assert.match(
-      (await service.read(original.slug))?.body ?? "",
-      /Newer canonical content/,
+    const archived = await readHistoryEntry(
+      repository.store,
+      versions[versions.length - 1] ?? "",
+      original.slug,
+    );
+    assert.ok(archived);
+    assert.match(archived.body, /Newer content under the same name/);
+    assert.equal(
+      archived.frontMatter.history_reason,
+      "replaced by memory_restore",
     );
   });
 });
 
-test("restore rejects invalid recovery IDs", async () => {
+test("restore strips history fields from the copy it writes back", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await makeService(agentDir);
+    const original = await service.add({
+      title: "Bare Restore",
+      type: "fact",
+      body: "Plain content.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    await service.delete(original.slug);
+
+    const restored = await service.restore(original.slug);
+    assert.equal(restored.replaced, false);
+    assert.equal(restored.node.frontMatter.history_reason, undefined);
+    assert.equal(restored.node.frontMatter.history_conflict, undefined);
+    assert.equal(restored.node.frontMatter.history_children, undefined);
+  });
+});
+
+test("restoring a slug with no history entry reports it", async () => {
   await withTempDir(async (agentDir) => {
     const service = await makeService(agentDir);
     await assert.rejects(
-      () => service.restore("not-a-uuid"),
-      /Invalid recovery ID/,
+      () => service.restore("never-existed"),
+      /No deleted memory or stored version named/,
     );
   });
 });

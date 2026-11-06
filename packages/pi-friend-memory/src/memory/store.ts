@@ -15,6 +15,8 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
+  stat,
   unlink,
 } from "node:fs/promises";
 import * as path from "node:path";
@@ -39,9 +41,6 @@ import {
   resolveWithin,
   validateSlug,
 } from "./paths.ts";
-
-const RECOVERY_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Stable description of a discoverable Markdown file. */
 export interface StoredMarkdownFile {
@@ -133,19 +132,6 @@ export class MemoryStore {
     await this.replaceFile(relativePath, content);
   }
 
-  /** Reads one recovery record as raw JSON text, or null when it is absent. */
-  async readRecoveryRecord(recoveryId: string): Promise<string | null> {
-    return this.readTextFileIfExists(recoveryRelativePath(recoveryId));
-  }
-
-  /** Atomically writes one validated recovery record. */
-  async writeRecoveryRecord(
-    recoveryId: string,
-    content: string,
-  ): Promise<void> {
-    await this.replaceFile(recoveryRelativePath(recoveryId), content);
-  }
-
   /** Atomically writes one UTF-8 JSON auxiliary file. */
   async writeJsonFile(relativePath: string, content: string): Promise<void> {
     if (!relativePath.endsWith(".json")) {
@@ -195,8 +181,8 @@ export class MemoryStore {
    *
    * Skips dot paths, symlinks, non-Markdown files, and every top-level path the
    * memory layout marks unsearchable — the vector index, sweep logs and
-   * preimages, and recovery records. Those are the extension's own bookkeeping,
-   * not memory, and indexing them made a preimage of a node indistinguishable
+   * history entries. Those are the extension's own bookkeeping, not memory, and
+   * indexing them made a stored version of a node indistinguishable
    * from the node itself in search results.
    */
   async listMarkdownFiles(): Promise<StoredMarkdownFile[]> {
@@ -211,6 +197,92 @@ export class MemoryStore {
       }
       return 0;
     });
+  }
+
+  /**
+   * Lists Markdown file names inside one directory of the store.
+   *
+   * Unlike {@link listMarkdownFiles} this ignores the searchable flag: history
+   * and sweep artefacts are meant to be read by path, and a caller that names a
+   * directory has already decided it wants what is in it.
+   */
+  async listDirectoryMarkdown(relativeDirectory: string): Promise<string[]> {
+    const absolute = resolveWithin(this.root, relativeDirectory);
+    let entries;
+    try {
+      entries = await readdir(absolute, { withFileTypes: true });
+    } catch (error) {
+      if (getErrorCode(error) === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    return entries
+      .filter(
+        (entry) =>
+          entry.isFile() &&
+          !entry.isSymbolicLink() &&
+          !entry.name.startsWith(".") &&
+          entry.name.endsWith(".md"),
+      )
+      .map((entry) => `${relativeDirectory}/${entry.name}`)
+      .sort();
+  }
+
+  /**
+   * Lists immediate subdirectories of one directory in the store.
+   *
+   * Used by history retention, which prunes inside a named directory and needs
+   * to know which slugs have one.
+   */
+  async listDirectories(relativeDirectory: string): Promise<string[]> {
+    const absolute = resolveWithin(this.root, relativeDirectory);
+    let entries;
+    try {
+      entries = await readdir(absolute, { withFileTypes: true });
+    } catch (error) {
+      if (getErrorCode(error) === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    return entries
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+      .map((entry) => `${relativeDirectory}/${entry.name}`)
+      .sort();
+  }
+
+  /** Returns a file's modification time, or null when it is absent. */
+  async fileModifiedAt(relativePath: string): Promise<Date | null> {
+    const target = resolveWithin(this.root, relativePath);
+    try {
+      const stats = await stat(target);
+      return stats.mtime;
+    } catch (error) {
+      if (getErrorCode(error) === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** Removes a directory only when it is empty; returns whether it did. */
+  async removeDirectoryIfEmpty(relativeDirectory: string): Promise<boolean> {
+    const absolute = resolveWithin(this.root, relativeDirectory);
+    try {
+      const entries = await readdir(absolute);
+      if (entries.length > 0) {
+        return false;
+      }
+      await rmdir(absolute);
+      return true;
+    } catch (error) {
+      const code = getErrorCode(error);
+      if (code === "ENOENT" || code === "ENOTEMPTY" || code === "EEXIST") {
+        return false;
+      }
+      throw error;
+    }
   }
 
   /** Appends text to an internal append-only file. */
@@ -312,13 +384,6 @@ function nodeRelativePath(slug: string): string {
   return `nodes/${validateSlug(slug)}.md`;
 }
 
-/** Builds and validates a recovery record filename. */
-function recoveryRelativePath(recoveryId: string): string {
-  if (!RECOVERY_ID_PATTERN.test(recoveryId)) {
-    throw new MemoryStoreError("Recovery ID must be a valid UUID.");
-  }
-  return `recovery/${recoveryId}.json`;
-}
 
 /** Writes a same-directory temporary file, syncs it, then renames it. */
 async function writeFileAtomically(

@@ -83,7 +83,6 @@ test("only the extension's own paths under the root are reserved", () => {
     "staging/c.md",
     "sweeps/2026-11-03.md",
     "sweeps/dropped/run/x.md",
-    "recovery/0f0f.json",
     "index/vectors.sqlite",
     "access-log",
   ]) {
@@ -168,9 +167,9 @@ test("the created layout and the reserved prefixes agree", async () => {
     const created = (await readdir(root)).sort();
     assert.deepEqual(created, [
       "access-log",
+      "history",
       "index",
       "nodes",
-      "recovery",
       "staging",
       "sweeps",
     ]);
@@ -196,9 +195,9 @@ test("the reserved prefixes stay derived from the layout declaration", () => {
   // letting the derivation do it silently.
   assert.deepEqual(RESERVED_MEMORY_PATHS, [
     "access-log",
+    "history",
     "index",
     "nodes",
-    "recovery",
     "staging",
     "sweeps",
   ]);

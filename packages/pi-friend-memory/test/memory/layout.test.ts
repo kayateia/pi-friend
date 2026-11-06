@@ -37,7 +37,7 @@ test("layout creation is idempotent and preserves existing content", async () =>
       paths.staging,
       paths.sweeps,
       paths.index,
-      paths.recovery,
+      paths.history,
     ]) {
       await access(directoryPath);
       assert.equal((await lstat(directoryPath)).mode & 0o777, 0o700);

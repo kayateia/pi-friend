@@ -57,10 +57,8 @@ test("missing configuration uses the default memory root", async () => {
     assert.deepEqual(config.sweep, {
       enabled: true,
       background: false,
-      tombstoneGraceDays: 30,
       minGuardedBatchSize: 10,
       allowDrop: false,
-      preimageKeep: 3,
     });
     assert.deepEqual(config.dreaming, {
       enabled: true,
@@ -376,6 +374,40 @@ test("invalid auto-capture settings fail closed", () => {
   }
 });
 
+test("history retention is parsed and validated", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  assert.equal(
+    parseMemoryConfig("memory: {}\n", configPath).history.keepDays,
+    30,
+  );
+  assert.equal(
+    parseMemoryConfig(
+      "memory:\n  history:\n    keep_days: 7\n",
+      configPath,
+    ).history.keepDays,
+    7,
+  );
+  // Zero is a real setting: keep every version.
+  assert.equal(
+    parseMemoryConfig(
+      "memory:\n  history:\n    keep_days: 0\n",
+      configPath,
+    ).history.keepDays,
+    0,
+  );
+  for (const bad of ["-1", "1.5", '"7"', "36501"]) {
+    assert.throws(
+      () =>
+        parseMemoryConfig(
+          `memory:\n  history:\n    keep_days: ${bad}\n`,
+          configPath,
+        ),
+      MemoryConfigError,
+      bad,
+    );
+  }
+});
+
 test("sweep settings are parsed and validated", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
@@ -384,7 +416,6 @@ test("sweep settings are parsed and validated", () => {
       "  sweep:",
       "    enabled: false",
       "    background: true",
-      "    tombstone_grace_days: 14",
       "    min_guarded_batch_size: 12",
       "    model: openrouter/google/gemini-2.5-flash",
       "    prompt: |",
@@ -396,9 +427,7 @@ test("sweep settings are parsed and validated", () => {
   assert.deepEqual(config.sweep, {
     enabled: false,
     background: true,
-    tombstoneGraceDays: 14,
     minGuardedBatchSize: 12,
-    preimageKeep: 3,
     allowDrop: false,
     model: "openrouter/google/gemini-2.5-flash",
     prompt: "Custom sweep prompt.",
@@ -407,14 +436,6 @@ test("sweep settings are parsed and validated", () => {
     () =>
       parseMemoryConfig(
         "memory:\n  sweep:\n    background: later\n",
-        configPath,
-      ),
-    MemoryConfigError,
-  );
-  assert.throws(
-    () =>
-      parseMemoryConfig(
-        "memory:\n  sweep:\n    tombstone_grace_days: 0\n",
         configPath,
       ),
     MemoryConfigError,
@@ -669,32 +690,21 @@ test("a replacement sweep prompt that never mentions drop is reported", () => {
   );
 });
 
-test("preimage_keep defaults to a bounded number and accepts zero", () => {
+test("preimage_keep is no longer a sweep option", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
-  assert.equal(
-    parseMemoryConfig("memory:\n  root: ~/memory\n", configPath).sweep
-      .preimageKeep,
-    3,
+  // Removed with the preimages themselves: a config still carrying it is
+  // reported as an unknown field rather than silently accepted.
+  const config = parseMemoryConfig(
+    "memory:\n  sweep:\n    preimage_keep: 3\n",
+    configPath,
   );
   assert.equal(
-    parseMemoryConfig(
-      "memory:\n  sweep:\n    preimage_keep: 0\n",
-      configPath,
-    ).sweep.preimageKeep,
-    0,
+    (config.sweep as unknown as Record<string, unknown>).preimageKeep,
+    undefined,
   );
-  for (const invalid of ['"two"', "-1", "101", "1.5"]) {
-    assert.throws(
-      () =>
-        parseMemoryConfig(
-          `memory:\n  sweep:\n    preimage_keep: ${invalid}\n`,
-          configPath,
-        ),
-      MemoryConfigError,
-      invalid,
-    );
-  }
+  assert.match(config.warnings.join("\n"), /preimage_keep/);
 });
+
 test("memory.search.default_mode is hybrid unless configured", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   assert.equal(

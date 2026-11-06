@@ -56,21 +56,12 @@ export interface SweepConfig {
   /** Optional text appended after the built-in sweep system prompt. */
   promptAppend?: string;
   /**
-   * How many sweep preimages to keep, newest first.
-   *
-   * `0` disables preimages: no snapshot is taken and existing ones are pruned at
-   * the next sweep. A positive count keeps that many run snapshots, which bounds
-   * the disk and index cost of a full store copy per run.
-   */
-  preimageKeep: number;
-  /**
    * Offer the sweep model a `drop` action, which archives a candidate under
    * `sweeps/dropped/` instead of promoting or merging it. Off by default: the
    * upstream design deliberately has no drop, and this is the disagreement made
    * configurable rather than the default changed on someone else's behalf.
    */
   allowDrop: boolean;
-  tombstoneGraceDays: number;
   /** Batches smaller than this bypass the 25% removal guard. */
   minGuardedBatchSize: number;
 }
@@ -140,6 +131,7 @@ export interface MemoryConfig {
   injection: RagInjectionConfig;
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
+  history: HistoryConfig;
   dreaming: DreamingConfig;
   search: SearchConfig;
   vector: VectorConfig;
@@ -190,13 +182,60 @@ export function defaultAutoCaptureConfig(): AutoCaptureConfig {
 }
 
 /** Returns the default daily-sweep policy. */
+/** How long previous versions are kept under `history/`. */
+export interface HistoryConfig {
+  /**
+   * Age in days after which a history file is pruned. `0` keeps everything.
+   *
+   * History is invisible to search, RAG and the model, so this bounds disk use
+   * rather than ranking quality: an edit from last year costs an inode, not a
+   * prompt. Pruning is per file, so a long-lived memory loses its oldest
+   * versions while keeping the recent ones.
+   */
+  keepDays: number;
+}
+
+/** History retention used when the configuration says nothing. */
+export function defaultHistoryConfig(): HistoryConfig {
+  return { keepDays: 30 };
+}
+
+function parseHistory(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): HistoryConfig {
+  const config = defaultHistoryConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.history must be a YAML object.`,
+    );
+  }
+  collectUnknownKeys(value, "history", `${configPath}: memory.history`, warnings);
+  if (value.keep_days !== undefined) {
+    if (
+      typeof value.keep_days !== "number" ||
+      !Number.isInteger(value.keep_days) ||
+      value.keep_days < 0 ||
+      value.keep_days > 36500
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.history.keep_days must be an integer from 0 to 36500 (0 keeps everything).`,
+      );
+    }
+    config.keepDays = value.keep_days;
+  }
+  return config;
+}
+
 export function defaultSweepConfig(): SweepConfig {
   return {
     enabled: true,
     background: false,
-    tombstoneGraceDays: 30,
     minGuardedBatchSize: 10,
-    preimageKeep: 3,
     allowDrop: false,
   };
 }
@@ -279,6 +318,7 @@ export function parseMemoryConfig(
       injection: defaultRagInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
+      history: defaultHistoryConfig(),
       dreaming: defaultDreamingConfig(),
       vector: defaultVectorConfig(),
       embeddings: defaultEmbeddingsConfig(),
@@ -339,6 +379,7 @@ export function parseMemoryConfig(
       warnings,
     ),
     sweep: parseSweep(memoryConfig.sweep, configPath, warnings),
+    history: parseHistory(memoryConfig.history, configPath, warnings),
     dreaming: parseDreaming(memoryConfig.dreaming, configPath, warnings),
     vector: parseVector(memoryConfig.vector, configPath, warnings),
     embeddings: parseEmbeddings(memoryConfig.embeddings, configPath, warnings),
@@ -373,6 +414,7 @@ export async function loadMemoryConfig(
         injection: defaultRagInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
+        history: defaultHistoryConfig(),
         dreaming: defaultDreamingConfig(),
         vector: defaultVectorConfig(),
         embeddings: defaultEmbeddingsConfig(),
@@ -791,32 +833,6 @@ function parseSweep(
       `${configPath}: memory.sweep.allow_drop is enabled but memory.sweep.prompt never mentions drop, so the model will never choose it.`,
     );
   }
-  if (value.preimage_keep !== undefined) {
-    if (
-      typeof value.preimage_keep !== "number" ||
-      !Number.isInteger(value.preimage_keep) ||
-      value.preimage_keep < 0 ||
-      value.preimage_keep > 100
-    ) {
-      throw new MemoryConfigError(
-        `${configPath}: memory.sweep.preimage_keep must be an integer from 0 to 100 (0 disables preimages).`,
-      );
-    }
-    config.preimageKeep = value.preimage_keep;
-  }
-  if (value.tombstone_grace_days !== undefined) {
-    if (
-      typeof value.tombstone_grace_days !== "number" ||
-      !Number.isInteger(value.tombstone_grace_days) ||
-      value.tombstone_grace_days < 1 ||
-      value.tombstone_grace_days > 3650
-    ) {
-      throw new MemoryConfigError(
-        `${configPath}: memory.sweep.tombstone_grace_days must be an integer from 1 to 3650.`,
-      );
-    }
-    config.tombstoneGraceDays = value.tombstone_grace_days;
-  }
   if (value.min_guarded_batch_size !== undefined) {
     if (
       typeof value.min_guarded_batch_size !== "number" ||
@@ -1015,6 +1031,7 @@ const KNOWN_KEYS = {
     "injection",
     "auto_capture",
     "sweep",
+    "history",
     "dreaming",
     "embeddings",
   ],
@@ -1037,10 +1054,9 @@ const KNOWN_KEYS = {
     "prompt",
     "prompt_append",
     "allow_drop",
-    "preimage_keep",
-    "tombstone_grace_days",
     "min_guarded_batch_size",
   ],
+  history: ["keep_days"],
   dreaming: ["enabled", "max_nodes", "model", "prompt", "prompt_append"],
   embeddings: ["model"],
 } as const;
