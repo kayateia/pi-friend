@@ -58,6 +58,16 @@ test("the merge prompt carries sources with speakers and dates", () => {
   assert.match(prompt, /"date": "2026-10-19T20:00:00.000Z"/);
 });
 
+test("the merge prompt says corrections are not conflicts", () => {
+  assert.match(
+    MERGE_SYSTEM_PROMPT,
+    /A correction, a changed preference, or a superseded fact is not a conflict/u,
+  );
+  // The field is for claims nothing can order, not for disagreements a date settles.
+  assert.match(MERGE_SYSTEM_PROMPT, /nothing in them says which is newer/u);
+  assert.match(MERGE_SYSTEM_PROMPT, /Leave `conflict` empty in every other case/u);
+});
+
 test("the merge prompt says archaeology and gloss are discouraged", () => {
   assert.match(MERGE_SYSTEM_PROMPT, /Archaeology/);
   assert.match(MERGE_SYSTEM_PROMPT, /Editorialising/);

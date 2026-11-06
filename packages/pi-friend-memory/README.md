@@ -353,9 +353,16 @@ promotion merges memories, one writer call consolidates them: the decision names
 the candidates, the code groups them by target, and the writer sees every source
 at once — slug, title, type, speakers, the date of that account, and the body.
 
-It returns a body and, when it could not reconcile the sources, a short conflict
-note. The code then unions tags, links, speakers and supersedes, writes the
-merged node, and stores every input under `history/merged/` first. The writer
+It returns a body and, only when the sources assert incompatible things that
+nothing in them can order, a short conflict note. Corrections, changed
+preferences and superseded facts are not conflicts — the newer date decides those
+and the body states the current version alone. The note is kept in the archived
+entry's front matter rather than surfaced: it is for whoever goes looking at how
+a memory came to say what it says, and a banner would make a rare, quiet fact
+into an alarm.
+
+The code then unions tags, links, speakers and supersedes, writes the merged
+node, and stores every input under `history/merged/` first. The writer
 never sees the front matter it cannot mangle, and never decides what merges —
 that belongs to the sweep, which is also where "a memory covers one key fact"
 is enforced, because the model choosing targets should not fold unrelated
