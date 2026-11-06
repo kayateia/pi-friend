@@ -112,12 +112,27 @@ export interface MemoryStageResult {
   created: boolean;
 }
 
-/** Result of merging one or more staging candidates into a canonical node. */
+/** Options for one merge. */
+export interface MergeOptions {
+  /** Caller-supplied body; skips the writer entirely. */
+  body?: string;
+  /** Conflict note used when the writer does not supply one. */
+  conflict?: string;
+  reportWarning?: (message: string) => void;
+}
+
+/** Result of merging one or more memories into a canonical node. */
 export interface MemoryMergeResult {
   node: ParsedMemoryNode;
   mergedInto: string;
+  /** Slugs removed from canonical memory, as opposed to from staging. */
+  removedMemories: string[];
+  /** Slugs removed from staging. */
+  removedCandidates: string[];
   /** False when the writer failed and the mechanical append was used instead. */
   rewritten: boolean;
+  /** True when the caller supplied the body and the writer was not consulted. */
+  bodySupplied: boolean;
   rewriteError?: string;
 }
 
@@ -566,7 +581,7 @@ export class MemoryNodeService {
   async mergeCandidates(
     targetSlug: string,
     candidateSlugs: string[],
-    options: { conflict?: string; reportWarning?: (message: string) => void } = {},
+    options: MergeOptions = {},
   ): Promise<MemoryMergeResult> {
     return this.runSerialized(() =>
       this.mergeCandidatesLocked(targetSlug, candidateSlugs, options),
@@ -582,7 +597,7 @@ export class MemoryNodeService {
   private async mergeCandidatesLocked(
     targetSlug: string,
     candidateSlugs: string[],
-    options: { conflict?: string; reportWarning?: (message: string) => void } = {},
+    options: MergeOptions = {},
   ): Promise<MemoryMergeResult> {
       if (candidateSlugs.length === 0) {
         throw new MemoryServiceError("A merge needs at least one candidate.");
@@ -599,25 +614,53 @@ export class MemoryNodeService {
         );
       }
 
-      const candidates: ParsedMemoryNode[] = [];
+      const sources: Array<{
+        node: ParsedMemoryNode;
+        area: MemoryNodeArea;
+      }> = [];
+      const seen = new Set<string>();
       for (const slug of candidateSlugs) {
-        const candidate = await this.repository.read(slug, "staging");
-        if (candidate === null) {
+        if (slug === target.slug) {
           throw new MemoryServiceError(
-            `No staging candidate found for "${slug}".`,
+            `Cannot merge "${target.slug}" into itself.`,
           );
         }
-        candidates.push(candidate);
+        if (seen.has(slug)) {
+          continue;
+        }
+        seen.add(slug);
+        // A source can be a canonical memory, as in a manual merge of two
+        // nodes, or a staging candidate, as in a sweep verdict. Both are
+        // archived the same way and both leave the area they came from.
+        const canonical = await this.repository.read(slug, "canonical");
+        if (canonical !== null) {
+          sources.push({ node: canonical, area: "canonical" });
+          continue;
+        }
+        const staged = await this.repository.read(slug, "staging");
+        if (staged === null) {
+          throw new MemoryServiceError(
+            `No memory or staging candidate found for "${slug}".`,
+          );
+        }
+        sources.push({ node: staged, area: "staging" });
       }
 
       const now = this.now().toISOString();
-      const sources = [target, ...candidates].map(toMergeSource);
+      const sourceNodes = sources.map((source) => source.node);
 
+      // A caller that supplies the body owns the wording and is expected to know
+      // what it is doing; the writer is only consulted when it did not.
       let rewrite: MergeRewrite | undefined;
       let rewriteError: string | undefined;
-      if (this.mergeWriter !== undefined) {
+      const suppliedBody = options.body?.trim();
+      if (suppliedBody !== undefined && suppliedBody !== "") {
+        rewrite = { body: suppliedBody };
+      } else if (this.mergeWriter !== undefined) {
         try {
-          rewrite = await this.mergeWriter(sources);
+          rewrite = await this.mergeWriter(
+            [target, ...sourceNodes].map(toMergeSource),
+          );
         } catch (error) {
           rewriteError = formatErrorChain(error);
         }
@@ -639,7 +682,7 @@ export class MemoryNodeService {
           body: target.body,
         },
       });
-      for (const candidate of candidates) {
+      for (const candidate of sourceNodes) {
         await writeHistoryEntry(this.repository.store, {
           kind: "merged",
           slug: candidate.slug,
@@ -648,14 +691,14 @@ export class MemoryNodeService {
         });
       }
       await this.pruneHistoryFor("merged", target.slug);
-      for (const candidate of candidates) {
+      for (const candidate of sourceNodes) {
         await this.pruneHistoryFor("merged", candidate.slug);
       }
 
       const merged = cloneNode(target);
-      merged.body = rewrite?.body ?? appendMechanically(target, candidates);
+      merged.body = rewrite?.body ?? appendMechanically(target, sourceNodes);
       merged.frontMatter.edited = now;
-      for (const candidate of candidates) {
+      for (const candidate of sourceNodes) {
         merged.frontMatter.agents = unique([
           ...merged.frontMatter.agents,
           ...candidate.frontMatter.agents,
@@ -679,8 +722,8 @@ export class MemoryNodeService {
       }
 
       await this.repository.write(merged, "canonical");
-      for (const candidate of candidates) {
-        await this.repository.remove(candidate.slug, "staging");
+      for (const source of sources) {
+        await this.repository.remove(source.node.slug, source.area);
       }
 
       if (rewriteError !== undefined) {
@@ -693,7 +736,14 @@ export class MemoryNodeService {
       return {
         node: merged,
         mergedInto: target.slug,
+        removedMemories: sources
+          .filter((source) => source.area === "canonical")
+          .map((source) => source.node.slug),
+        removedCandidates: sources
+          .filter((source) => source.area === "staging")
+          .map((source) => source.node.slug),
         rewritten: rewrite !== undefined,
+        bodySupplied: suppliedBody !== undefined && suppliedBody !== "",
         ...(rewriteError === undefined ? {} : { rewriteError }),
       };
   }

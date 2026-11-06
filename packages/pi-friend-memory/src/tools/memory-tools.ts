@@ -74,6 +74,15 @@ interface MemoryRestoreDetails {
   restoredFrom: string;
 }
 
+/** Structured details returned by a merge. */
+interface MemoryMergeDetails {
+  slug: string;
+  mergedInto: string;
+  removedMemories: string[];
+  removedCandidates: string[];
+  path: string;
+}
+
 /** Structured details returned by promotion of a staging candidate. */
 interface MemoryPromoteDetails {
   slug: string;
@@ -326,6 +335,79 @@ export function registerMemoryTools(
           slug: result.slug,
           path: `nodes/${result.slug}.md`,
           restoredFrom: result.restoredFrom,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: toolName("memory_merge"),
+    label: "Memory Merge",
+    description: [
+      "Merge one or more memories into a target memory, in a single operation.",
+      "Sources may be canonical memories or staging candidates; the target must be canonical. Every source is",
+      "archived under history/merged/ before it is removed, so the merge can be undone.",
+      "The merged body is written by the merge model from all sources at once. Supply `body` only when you",
+      "have already decided the exact wording — the sources are then merged without a rewrite, and no conflict",
+      "note is recorded, so say what you mean in the text itself.",
+      "Corrections and superseded facts are not conflicts: newer information simply replaces older.",
+    ].join("\n"),
+    parameters: Type.Object({
+      target: Type.String({
+        description: "Canonical memory slug to merge into.",
+      }),
+      sources: Type.Array(
+        Type.String({
+          description: "Memory or staging candidate slug to merge from.",
+        }),
+        {
+          minItems: 1,
+          description: "One or more memories to merge into the target.",
+        },
+      ),
+      body: Type.Optional(
+        Type.String({
+          description:
+            "Replacement body text. Omit to have the merge model write it from the sources.",
+        }),
+      ),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+    ): Promise<AgentToolResult<MemoryMergeDetails>> {
+      const service = requireService(getService);
+      const result = await service.mergeCandidates(params.target, params.sources, {
+        ...(params.body === undefined ? {} : { body: params.body }),
+      });
+
+      const removed = [
+        ...result.removedMemories.map((slug) => `"${slug}"`),
+        ...result.removedCandidates.map((slug) => `"${slug}" (candidate)`),
+      ];
+      const lines = [
+        `Merged ${removed.join(", ")} into "${result.mergedInto}".`,
+      ];
+      if (!result.bodySupplied && !result.rewritten) {
+        lines.push(
+          "The merge writer failed, so the bodies were appended instead; see pi-friend.log.",
+        );
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: {
+          slug: result.node.slug,
+          mergedInto: result.mergedInto,
+          removedMemories: result.removedMemories,
+          removedCandidates: result.removedCandidates,
+          path: `nodes/${result.node.slug}.md`,
         },
       };
     },

@@ -118,9 +118,10 @@ memory:
       Keep every durable fact, and who said, prefers, or did each thing; where an individual's name is known, use their name instead of pronouns or epithets.
       Each source entry is paired with a list of known speakers and the date of that account. A pronoun in one source entry may refer to a different individual than the same pronoun in another; use the speaker lists and the context to work out who each entry is about, and write so that who was involved, and who did what, is unambiguous.
       State each fact once, merging duplicated wording into a single statement.
-      When the sources disagree, newer facts take precedence; the date tells you which account is newer.
+      When the sources disagree, the newer account replaces the older one; the date tells you which is newer. A correction, a changed preference, or a superseded fact is not a conflict — state the current version and say no more about the old one.
       Never fabricate facts, opinions, people, links, or speakers that are not in the source entries.
-      Return only strict JSON with `body` and `conflict` properties; `conflict` is a short note naming contradictions you did not resolve, or an empty string.
+      Use `conflict` only when the sources assert incompatible things about the same fact and nothing in them says which is newer: the same date, or no basis for ordering. Name both claims in one sentence, keep both in the body, and mark them as unresolved. Leave `conflict` empty in every other case, including whenever a date decides it.
+      Return only strict JSON with `body` and `conflict` properties; `conflict` is that note, or an empty string.
 
       The following content shapes are discouraged:
 

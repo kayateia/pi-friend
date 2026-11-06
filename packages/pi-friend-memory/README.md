@@ -311,6 +311,13 @@ Pi reads the extension entry point from the `pi.extensions` field in
   near-duplicates into an existing canonical node. Before a merge rewrites the
   target, both sides are stored under `history/merged/<slug>/`, because those
   are the only copies that will not exist afterwards.
+- `memory_merge` merges one or more memories into a target in one operation. Sources
+  may be canonical memories or staging candidates; the target must be canonical.
+  Every source is archived under `history/merged/` before it is removed, so the
+  merge is undoable with `memory_restore`. Omit `body` and the merge model writes
+  the consolidated text from all sources; supply it and the text is used verbatim,
+  with no rewrite and no conflict note — corrections and superseded facts are not
+  conflicts, so a merge that needs one is usually the wrong merge.
 - `memory_read` reads a complete node from canonical or staging storage.
 - Search results and recalled blocks both carry attribution — `Heard from: Aria; Iri
   (uncertain) — relayed` — because in a plural system who said something is part of
@@ -353,9 +360,16 @@ promotion merges memories, one writer call consolidates them: the decision names
 the candidates, the code groups them by target, and the writer sees every source
 at once — slug, title, type, speakers, the date of that account, and the body.
 
-It returns a body and, when it could not reconcile the sources, a short conflict
-note. The code then unions tags, links, speakers and supersedes, writes the
-merged node, and stores every input under `history/merged/` first. The writer
+It returns a body and, only when the sources assert incompatible things that
+nothing in them can order, a short conflict note. Corrections, changed
+preferences and superseded facts are not conflicts — the newer date decides those
+and the body states the current version alone. The note is kept in the archived
+entry's front matter rather than surfaced: it is for whoever goes looking at how
+a memory came to say what it says, and a banner would make a rare, quiet fact
+into an alarm.
+
+The code then unions tags, links, speakers and supersedes, writes the merged
+node, and stores every input under `history/merged/` first. The writer
 never sees the front matter it cannot mangle, and never decides what merges —
 that belongs to the sweep, which is also where "a memory covers one key fact"
 is enforced, because the model choosing targets should not fold unrelated

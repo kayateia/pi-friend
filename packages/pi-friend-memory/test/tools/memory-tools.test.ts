@@ -161,3 +161,54 @@ test("memory_search prints speaker attribution when present", async () => {
     /Heard from: Aria; Iri \(uncertain\) — relayed/,
   );
 });
+
+test("memory_merge passes the target, sources and optional body through", async () => {
+  const calls: unknown[] = [];
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  const stubService = {
+    async mergeCandidates(target: string, sources: string[], options: unknown) {
+      calls.push({ target, sources, options });
+      return {
+        node: { slug: target },
+        mergedInto: target,
+        removedMemories: sources,
+        removedCandidates: [],
+        rewritten: options !== undefined,
+        bodySupplied: (options as { body?: string }).body !== undefined,
+      };
+    },
+  };
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
+
+  const definition = definitions.get("memory_merge") as {
+    parameters: { properties: Record<string, unknown> };
+    execute: (
+      id: string,
+      params: unknown,
+    ) => Promise<{ content: { text: string }[]; details: unknown }>;
+  };
+  assert.ok("target" in definition.parameters.properties);
+  assert.ok("sources" in definition.parameters.properties);
+  assert.ok("body" in definition.parameters.properties);
+
+  const result = await definition.execute("call", {
+    target: "house-rules",
+    sources: ["old-rules", "staged-rule"],
+    body: "Consolidated rules.",
+  });
+  assert.deepEqual(calls.at(-1), {
+    target: "house-rules",
+    sources: ["old-rules", "staged-rule"],
+    options: { body: "Consolidated rules." },
+  });
+  assert.match(result.content[0]?.text ?? "", /into "house-rules"/);
+  assert.equal(
+    (result.details as { removedMemories: string[] }).removedMemories.length,
+    2,
+  );
+});
