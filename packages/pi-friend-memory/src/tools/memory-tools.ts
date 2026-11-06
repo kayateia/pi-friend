@@ -63,6 +63,8 @@ interface MemoryEditDetails extends MemoryAddDetails {
 /** Structured details returned by a deletion. */
 interface MemoryDeleteDetails {
   slug: string;
+  /** Area the node left; a deleted memory restores canonical, a drop staged. */
+  area: MemoryNodeArea;
   /** Archived copy, readable by hand and restorable by slug. */
   historyPath: string;
 }
@@ -239,10 +241,11 @@ export function registerMemoryTools(
     name: toolName("memory_delete"),
     label: "Memory Delete",
     description: [
-      "Move one canonical memory node into history without hard-deleting it.",
-      "The match may be an exact slug or a case-insensitive substring of its title, tags, or body.",
-      "Ambiguous matches are rejected. The node is copied to history/deleted/<slug>.md before it leaves nodes/.",
-      `Use ${toolName("memory_restore")} with the slug to undo the deletion, while the history entry is retained.`,
+      "Move one memory node or staging candidate into history without hard-deleting it.",
+      "The match may be an exact slug or a case-insensitive substring of its title, tags, or body; both canonical memories and staging candidates are searched.",
+      "Ambiguous matches are rejected, and the error names each one as a memory or a candidate.",
+      "A memory is copied to history/deleted/<slug>.md before it leaves nodes/; a candidate is copied to history/dropped/<slug>.md before it leaves staging/, the same entry a sweep's drop decision writes.",
+      `Use ${toolName("memory_restore")} with the slug to undo the deletion: a memory returns to nodes/, a candidate to staging/.`,
     ].join("\n"),
     parameters: Type.Object({
       match: Type.String({
@@ -267,12 +270,16 @@ export function registerMemoryTools(
           {
             type: "text",
             text:
-              `Moved memory "${result.slug}" to ${result.historyPath}.\n` +
-              `Use ${toolName("memory_restore")} with the slug to undo the deletion while the history entry is retained.`,
+              result.area === "staging"
+                ? `Dropped candidate "${result.slug}" to ${result.historyPath}.\n` +
+                  `Use ${toolName("memory_restore")} with the slug to return it to staging, where the next sweep will consider it again.`
+                : `Moved memory "${result.slug}" to ${result.historyPath}.\n` +
+                  `Use ${toolName("memory_restore")} with the slug to undo the deletion while the history entry is retained.`,
           },
         ],
         details: {
           slug: result.slug,
+          area: result.area,
           historyPath: result.historyPath,
         },
       };

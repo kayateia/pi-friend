@@ -82,9 +82,14 @@ export interface MemoryEditInput {
   reason?: string;
 }
 
-/** Result of moving one canonical node into the history tree. */
+/** Result of moving one live node into the history tree. */
 export interface MemoryDeletionResult {
   slug: string;
+  /**
+   * Which area the node left. A deleted memory comes back canonical, a dropped
+   * candidate staged, so the caller needs this to phrase the undo.
+   */
+  area: MemoryNodeArea;
   /** Path of the archived copy, relative to the memory root. */
   historyPath: string;
   original: ParsedMemoryNode;
@@ -756,21 +761,22 @@ export class MemoryNodeService {
    * a drop is a decision about a candidate, not an accumulating record.
    */
   async archiveCandidate(slug: string): Promise<string> {
-    return this.runSerialized(async () => {
-      const candidate = await this.repository.read(slug, "staging");
-      if (candidate === null) {
-        throw new MemoryServiceError(
-          `No staging candidate found for "${slug}".`,
-        );
-      }
-      const relativePath = await writeHistoryEntry(this.repository.store, {
-        kind: "dropped",
-        slug,
-        node: cloneNode(candidate),
-      });
-      await this.repository.remove(slug, "staging");
-      return relativePath;
+    return this.runSerialized(() => this.archiveCandidateLocked(slug));
+  }
+
+  /** The drop itself, assuming the caller already holds the mutation lock. */
+  private async archiveCandidateLocked(slug: string): Promise<string> {
+    const candidate = await this.repository.read(slug, "staging");
+    if (candidate === null) {
+      throw new MemoryServiceError(`No staging candidate found for "${slug}".`);
+    }
+    const relativePath = await writeHistoryEntry(this.repository.store, {
+      kind: "dropped",
+      slug,
+      node: cloneNode(candidate),
     });
+    await this.repository.remove(slug, "staging");
+    return relativePath;
   }
 
   /** Updates editable node fields while preserving creation and usage state. */
@@ -861,12 +867,18 @@ export class MemoryNodeService {
   }
 
   /**
-   * Moves exactly one matching canonical node into the history tree.
+   * Moves exactly one matching live node into the history tree.
    *
-   * The archived copy is written before the canonical file is removed, and it
-   * is the node exactly as it was, so restoring is a copy rather than a
-   * reconstruction. Ambiguous substring matches are rejected so a broad request
-   * cannot delete several memories by accident.
+   * Both live areas are searched. The area decides the entry: a canonical
+   * memory is archived as `deleted`, while a staging candidate is archived as
+   * `dropped` — the same entry the sweep writes when its model rejects a
+   * candidate — so a candidate a person knows to be false is recoverable by
+   * exactly the route the sweep's own rejections are. The archived copy is
+   * written before the live file is removed, and it is the node exactly as it
+   * was, so restoring is a copy rather than a reconstruction. Ambiguous
+   * substring matches are rejected so a broad request cannot delete several
+   * nodes by accident; slugs are unique across the live areas, so an exact slug
+   * never has to choose between them.
    */
   async delete(match: string): Promise<MemoryDeletionResult> {
     return this.runSerialized(async () => {
@@ -875,17 +887,28 @@ export class MemoryNodeService {
         throw new MemoryServiceError("Delete match must not be empty.");
       }
 
-      const nodes = await this.repository.list("canonical");
-      const exact = nodes.find((node) => node.slug === query.toLowerCase());
-      let target = exact;
+      // Canonical first so an ambiguity is listed memories before candidates,
+      // which is the order the question is usually asked in.
+      const live = [
+        ...(await this.repository.list("canonical")).map((node) => ({
+          node,
+          area: "canonical" as MemoryNodeArea,
+        })),
+        ...(await this.repository.list("staging")).map((node) => ({
+          node,
+          area: "staging" as MemoryNodeArea,
+        })),
+      ];
+
+      const normalizedQuery = query.toLowerCase();
+      let target = live.find((entry) => entry.node.slug === normalizedQuery);
       if (!target) {
-        const normalizedQuery = query.toLowerCase();
-        const matches = nodes.filter((node) =>
+        const matches = live.filter((entry) =>
           [
-            node.slug,
-            node.frontMatter.title,
-            node.frontMatter.tags.join(" "),
-            node.body,
+            entry.node.slug,
+            entry.node.frontMatter.title,
+            entry.node.frontMatter.tags.join(" "),
+            entry.node.body,
           ]
             .join("\n")
             .toLowerCase()
@@ -894,27 +917,42 @@ export class MemoryNodeService {
 
         if (matches.length === 0) {
           throw new MemoryServiceError(
-            `No canonical memory matches "${query}".`,
+            `No memory or staging candidate matches "${query}".`,
           );
         }
         if (matches.length > 1) {
           throw new MemoryServiceError(
-            `"${query}" matches multiple memories: ${matches
-              .map((node) => node.slug)
+            `"${query}" is ambiguous: ${matches
+              .map(
+                (entry) =>
+                  `${entry.node.slug} (${
+                    entry.area === "staging" ? "candidate" : "memory"
+                  })`,
+              )
               .join(", ")}. Use an exact slug or a narrower match.`,
           );
         }
         target = matches[0];
       }
 
-      const original = cloneNode(target);
+      if (target.area === "staging") {
+        const historyPath = await this.archiveCandidateLocked(target.node.slug);
+        return {
+          slug: target.node.slug,
+          area: "staging",
+          historyPath,
+          original: cloneNode(target.node),
+        };
+      }
+
+      const original = cloneNode(target.node);
       const historyPath = await writeHistoryEntry(this.repository.store, {
         kind: "deleted",
-        slug: target.slug,
-        node: cloneNode(target),
+        slug: target.node.slug,
+        node: cloneNode(target.node),
       });
       try {
-        await this.repository.remove(target.slug, "canonical");
+        await this.repository.remove(target.node.slug, "canonical");
       } catch (error) {
         // The node is still canonical, so the archive would claim a deletion
         // that did not happen. Drop it and let the failure stand.
@@ -922,7 +960,12 @@ export class MemoryNodeService {
         throw error;
       }
 
-      return { slug: target.slug, historyPath, original };
+      return {
+        slug: target.node.slug,
+        area: "canonical",
+        historyPath,
+        original,
+      };
     });
   }
 

@@ -33,7 +33,7 @@ memory/
 ├── staging/             ← auto-captured candidates, not yet promoted
 ├── history/             ← previous versions, one subtree per reason
 │   ├── deleted/         ← <slug>.md, the node as it was before deletion
-│   ├── dropped/         ← <slug>.md, a staging candidate removed by a sweep
+│   ├── dropped/         ← <slug>.md, a staging candidate removed by a sweep or by hand
 │   ├── edited/          ← <slug>/<timestamp>.md, the version an edit replaced
 │   ├── merged/          ← <slug>/<timestamp>.md, before a merge rewrote it
 │   └── split/           ← <slug>/<timestamp>.md, before a split divided it
@@ -142,7 +142,7 @@ Body: concise, single-topic prose. May include short verbatim quotes (with speak
 The names below are the built-in tool names. A configured `tool_prefix` is prepended to each.
 
 - `memory_add(title, body, front_matter_extras?)` → creates a canonical active node, derives a unique slug, and records links, tags, speaker attribution, and other front-matter metadata.
-- `memory_delete(match)` → copies the node to `history/deleted/<slug>.md`, then removes it from `nodes/` (does not hard-delete).
+- `memory_delete(match)` → copies the node to `history/deleted/<slug>.md` and removes it from `nodes/`, or, for a staging candidate, to `history/dropped/<slug>.md` and out of `staging/` (does not hard-delete). The match spans both areas; an ambiguous match is rejected with each result labelled memory or candidate.
 - `memory_edit(slug, edits)` → edits body/front matter while preserving `created`, `use_count`, and decay state; sets `edited` and stores the replaced version under `history/edited/<slug>/` with the edit's reason.
 - `memory_restore(slug, timestamp?)` → copies a memory back out of `history/`, preferring the deletion entry and otherwise the newest stored version; replaces a live node of the same slug (archiving its text first) and removes the entry it extracted. Restoring a split source removes the children the split recorded.
 - `memory_read(slug, area?)` → reads a complete serialized node from canonical or staging storage.
