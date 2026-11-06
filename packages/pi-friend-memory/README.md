@@ -311,6 +311,13 @@ Pi reads the extension entry point from the `pi.extensions` field in
   near-duplicates into an existing canonical node. Before a merge rewrites the
   target, both sides are stored under `history/merged/<slug>/`, because those
   are the only copies that will not exist afterwards.
+- `memory_merge` merges one or more memories into a target in one operation. Sources
+  may be canonical memories or staging candidates; the target must be canonical.
+  Every source is archived under `history/merged/` before it is removed, so the
+  merge is undoable with `memory_restore`. Omit `body` and the merge model writes
+  the consolidated text from all sources; supply it and the text is used verbatim,
+  with no rewrite and no conflict note — corrections and superseded facts are not
+  conflicts, so a merge that needs one is usually the wrong merge.
 - `memory_read` reads a complete node from canonical or staging storage.
 - Search results and recalled blocks both carry attribution — `Heard from: Aria; Iri
   (uncertain) — relayed` — because in a plural system who said something is part of

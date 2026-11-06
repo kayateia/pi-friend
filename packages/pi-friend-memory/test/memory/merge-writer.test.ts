@@ -220,3 +220,121 @@ test("a source's date is edited when present, created otherwise", () => {
     "2026-11-02T00:00:00.000Z",
   );
 });
+
+test("a manual merge can combine two canonical memories", async () => {
+  await withTempDir(async (agentDir) => {
+    let writerCalls = 0;
+    const { service, repository } = await makeService(agentDir, async () => {
+      writerCalls += 1;
+      return { body: "Written by the merge model." };
+    });
+
+    const target = await service.add({
+      title: "House Rules",
+      type: "fact",
+      body: "Rules live here.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+    const source = await service.add({
+      title: "Old Rules",
+      type: "fact",
+      body: "An older statement of the same rules.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+
+    const result = await service.mergeCandidates(target.slug, [source.slug]);
+
+    assert.equal(writerCalls, 1);
+    assert.equal(result.node.body.trim(), "Written by the merge model.");
+    assert.deepEqual(result.removedMemories, [source.slug]);
+    assert.deepEqual(result.removedCandidates, []);
+    // The source is gone from canonical memory and archived as a version.
+    assert.equal(await service.read(source.slug), null);
+    assert.equal(
+      (await repository.store.listDirectoryMarkdown(
+        `history/merged/${source.slug}`,
+      )).length,
+      1,
+    );
+  });
+});
+
+test("a supplied body replaces the writer entirely", async () => {
+  await withTempDir(async (agentDir) => {
+    let writerCalls = 0;
+    const { service } = await makeService(agentDir, async () => {
+      writerCalls += 1;
+      return { body: "Written by the merge model." };
+    });
+    const target = await service.add({
+      title: "Written By Hand",
+      type: "fact",
+      body: "Target body.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+    const source = await service.add({
+      title: "Absorbed",
+      type: "fact",
+      body: "Source body.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+
+    const result = await service.mergeCandidates(target.slug, [source.slug], {
+      body: "Exactly this text, no rewrite.",
+    });
+
+    assert.equal(writerCalls, 0);
+    assert.equal(result.bodySupplied, true);
+    assert.equal(result.rewritten, true);
+    assert.equal(result.node.body.trim(), "Exactly this text, no rewrite.");
+  });
+});
+
+test("a merge refuses a target merged into itself and unknown sources", async () => {
+  await withTempDir(async (agentDir) => {
+    const { service } = await makeService(agentDir);
+    const target = await service.add({
+      title: "Target",
+      type: "fact",
+      body: "Target body.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+
+    await assert.rejects(
+      () => service.mergeCandidates(target.slug, [target.slug]),
+      /into itself/,
+    );
+    await assert.rejects(
+      () => service.mergeCandidates(target.slug, ["never-existed"]),
+      /No memory or staging candidate found/,
+    );
+    // Nothing was changed by either refusal.
+    assert.ok(await service.read(target.slug));
+  });
+});
+
+test("repeated source slugs merge once", async () => {
+  await withTempDir(async (agentDir) => {
+    const { service } = await makeService(agentDir, async () => ({
+      body: "Merged.",
+    }));
+    const target = await service.add({
+      title: "Target",
+      type: "fact",
+      body: "Target body.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+    const source = await service.add({
+      title: "Source",
+      type: "fact",
+      body: "Source body.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+
+    const result = await service.mergeCandidates(target.slug, [
+      source.slug,
+      source.slug,
+    ]);
+    assert.deepEqual(result.removedMemories, [source.slug]);
+  });
+});
