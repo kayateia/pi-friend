@@ -256,7 +256,7 @@ test("delete rejects ambiguous substring matches but accepts an exact slug", asy
 
     await assert.rejects(
       () => service.delete("shared"),
-      /matches multiple memories/,
+      /is ambiguous/u,
     );
     assert.ok(await service.read(first.slug));
     assert.ok(await service.read(second.slug));
@@ -264,6 +264,92 @@ test("delete rejects ambiguous substring matches but accepts an exact slug", asy
     await service.delete(first.slug);
     assert.equal(await service.read(first.slug), null);
     assert.ok(await service.read(second.slug));
+  });
+});
+
+test("delete drops a staging candidate into history/dropped", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await makeService(agentDir);
+    const falseCandidate = await service.stageCandidate({
+      title: "False Candidate",
+      type: "fact",
+      body: "The extension caches embeddings forever.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+    const keptCandidate = await service.stageCandidate({
+      title: "True Candidate",
+      type: "fact",
+      body: "The module cache is process-wide.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+
+    // A substring finds the candidate without the caller naming its area.
+    const dropped = await service.delete("caches embeddings");
+    assert.equal(dropped.slug, falseCandidate.node.slug);
+    assert.equal(dropped.area, "staging");
+    assert.equal(
+      dropped.historyPath,
+      `history/dropped/${falseCandidate.node.slug}.md`,
+    );
+    assert.equal(await service.read(falseCandidate.node.slug, "staging"), null);
+    assert.ok(await service.read(keptCandidate.node.slug, "staging"));
+    assert.equal(await service.read(falseCandidate.node.slug), null);
+
+    // The archive is the candidate as it was, and restoring returns it to
+    // staging rather than promoting an unverified draft into memory.
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const archived = await readHistoryEntry(
+      repository.store,
+      dropped.historyPath,
+      falseCandidate.node.slug,
+    );
+    assert.equal(archived?.frontMatter.status, "candidate");
+    assert.match(archived?.body ?? "", /caches embeddings forever/u);
+
+    const restored = await service.restore(falseCandidate.node.slug);
+    assert.equal(restored.restoredTo, "staging");
+    assert.match(restored.restoredFrom, /^history\/dropped\//u);
+    assert.match(
+      (await service.read(falseCandidate.node.slug, "staging"))?.body ?? "",
+      /caches embeddings forever/u,
+    );
+  });
+});
+
+test("delete names each ambiguous match as a memory or a candidate", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await makeService(agentDir);
+    const memory = await service.add({
+      title: "Sweep Window Memory",
+      type: "fact",
+      body: "A canonical note about the sweep window.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+    const candidate = await service.stageCandidate({
+      title: "Sweep Window Candidate",
+      type: "fact",
+      body: "A candidate note about the sweep window.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+
+    await assert.rejects(
+      () => service.delete("sweep window"),
+      new RegExp(
+        `is ambiguous: ${memory.slug} \\(memory\\), ${candidate.node.slug} \\(candidate\\)`,
+        "u",
+      ),
+    );
+    assert.ok(await service.read(memory.slug));
+    assert.ok(await service.read(candidate.node.slug, "staging"));
+
+    // The escape hatch the message names works: a slug is unique across the
+    // live areas, so an exact slug never has to choose.
+    const dropped = await service.delete(candidate.node.slug);
+    assert.equal(dropped.area, "staging");
+    assert.ok(await service.read(memory.slug));
   });
 });
 

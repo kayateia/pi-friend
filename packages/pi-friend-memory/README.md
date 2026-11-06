@@ -298,8 +298,12 @@ Pi reads the extension entry point from the `pi.extensions` field in
 - `memory_edit` updates an existing node while preserving creation and usage
   metadata, and stores the version it replaces under `history/edited/<slug>/`
   with the edit's reason.
-- `memory_delete` copies exactly one matched node into
-  `history/deleted/<slug>.md` before removing it from `nodes/`.
+- `memory_delete` copies exactly one matched node into history before removing
+  it: a memory goes to `history/deleted/<slug>.md` and leaves `nodes/`, while a
+  staging candidate goes to `history/dropped/<slug>.md` and leaves `staging/` —
+  the same entry the sweep writes when its model rejects a candidate. The match
+  may name either area, and an ambiguity is rejected with each match labelled
+  memory or candidate.
 - `memory_restore` copies a memory back out of history by slug, optionally
   naming a version. Without a timestamp it prefers the deletion entry, then the
   newest stored version, then a dropped candidate. A live node with the same
