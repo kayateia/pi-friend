@@ -453,6 +453,35 @@ The Markdown tree remains canonical. Deleting `index/vectors.sqlite` is always
 safe because the index can be rebuilt from source files. Hybrid mode combines
 keyword and semantic candidates using reciprocal-rank fusion.
 
+## Models for the internal passes
+
+Capture, the sweep, dreaming and the merge writer each take an optional
+`model` (`memory.auto_capture.model`, `memory.sweep.model`,
+`memory.dreaming.model`, `memory.merge.model`) and an optional `thinking_level`.
+Everything about "the configured model cannot be used" is handled once, so the
+four passes behave the same way:
+
+| Situation | What happens |
+| --- | --- |
+| No `model` configured | the session's current model is used |
+| `model` lacks a `provider/` prefix | warning, session model |
+| `model` is not in the registry | warning, session model |
+| The model resolves but the request fails | the pass fails, visibly; the model is not swapped mid-pass |
+| The provider rejects the thinking level | retried once without it, announced once per model and level |
+| No session model at all | the pass reports that every time it runs |
+
+The thinking-level retry is a fallback, not a check: the model catalogue is
+maintained by hand, so it can be wrong about which levels a provider accepts,
+and a provider can reject one it claims to support. Neither is worth abandoning
+a pass that has already produced decisions, which is why the retry exists — but
+a level that never works is a configuration mistake, so the retry is announced
+once and logged every time. Banners are deduplicated per process; the file log
+deduplicates identical errors separately.
+
+Not swapping models mid-pass is deliberate: a substitution makes "why did this
+merge come out differently" unanswerable, and a rate limit would double the cost
+of every retry.
+
 ## Diagnostics and errors
 
 Initialization failures and recoverable background failures are always appended

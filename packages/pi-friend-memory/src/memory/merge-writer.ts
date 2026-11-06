@@ -123,6 +123,8 @@ export function createMergeWriter(
       userContent: buildMergePrompt(sources),
       maxTokens: 4_000,
       timeoutMs: MERGE_TIMEOUT_MS,
+      label: "merge",
+      reportWarning,
       ...(signal === undefined ? {} : { signal }),
       ...(config.thinkingLevel === undefined
         ? {}

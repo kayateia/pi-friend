@@ -149,6 +149,8 @@ export async function runDreamModel(
     userContent: buildDreamPrompt(shortlist, maxNodes),
     maxTokens: 2_000,
     timeoutMs: 30_000,
+    label: "dreaming",
+    reportWarning,
     ...(signal === undefined ? {} : { signal }),
     ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
   });

@@ -161,6 +161,8 @@ export async function runSweepModel(
     userContent: buildSweepPrompt(candidates, canonical, allowDrop),
     maxTokens: SWEEP_MAX_TOKENS,
     timeoutMs: 30_000,
+    label: "sweep",
+    reportWarning,
     ...(signal === undefined ? {} : { signal }),
     ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
   });

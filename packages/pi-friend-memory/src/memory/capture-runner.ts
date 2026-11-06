@@ -56,6 +56,8 @@ export async function runCaptureModel(
     ),
     maxTokens: 2_000,
     timeoutMs: CAPTURE_TIMEOUT_MS,
+    label: "auto-capture",
+    reportWarning,
     signal,
     ...(config.thinkingLevel === undefined
       ? {}
