@@ -125,6 +125,8 @@ export interface MemoryMergeResult {
 export interface MemoryPromotionResult {
   node: ParsedMemoryNode;
   merged: boolean;
+  /** For a merge, false when the writer failed and bodies were appended. */
+  rewritten?: boolean;
   mergedInto?: string;
 }
 
@@ -531,6 +533,7 @@ export class MemoryNodeService {
           node: result.node,
           merged: true,
           mergedInto: target.slug,
+          rewritten: result.rewritten,
         };
       }
 

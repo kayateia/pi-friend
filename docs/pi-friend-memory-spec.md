@@ -242,6 +242,8 @@ background signal and waits for cleanup before closing the semantic index.
 
 **Merging cold nodes:** when a summary node absorbs detail, relocate detail, never delete it. Preserve any pointers to full analyses verbatim.
 
+**Merges are written, not concatenated.** The model that decides what merges also does not write the result: a separate writer composes one body from all the sources at once, seeing their speakers and dates so it can attribute and supersede correctly. Tags, links, speakers and supersedes are unioned by code, and a written body that cannot be produced falls back to appending, because an append cannot lose a fact.
+
 Once per day, a model pass:
   1. Processes volume-relative decay on `staging` nodes using the canonical volume curve and `0.05` floor, without resetting decay for RAG hits. Candidates whose decay weight reaches `0.05` are removed before model review, logged, and included in the 25% removal total. Do not expire candidates solely because wall-clock time has passed.
   2. Reviews remaining candidates in `staging/` (`promote`, `merge`; log each decision).

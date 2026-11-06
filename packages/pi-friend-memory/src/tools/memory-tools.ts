@@ -336,7 +336,7 @@ export function registerMemoryTools(
     label: "Memory Promote",
     description: [
       "Promote one auto-captured candidate from staging into canonical memory.",
-      "Near-duplicates are merged into an existing active node with links, tags, speakers, and audit history preserved.",
+      "Near-duplicates are merged into an existing active node: the merged body is written by the merge model, while tags, links, speakers and supersedes are unioned by the code.",
       `Use ${toolName("memory_search")} to find staging candidates when their slug is not already known.`,
     ].join("\n"),
     parameters: Type.Object({
@@ -362,7 +362,11 @@ export function registerMemoryTools(
           {
             type: "text",
             text: result.merged
-              ? `Merged staging candidate "${params.slug}" into canonical memory "${result.mergedInto}".`
+              ? `Merged staging candidate "${params.slug}" into canonical memory "${result.mergedInto}".${
+                  result.rewritten === false
+                    ? " The merge writer failed, so the bodies were appended instead; see pi-friend.log."
+                    : ""
+                }`
               : `Promoted staging candidate "${params.slug}" into canonical memory.`,
           },
         ],
