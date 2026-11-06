@@ -106,6 +106,29 @@ export function recentTurnStart(
   return 0;
 }
 
+/**
+ * Returns where a capture begins reading, and whether the cursor was usable.
+ *
+ * A cursor naming an entry in the branch is exact, and the read starts after it.
+ * A cursor naming nothing — compacted away, or recorded against a branch that is
+ * no longer the leaf — is ambiguous, so the bounded recent-turn window is the
+ * fallback. `cursorFound` lets the caller warn about exactly that case without
+ * treating a session that has never been captured as an anomaly.
+ */
+export function captureStartIndex(
+  entries: SessionEntry[],
+  cursor: string | undefined,
+  everyTurns: number,
+): { startIndex: number; cursorFound: boolean } {
+  if (cursor !== undefined) {
+    const index = entries.findIndex((entry) => entry.id === cursor);
+    if (index >= 0) {
+      return { startIndex: index + 1, cursorFound: true };
+    }
+  }
+  return { startIndex: recentTurnStart(entries, everyTurns), cursorFound: false };
+}
+
 /** Parses the capture model's JSON response into validated draft objects. */
 export function parseCaptureResponse(
   response: string,

@@ -52,6 +52,22 @@ export class AutoCaptureScheduler {
     this.scheduleTimer();
   }
 
+  /**
+   * Arms one idle debounce without recording a settled run.
+   *
+   * A session can be loaded holding material its capture cursor has not passed,
+   * with no settlement ahead to arm anything: after a restart, or when a session
+   * is opened long after it was last spoken in. Without this the work waits for
+   * someone to speak again, which may never happen.
+   */
+  armIdleCapture(): void {
+    if (this.stopped) {
+      return;
+    }
+    this.clearTimer();
+    this.scheduleTimer();
+  }
+
   /** Cancels pending timer work and prevents a later capture. */
   shutdown(): void {
     this.stopped = true;

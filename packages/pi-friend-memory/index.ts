@@ -33,7 +33,10 @@ import {
   defaultMergeConfig,
   type MergeConfig,
 } from "./src/memory/config.ts";
-import { recentTurnStart, serializeCaptureTranscript } from "./src/memory/capture.ts";
+import {
+  captureStartIndex,
+  serializeCaptureTranscript,
+} from "./src/memory/capture.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
 import { createMergeWriter } from "./src/memory/merge-writer.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
@@ -134,24 +137,20 @@ export default async function registerPiFriend(
       const cursor = restored.cursor?.lastEntryId;
 
       const branch = ctx.sessionManager.getBranch();
-      const cursorIndex = cursor
-        ? branch.findIndex((entry) => entry.id === cursor)
-        : -1;
       // A known cursor is exact. An unknown one is bounded to the most recent
       // turns rather than to the whole session: the previous capture almost
       // certainly covered the older material, and the 24,000-character cap
       // would drop it anyway — after paying to send it.
-      let startIndex: number;
-      if (cursorIndex >= 0) {
-        startIndex = cursorIndex + 1;
-      } else {
-        if (cursor !== undefined) {
-          reportCaptureWarning(
-            ctx,
-            "pi-friend auto-capture: the saved capture cursor is not in this session branch; capturing only the most recent turns.",
-          );
-        }
-        startIndex = recentTurnStart(branch, config.everyTurns);
+      const { startIndex, cursorFound } = captureStartIndex(
+        branch,
+        cursor,
+        config.everyTurns,
+      );
+      if (cursor !== undefined && !cursorFound) {
+        reportCaptureWarning(
+          ctx,
+          "pi-friend auto-capture: the saved capture cursor is not in this session branch; capturing only the most recent turns.",
+        );
       }
       const entries = branch.slice(startIndex);
       const transcript = serializeCaptureTranscript(entries);
@@ -206,6 +205,45 @@ export default async function registerPiFriend(
         `pi-friend auto-capture failed: ${formatErrorChain(error)}`,
       );
     }
+  };
+
+  /**
+   * Reports whether a session loaded now holds material its cursor has not passed.
+   *
+   * Derived, not stored. The cursor already records how far capture got, and the
+   * branch is the authority on what has happened since; a flag written on every
+   * message would be a second copy of that truth, able to lag behind it after a
+   * failed write and to lie differently about which session it describes.
+   *
+   * An unknown cursor deliberately does not count. Its fallback re-reads the most
+   * recent turns, which may already have been captured, and arming on every
+   * resume would then stage duplicates each time a session is opened — so that
+   * case stays with the next settle, where it has always belonged.
+   */
+  const hasUncapturedEntries = async (
+    ctx: ExtensionContext,
+    config: AutoCaptureConfig,
+  ): Promise<boolean> => {
+    const branch = ctx.sessionManager.getBranch();
+    if (branch.length === 0) {
+      return false;
+    }
+    const restored = await readCaptureCursor(
+      captureStatePath(),
+      ctx.sessionManager.getSessionId(),
+    );
+    const cursor = restored.cursor?.lastEntryId;
+    const { startIndex, cursorFound } = captureStartIndex(
+      branch,
+      cursor,
+      config.everyTurns,
+    );
+    if (cursor !== undefined && !cursorFound) {
+      return false;
+    }
+    return (
+      serializeCaptureTranscript(branch.slice(startIndex)).trim() !== ""
+    );
   };
 
   /** Runs one sweep and reports its outcome without throwing to Pi hooks. */
@@ -322,6 +360,13 @@ export default async function registerPiFriend(
         capture: () => executeCapture(ctx, service, config),
         reportError: (label, error) => logError(label, error),
       });
+      // A reload or resume lands here with the session's history already in the
+      // branch, and nothing else will arm a capture until someone speaks. If the
+      // cursor has not passed that history, arm the idle debounce now so the work
+      // is captured even in a session nobody returns to.
+      if (config.enabled && (await hasUncapturedEntries(ctx, config))) {
+        captureScheduler.armIdleCapture();
+      }
     } catch (error) {
       logError("memory initialization", error);
       const message = `pi-friend memory initialization failed: ${formatErrorChain(error)}`;
