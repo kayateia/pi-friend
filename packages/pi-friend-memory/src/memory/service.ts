@@ -15,8 +15,9 @@ import {
   serializeMemoryNode,
 } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
-import { appendAuditEntry } from "./audit.ts";
 import type { HistoryKind } from "./history.ts";
+import type { MergeRewrite, MergeWriter } from "./merge-writer.ts";
+import { toMergeSource } from "./merge-writer.ts";
 import {
   VERSIONED_HISTORY_KINDS,
   historyEntryPath,
@@ -111,6 +112,15 @@ export interface MemoryStageResult {
   created: boolean;
 }
 
+/** Result of merging one or more staging candidates into a canonical node. */
+export interface MemoryMergeResult {
+  node: ParsedMemoryNode;
+  mergedInto: string;
+  /** False when the writer failed and the mechanical append was used instead. */
+  rewritten: boolean;
+  rewriteError?: string;
+}
+
 /** Result of promoting one staging candidate. */
 export interface MemoryPromotionResult {
   node: ParsedMemoryNode;
@@ -152,6 +162,7 @@ export class MemoryNodeService {
   private readonly now: () => Date;
   private readonly semantic: SemanticSearchDependencies | undefined;
   private readonly externalIndex: ExternalIndexSource | undefined;
+  private readonly mergeWriter: MergeWriter | undefined;
   private readonly lockContext = new AsyncLocalStorage<boolean>();
 
   constructor(
@@ -159,11 +170,13 @@ export class MemoryNodeService {
     now: () => Date = () => new Date(),
     semantic: SemanticSearchDependencies | undefined = undefined,
     externalIndex: ExternalIndexSource | undefined = undefined,
+    mergeWriter: MergeWriter | undefined = undefined,
   ) {
     this.repository = repository;
     this.now = now;
     this.semantic = semantic;
     this.externalIndex = externalIndex;
+    this.mergeWriter = mergeWriter;
   }
 
   /** Storage handle used by sweep artifact/state management. */
@@ -480,7 +493,7 @@ export class MemoryNodeService {
   async promoteCandidate(
     slug: string,
     preferredTarget?: string,
-    options: { conflict?: string } = {},
+    options: { conflict?: string; reportWarning?: (message: string) => void } = {},
   ): Promise<MemoryPromotionResult> {
     return this.runSerialized(async () => {
       const candidate = await this.repository.read(slug, "staging");
@@ -499,49 +512,23 @@ export class MemoryNodeService {
           `Preferred merge target "${preferredTarget}" does not exist.`,
         );
       }
+      if (target === null && this.semantic) {
+        target = await this.findPromotionDuplicate(candidate);
+      }
       if (target !== null && isQuarantinedMemoryType(target.frontMatter.type)) {
         throw new MemoryServiceError(
           `Cannot merge a staging candidate into ${target.frontMatter.type} memory "${target.slug}".`,
         );
       }
-      if (target === null && this.semantic) {
-        target = await this.findPromotionDuplicate(candidate);
-      }
 
       if (target !== null) {
-        // Both sides are stored before the write. A merge is the one operation
-        // whose inputs stop existing afterwards: the target is rewritten in
-        // place and the candidate leaves staging.
-        const conflict = options.conflict?.trim();
-        await writeHistoryEntry(this.repository.store, {
-          kind: "merged",
-          slug: target.slug,
-          timestamp: now,
-          node: {
-            slug: target.slug,
-            frontMatter: {
-              ...target.frontMatter,
-              ...(conflict === undefined || conflict === ""
-                ? {}
-                : { history_conflict: conflict }),
-            },
-            body: target.body,
-          },
-        });
-        await writeHistoryEntry(this.repository.store, {
-          kind: "merged",
-          slug: candidate.slug,
-          timestamp: now,
-          node: cloneNode(candidate),
-        });
-        await this.pruneHistoryFor("merged", target.slug);
-        await this.pruneHistoryFor("merged", candidate.slug);
-
-        const merged = mergeCandidate(target, candidate, now);
-        await this.repository.write(merged, "canonical");
-        await this.repository.remove(candidate.slug, "staging");
+        const result = await this.mergeCandidatesLocked(
+          target.slug,
+          [candidate.slug],
+          options,
+        );
         return {
-          node: merged,
+          node: result.node,
           merged: true,
           mergedInto: target.slug,
         };
@@ -553,16 +540,159 @@ export class MemoryNodeService {
       promoted.frontMatter.last_used = now;
       promoted.frontMatter.edited = now;
       promoted.frontMatter.superseded_by = "";
-      promoted.body = appendAuditEntry(
-        promoted.body,
-        now,
-        "memory_promote: promoted from staging",
-      );
 
       await this.repository.write(promoted, "canonical");
       await this.repository.remove(candidate.slug, "staging");
       return { node: promoted, merged: false };
     });
+  }
+
+  /**
+   * Merges staging candidates into one canonical node.
+   *
+   * Grouped by target rather than one call per decision: several candidates
+   * landing in the same memory are one consolidation, and rewriting it once
+   * from all of them is both cheaper and more coherent than rewriting it
+   * repeatedly from each intermediate result.
+   *
+   * The merged body comes from the configured writer when one exists. If it
+   * fails, the mechanical append that predates it is used instead and the
+   * failure is reported — a merge that cannot be written well should still
+   * happen, because refusing it re-offers the same candidates every sweep.
+   */
+  async mergeCandidates(
+    targetSlug: string,
+    candidateSlugs: string[],
+    options: { conflict?: string; reportWarning?: (message: string) => void } = {},
+  ): Promise<MemoryMergeResult> {
+    return this.runSerialized(() =>
+      this.mergeCandidatesLocked(targetSlug, candidateSlugs, options),
+    );
+  }
+
+  /**
+   * The merge itself, assuming the caller already holds the mutation lock.
+   *
+   * `promoteCandidate` calls this directly: it is already serialized, and a
+   * nested `runSerialized` would queue behind its own lock and hang.
+   */
+  private async mergeCandidatesLocked(
+    targetSlug: string,
+    candidateSlugs: string[],
+    options: { conflict?: string; reportWarning?: (message: string) => void } = {},
+  ): Promise<MemoryMergeResult> {
+      if (candidateSlugs.length === 0) {
+        throw new MemoryServiceError("A merge needs at least one candidate.");
+      }
+      const target = await this.repository.read(targetSlug, "canonical");
+      if (target === null) {
+        throw new MemoryServiceError(
+          `Merge target "${targetSlug}" does not exist.`,
+        );
+      }
+      if (isQuarantinedMemoryType(target.frontMatter.type)) {
+        throw new MemoryServiceError(
+          `Cannot merge into ${target.frontMatter.type} memory "${target.slug}".`,
+        );
+      }
+
+      const candidates: ParsedMemoryNode[] = [];
+      for (const slug of candidateSlugs) {
+        const candidate = await this.repository.read(slug, "staging");
+        if (candidate === null) {
+          throw new MemoryServiceError(
+            `No staging candidate found for "${slug}".`,
+          );
+        }
+        candidates.push(candidate);
+      }
+
+      const now = this.now().toISOString();
+      const sources = [target, ...candidates].map(toMergeSource);
+
+      let rewrite: MergeRewrite | undefined;
+      let rewriteError: string | undefined;
+      if (this.mergeWriter !== undefined) {
+        try {
+          rewrite = await this.mergeWriter(sources);
+        } catch (error) {
+          rewriteError = formatErrorChain(error);
+        }
+      }
+
+      const conflict = (rewrite?.conflict ?? options.conflict)?.trim();
+      await writeHistoryEntry(this.repository.store, {
+        kind: "merged",
+        slug: target.slug,
+        timestamp: now,
+        node: {
+          slug: target.slug,
+          frontMatter: {
+            ...target.frontMatter,
+            ...(conflict === undefined || conflict === ""
+              ? {}
+              : { history_conflict: conflict }),
+          },
+          body: target.body,
+        },
+      });
+      for (const candidate of candidates) {
+        await writeHistoryEntry(this.repository.store, {
+          kind: "merged",
+          slug: candidate.slug,
+          timestamp: now,
+          node: cloneNode(candidate),
+        });
+      }
+      await this.pruneHistoryFor("merged", target.slug);
+      for (const candidate of candidates) {
+        await this.pruneHistoryFor("merged", candidate.slug);
+      }
+
+      const merged = cloneNode(target);
+      merged.body = rewrite?.body ?? appendMechanically(target, candidates);
+      merged.frontMatter.edited = now;
+      for (const candidate of candidates) {
+        merged.frontMatter.agents = unique([
+          ...merged.frontMatter.agents,
+          ...candidate.frontMatter.agents,
+        ]);
+        merged.frontMatter.tags = unique([
+          ...merged.frontMatter.tags,
+          ...candidate.frontMatter.tags,
+        ]);
+        merged.frontMatter.links = unique([
+          ...merged.frontMatter.links,
+          ...candidate.frontMatter.links,
+        ]).filter((link) => link !== target.slug);
+        merged.frontMatter.supersedes = unique([
+          ...merged.frontMatter.supersedes,
+          ...candidate.frontMatter.supersedes,
+        ]);
+        merged.frontMatter.speaker = mergeSpeakers(
+          merged.frontMatter.speaker,
+          candidate.frontMatter.speaker,
+        );
+      }
+
+      await this.repository.write(merged, "canonical");
+      for (const candidate of candidates) {
+        await this.repository.remove(candidate.slug, "staging");
+      }
+
+      if (rewriteError !== undefined) {
+        logError("memory merge writer", new Error(rewriteError));
+        options.reportWarning?.(
+          `pi-friend memory: merging into "${target.slug}" used the mechanical append because the merge writer failed (${rewriteError}).`,
+        );
+      }
+
+      return {
+        node: merged,
+        mergedInto: target.slug,
+        rewritten: rewrite !== undefined,
+        ...(rewriteError === undefined ? {} : { rewriteError }),
+      };
   }
 
   /**
@@ -1099,50 +1229,30 @@ function cloneNode(node: ParsedMemoryNode): ParsedMemoryNode {
   };
 }
 
-/** Merges a staging candidate into an existing canonical node. */
-function mergeCandidate(
+/**
+ * Concatenates bodies the way merges worked before the writer existed.
+ *
+ * Used when no writer is configured, and as the fallback when one fails: it
+ * cannot lose a fact, because it never rewrites anything, so a bad merge pass
+ * degrades to the old behaviour rather than to a hole.
+ */
+function appendMechanically(
   target: ParsedMemoryNode,
-  candidate: ParsedMemoryNode,
-  timestamp: string,
-): ParsedMemoryNode {
-  const merged = cloneNode(target);
-  const candidateBody = candidate.body.trim();
-  if (
-    candidateBody !== "" &&
-    !merged.body
-      .replace(/\s+/gu, " ")
-      .includes(candidateBody.replace(/\s+/gu, " "))
-  ) {
-    merged.body = `${merged.body.replace(/\s+$/u, "")}\n\n${candidateBody}\n`;
+  candidates: ParsedMemoryNode[],
+): string {
+  let body = target.body;
+  for (const candidate of candidates) {
+    const candidateBody = candidate.body.trim();
+    if (
+      candidateBody !== "" &&
+      !body
+        .replace(/\s+/gu, " ")
+        .includes(candidateBody.replace(/\s+/gu, " "))
+    ) {
+      body = `${body.replace(/\s+$/u, "")}\n\n${candidateBody}\n`;
+    }
   }
-
-  merged.frontMatter.agents = unique([
-    ...merged.frontMatter.agents,
-    ...candidate.frontMatter.agents,
-  ]);
-  merged.frontMatter.tags = unique([
-    ...merged.frontMatter.tags,
-    ...candidate.frontMatter.tags,
-  ]);
-  merged.frontMatter.links = unique([
-    ...merged.frontMatter.links,
-    ...candidate.frontMatter.links,
-  ]).filter((link) => link !== target.slug);
-  merged.frontMatter.supersedes = unique([
-    ...merged.frontMatter.supersedes,
-    ...candidate.frontMatter.supersedes,
-  ]);
-  merged.frontMatter.speaker = mergeSpeakers(
-    merged.frontMatter.speaker,
-    candidate.frontMatter.speaker,
-  );
-  merged.frontMatter.edited = timestamp;
-  merged.body = appendAuditEntry(
-    merged.body,
-    timestamp,
-    `memory_promote: merged staging candidate ${candidate.slug}`,
-  );
-  return merged;
+  return body;
 }
 
 /** Compares titles and bodies after whitespace/case normalization. */

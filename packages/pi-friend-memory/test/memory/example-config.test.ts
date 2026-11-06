@@ -13,6 +13,7 @@ import test from "node:test";
 import { parseMemoryConfig } from "../../src/memory/config.ts";
 import {
   CAPTURE_SYSTEM_PROMPT,
+  MERGE_SYSTEM_PROMPT,
   DREAM_SYSTEM_PROMPT,
   SWEEP_SYSTEM_PROMPT,
 } from "../../src/memory/prompts.ts";
@@ -37,6 +38,7 @@ test("the example configuration matches supported defaults", async () => {
   assert.equal(config.sweep.background, false);
   assert.equal(config.sweep.prompt, SWEEP_SYSTEM_PROMPT);
   assert.equal(config.history.keepDays, 30);
+  assert.equal(config.merge.prompt, MERGE_SYSTEM_PROMPT);
   assert.equal(config.dreaming.maxNodes, 4);
   assert.equal(config.dreaming.prompt, DREAM_SYSTEM_PROMPT);
   assert.equal(config.vector.chunkSize, 4_000);

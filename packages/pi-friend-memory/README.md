@@ -346,6 +346,29 @@ memories are skipped. Promotion uses the semantic index to detect
 near-duplicates, merging close matches while preserving links, tags, speakers,
 and audit history.
 
+## Merging
+
+A merge is a rewrite, not an append. When a sweep verdict or a near-duplicate
+promotion merges memories, one writer call consolidates them: the decision names
+the candidates, the code groups them by target, and the writer sees every source
+at once — slug, title, type, speakers, the date of that account, and the body.
+
+It returns a body and, when it could not reconcile the sources, a short conflict
+note. The code then unions tags, links, speakers and supersedes, writes the
+merged node, and stores every input under `history/merged/` first. The writer
+never sees the front matter it cannot mangle, and never decides what merges —
+that belongs to the sweep, which is also where "a memory covers one key fact"
+is enforced, because the model choosing targets should not fold unrelated
+content together in the first place.
+
+A failed or unusable response falls back to appending the bodies, with a warning
+that names the target: the old behaviour cannot lose a fact, and refusing the
+merge would re-offer the same candidates at every sweep.
+
+Configure it under `memory.merge`: `model`, `thinking_level`, and `prompt` or
+`prompt_append`. With no model configured it uses the session's model, the same
+fallback the other internal passes use.
+
 ## Daily sweep and decay
 
 The daily sweep runs at most once per local calendar day after an agent run

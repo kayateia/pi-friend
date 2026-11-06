@@ -612,6 +612,68 @@ test("the service refuses a merge into a dream even when asked directly", async 
 });
 
 
+test("two candidates merging into one target make one writer call", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const calls: string[][] = [];
+    const service = new MemoryNodeService(
+      repository,
+      () => new Date("2026-10-24T05:00:00.000Z"),
+      undefined,
+      undefined,
+      async (sources) => {
+        calls.push(sources.map((source) => source.slug));
+        return { body: "Consolidated by the writer." };
+      },
+    );
+    const target = await service.add({
+      title: "Merge Target",
+      type: "fact",
+      body: "Target body.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const first = await service.stageCandidate({
+      title: "First To Merge",
+      type: "fact",
+      body: "First body.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+    const second = await service.stageCandidate({
+      title: "Second To Merge",
+      type: "fact",
+      body: "Second body.",
+      speaker: [{ name: "Aisling", confident: true }],
+    });
+
+    const result = await runDailySweep(
+      undefined,
+      service,
+      { enabled: true, background: false, minGuardedBatchSize: 10, allowDrop: false },
+      {
+        force: true,
+        now: new Date("2026-10-24T05:00:00.000Z"),
+        decide: async () => [
+          { slug: first.node.slug, action: "merge", target: target.slug, reason: "same fact" },
+          { slug: second.node.slug, action: "merge", target: target.slug, reason: "same fact" },
+        ],
+      },
+    );
+
+    assert.deepEqual(calls, [
+      [target.slug, first.node.slug, second.node.slug],
+    ]);
+    assert.equal(result.merged, 2);
+    assert.equal(result.promoted, 0);
+    assert.equal(
+      (await service.read(target.slug))?.body.trim(),
+      "Consolidated by the writer.",
+    );
+  });
+});
+
 /** Builds a minimal sweep prompt node fixture. */
 function makeCandidate(slug: string, type: MemoryType = "fact") {
   return {

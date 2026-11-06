@@ -30,9 +30,12 @@ import {
   type SweepConfig,
   defaultDreamingConfig,
   type DreamingConfig,
+  defaultMergeConfig,
+  type MergeConfig,
 } from "./src/memory/config.ts";
 import { recentTurnStart, serializeCaptureTranscript } from "./src/memory/capture.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
+import { createMergeWriter } from "./src/memory/merge-writer.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
 import {
   captureStatePath,
@@ -85,6 +88,7 @@ export default async function registerPiFriend(
   let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
   let captureScheduler: AutoCaptureScheduler | undefined;
   let sweepConfig: SweepConfig = defaultSweepConfig();
+  let mergeConfig: MergeConfig = defaultMergeConfig();
   let dreamingConfig: DreamingConfig = defaultDreamingConfig();
   let sweepInFlight = false;
   let backgroundSweepTimer: ReturnType<typeof setTimeout> | undefined;
@@ -276,6 +280,7 @@ export default async function registerPiFriend(
       injectionConfig = repository.store.config.injection;
       autoCaptureConfig = repository.store.config.autoCapture;
       sweepConfig = repository.store.config.sweep;
+      mergeConfig = repository.store.config.merge;
       dreamingConfig = repository.store.config.dreaming;
       const reportWarning = (message: string): void => {
         if (ctx.hasUI) {
@@ -304,6 +309,7 @@ export default async function registerPiFriend(
         undefined,
         semanticSearch,
         externalIndexManager,
+        createMergeWriter(ctx, mergeConfig, reportWarning),
       );
       await externalIndexManager.start();
       const service = memoryService;
