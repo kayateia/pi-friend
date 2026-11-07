@@ -201,6 +201,13 @@ once-per-day consolidation schedule, not daily-log processing.
   3. **Cold**: `see also: <title> — <keywords>` only.
 - Tier assignment is computed at retrieval time from `decay_weight` and access data; the md files are not rewritten at retrieval time (see §8).
 
+### 6a. Speaker tags
+
+- A name tag (`\>>Sam:`, `<Sam>`, `Sam>`, `[Sam]`, `-Sam`, `~Sam`) marks who is speaking; it is not part of what was said. One recogniser, `findSpeakerTag`, serves every caller that needs that distinction, so the query cleaner, the capture hint and the `speaker` index cannot disagree about what counts as a tag.
+- Default patterns live in `speaker-tags.ts`; `memory.speaker_tags.patterns` replaces them. Each entry is a regex whose first capture group, or a group named `name`, is the name. An empty list, a pattern that does not compile, has no capture group, or exceeds 200 characters is a configuration error, and one that matches the empty string earns a warning. Recognition cannot be switched off by emptying the list: a silent "no patterns" would let a tag bias search again, which is the bias this exists to remove.
+- Prefix forms are anchored at the start and must be followed by whitespace or the end; suffix forms sit at the end and must be preceded by whitespace or the start. A name is one word — letters in either case, apostrophes, hyphens — with no digits or periods, so a bracketed timestamp is not a name and a dotted word is a hostname rather than a person. One word is deliberate: a prefix tag must not swallow the start of a message, and a suffix tag must not reach back over a phrase. A house that signs with full names configures its own patterns.
+- `pi-time-awareness` prefixes person-authored messages with `[Mon 2026-11-02 16:31 EST] ` at the provider-payload layer, so text arriving through a `context` hook carries it and a tag behind it is no longer at the start. Callers given that text must remove the timestamp before asking for a tag. Capture is unaffected: it reads the transcript, which the extension never edits.
+
 ## 7. Decay
 
 - **Volume-relative**: each node's weight decreases by a function of *how many new memories have been stored since its last use*, not elapsed clock time. Quiet weeks don't bury things.
