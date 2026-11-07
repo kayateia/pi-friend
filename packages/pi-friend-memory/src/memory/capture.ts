@@ -13,6 +13,11 @@ import {
   type MemorySpeaker,
   type MemoryType,
 } from "./schema.ts";
+import {
+  defaultSpeakerTagPatterns,
+  findSpeakerTag,
+  type CompiledSpeakerTagPattern,
+} from "./speaker-tags.ts";
 
 type AgentMessage = Extract<SessionEntry, { type: "message" }>["message"];
 
@@ -29,17 +34,25 @@ export interface CaptureCandidateDraft {
   source?: string;
 }
 
+/** What the window's own messages say about who was speaking. */
+export interface CaptureSpeakerHint {
+  /**
+   * Distinct names signing person-authored messages, in the order they first
+   * appear. Empty when nothing was signed: the capture then has no grounds for
+   * attribution, and the prompt tells the model to omit rather than guess.
+   */
+  names: string[];
+}
+
 /** Builds the user-facing JSON extraction prompt. */
 export function buildCapturePrompt(
   transcript: string,
   maxCandidates: number,
-  speakerHint?: string,
+  speakerHint?: CaptureSpeakerHint,
 ): string {
   return [
     `Extract at most ${maxCandidates} durable memory candidates from the transcript below.`,
-    ...(speakerHint
-      ? [`The current human speaker is ${speakerHint}; use that concrete attribution name.`]
-      : []),
+    ...speakerAttributionLines(speakerHint),
     'Use this JSON shape: {"candidates":[{"title":"string","type":"fact|preference|event|person-note","body":"concise Markdown","speaker":[{"name":"string","confident":true}],"agents":[],"emotional_flavor":"neutral","tags":[],"links":[]}]}',
     'Return {"candidates":[]} when nothing durable was learned.',
     "",
@@ -47,6 +60,30 @@ export function buildCapturePrompt(
     transcript,
     "</transcript>",
   ].join("\n");
+}
+
+/**
+ * States who was speaking, in the terms the window supports.
+ *
+ * One name is a fact and is given as one; several names are also a fact, and
+ * saying "the current speaker is X" then would attribute the earlier person's
+ * words to the later one. Nothing at all is silence: the system prompt already
+ * forbids inventing a name, and a guess here would be repeated across every
+ * candidate in the batch.
+ */
+function speakerAttributionLines(hint?: CaptureSpeakerHint): string[] {
+  const names = hint?.names ?? [];
+  if (names.length === 0) {
+    return [];
+  }
+  if (names.length === 1) {
+    return [
+      `The human speaker is ${names[0]}; use that concrete attribution name.`,
+    ];
+  }
+  return [
+    `More than one person is speaking: ${names.join(", ")}. Attribute each candidate to the person whose message it comes from.`,
+  ];
 }
 
 /** Serializes recent session entries into a bounded capture transcript. */
@@ -133,16 +170,22 @@ export function captureStartIndex(
 export function parseCaptureResponse(
   response: string,
   maxCandidates: number,
-  speakerHint?: string,
+  speakerHint?: CaptureSpeakerHint,
 ): CaptureCandidateDraft[] {
   const object = extractJsonObject(response);
   if (!object || !Array.isArray(object.candidates)) {
     throw new Error("Capture response must contain a candidates array.");
   }
 
+  // A generic label is replaced only when exactly one person signed the window:
+  // with several names in play there is no safe answer, and the candidate is
+  // dropped by the filter below rather than attributed to whoever spoke last.
+  const soleSpeaker =
+    speakerHint?.names.length === 1 ? speakerHint.names[0] : undefined;
+
   return object.candidates
     .slice(0, maxCandidates)
-    .map((candidate) => parseCandidate(candidate, speakerHint))
+    .map((candidate) => parseCandidate(candidate, soleSpeaker))
     .filter(
       (candidate) =>
         !isQuarantinedMemoryType(candidate.type) &&
@@ -152,20 +195,38 @@ export function parseCaptureResponse(
     );
 }
 
-/** Infers an explicit human name from simple first-person introduction forms. */
-export function inferSpeakerName(transcript: string): string | undefined {
-  const patterns = [
-    /\bmy name is ([A-Z][\p{L}\p{N}_-]{0,30})\b/iu,
-    /\bi am ([A-Z][\p{L}\p{N}_-]{0,30})\b/iu,
-    /\bi['’]m ([A-Z][\p{L}\p{N}_-]{0,30})\b/iu,
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(transcript);
-    if (match?.[1]) {
-      return match[1];
+/**
+ * Reads the names written into the window's own messages.
+ *
+ * Only tags count. The previous mechanism inferred a name from first-person
+ * phrasing, with a case-insensitive `[A-Z]`, so any word after "I am" became a
+ * name: "I am so tired" supplied "so", and the parser then stamped it onto every
+ * candidate in the batch. A tag is a name a person wrote on purpose, and the
+ * same recogniser is used for query cleaning and the `speaker` index.
+ */
+export function captureSpeakerHint(
+  entries: SessionEntry[],
+  patterns: readonly CompiledSpeakerTagPattern[] = defaultSpeakerTagPatterns(),
+): CaptureSpeakerHint {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (entry.type !== "message" || entry.message.role !== "user") {
+      continue;
     }
+    const tag = findSpeakerTag(formatContent(entry.message.content), patterns);
+    if (tag === undefined) {
+      continue;
+    }
+    // `Aria` and `aria` are the same person; first spelling wins.
+    const key = tag.name.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    names.push(tag.name);
   }
-  return undefined;
+  return { names };
 }
 
 /** Formats one agent message without retaining images or full tool payloads. */

@@ -76,6 +76,7 @@ memory:
       Each candidate must cover one durable topic, and its `type` must be exactly one of `fact`, `preference`, `event`, or `person-note`; invent no other category.
       Ignore transient tasks, plans, and content that should not persist.
       Use the actual speaker names present in the transcript.
+      A name tag at the start or end of a message (`\>>Sam:`, `<Sam>`, `Sam>`, `[Sam]`, `-Sam`) names its speaker; the tag is attribution, not part of what was said.
       Never use generic labels such as USER, ASSISTANT, or system as speaker names.
       If a concrete speaker name cannot be determined, omit that candidate.
       Never create dream nodes.

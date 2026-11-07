@@ -34,6 +34,7 @@ import {
   type MergeConfig,
 } from "./src/memory/config.ts";
 import {
+  captureSpeakerHint,
   captureStartIndex,
   serializeCaptureTranscript,
 } from "./src/memory/capture.ts";
@@ -162,6 +163,9 @@ export default async function registerPiFriend(
         ctx,
         config,
         transcript,
+        // Read from the same window the transcript was built from, so a name
+        // signed in a message outside it cannot answer for these candidates.
+        captureSpeakerHint(entries),
         (message) => reportCaptureWarning(ctx, message),
       );
       for (const draft of drafts) {

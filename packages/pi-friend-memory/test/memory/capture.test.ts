@@ -11,8 +11,8 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import test from "node:test";
 import {
   buildCapturePrompt,
+  captureSpeakerHint,
   captureStartIndex,
-  inferSpeakerName,
   parseCaptureResponse,
   recentTurnStart,
   serializeCaptureTranscript,
@@ -152,12 +152,100 @@ test("capture prompt carries the transcript guard and candidate limit", () => {
   assert.match(prompt, /<transcript>\nUSER: hello\n<\/transcript>/);
 });
 
-test("explicit speaker introductions produce a capture hint", () => {
-  assert.equal(
-    inferSpeakerName("USER: My name is Aisling. Remember this."),
-    "Aisling",
+test("speaker names come from tags on the window's own messages", () => {
+  const user = (id: string, text: string): SessionEntry => ({
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: "2026-10-20T00:00:00Z",
+    message: {
+      role: "user",
+      content: [{ type: "text", text }],
+      timestamp: 1,
+    },
+  });
+  const assistant = (id: string, text: string): SessionEntry => ({
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: "2026-10-20T00:00:00Z",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "test",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: 1,
+    },
+  });
+
+  // One signed message names the speaker; the tag is not a phrase to infer
+  // from, so an unsigned message beside it changes nothing.
+  assert.deepEqual(
+    captureSpeakerHint([user("u1", "\\>>Aria: the sweep ran"), user("u2", "thanks")]),
+    { names: ["Aria"] },
   );
-  assert.equal(inferSpeakerName("USER: Remember this."), undefined);
+  // Several people, in the order they first appear, deduplicated by name.
+  assert.deepEqual(
+    captureSpeakerHint([
+      user("u1", "\\>>Aria: the sweep ran"),
+      user("u2", "[Iri] it did"),
+      user("u3", "\\>>aria: and again"),
+    ]),
+    { names: ["Aria", "Iri"] },
+  );
+  // Assistant prose is not a person's signature, even when it looks like one.
+  assert.deepEqual(
+    captureSpeakerHint([user("u1", "the sweep ran"), assistant("a1", "-Aria")]),
+    { names: [] },
+  );
+});
+
+test("first-person phrasing no longer becomes a name", () => {
+  const entry = (id: string, text: string): SessionEntry => ({
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: "2026-10-20T00:00:00Z",
+    message: {
+      role: "user",
+      content: [{ type: "text", text }],
+      timestamp: 1,
+    },
+  });
+  // These are the transcript lines that used to produce a speaker hint of
+  // "so", "not" and "working", which was then stamped onto every candidate.
+  for (const text of [
+    "I am so tired today",
+    "I'm not sure we should",
+    "I am working on the prompt",
+    "my name is Aria",
+  ]) {
+    assert.deepEqual(captureSpeakerHint([entry("u1", text)]), { names: [] });
+  }
+});
+
+test("the capture prompt states the attribution the window supports", () => {
+  const one = buildCapturePrompt("USER: hi", 2, { names: ["Aria"] });
+  assert.match(one, /The human speaker is Aria; use that concrete attribution name\./u);
+
+  // Two names are stated as two, not collapsed into "the current speaker".
+  const two = buildCapturePrompt("USER: hi", 2, { names: ["Aria", "Iri"] });
+  assert.match(two, /More than one person is speaking: Aria, Iri\./u);
+  assert.doesNotMatch(two, /The human speaker is/u);
+
+  // Nothing to say means nothing said: the system prompt forbids inventing one.
+  const none = buildCapturePrompt("USER: hi", 2, { names: [] });
+  assert.doesNotMatch(none, /human speaker/u);
 });
 
 test("capture response parsing accepts fenced JSON and filters quarantined types", () => {
@@ -214,11 +302,20 @@ test("capture response parsing drops generic speaker labels", () => {
   assert.deepEqual(candidates, []);
 });
 
-test("generic speaker labels are replaced by an explicit speaker hint", () => {
+test("generic speaker labels are replaced by a hint only when one person signed", () => {
   const candidates = parseCaptureResponse(
     '{"candidates":[{"title":"Tea","type":"preference","body":"Jasmine tea.","speaker":[{"name":"USER","confident":true}]}]}',
     3,
-    "Aisling",
+    { names: ["Aisling"] },
   );
   assert.equal(candidates[0]?.speaker[0]?.name, "Aisling");
+
+  // With two people in the window there is no safe answer, so the candidate is
+  // dropped rather than handed to whoever spoke last.
+  const ambiguous = parseCaptureResponse(
+    '{"candidates":[{"title":"Tea","type":"preference","body":"Jasmine tea.","speaker":[{"name":"USER","confident":true}]}]}',
+    3,
+    { names: ["Aisling", "Iri"] },
+  );
+  assert.deepEqual(ambiguous, []);
 });

@@ -381,6 +381,16 @@ model request reviews only the transcript entries added since the prior
 successful capture. The prompt treats conversation content as observed data,
 requires concrete speaker attribution, and allows only active memory types.
 
+Attribution comes from speaker tags, not from guessing. The capture window is
+read for tags using the same recogniser described above, and the prompt is told
+what they say: one name is stated as the speaker, several names are listed so
+each candidate can be attributed to the person whose message it came from, and
+no names means no line at all. A candidate whose speaker stays a generic label
+(`USER`, `system`) is replaced by the sole name when exactly one person signed
+the window, and dropped otherwise, because with several people there is no safe
+answer. Phrasing is never treated as evidence: "I am so tired" used to supply
+the name "so", which the parser then stamped onto every candidate in the batch.
+
 Capture is also debounced from the last settled run using
 `auto_capture.idle_timeout` seconds, default 600. A new settled run resets the
 timer. Expiry triggers only while no agent run is active; shutdown cancels a
