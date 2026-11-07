@@ -191,7 +191,8 @@ function captureGroupCount(regex: RegExp): number {
  *
  * The first pattern that matches at the position it was anchored to decides:
  * a message carries one tag, and guessing between several would invent
- * attribution rather than read it.
+ * attribution rather than read it. A match inside code or a quotation is not the
+ * author signing and is skipped, so a later form can still be found.
  */
 export function findSpeakerTag(
   text: string,
@@ -212,9 +213,54 @@ export function findSpeakerTag(
     const start = match.index + (whole.length - whole.trimStart().length);
     const end =
       match.index + whole.length - (whole.length - whole.trimEnd().length);
+    if (isVerbatim(text, start)) {
+      continue;
+    }
     return { name, start, end };
   }
   return undefined;
+}
+
+/**
+ * Reports whether an offset falls inside code or a quotation.
+ *
+ * A tag is a person signing; the same characters inside a fenced block, an
+ * inline code span, or a line beginning with `>` are being quoted, not written
+ * as attribution, and treating them as a signature would attribute the author's
+ * memory to whoever they were quoting.
+ */
+function isVerbatim(text: string, index: number): boolean {
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  const newline = text.indexOf("\n", index);
+  const lineEnd = newline === -1 ? text.length : newline;
+  const line = text.slice(lineStart, lineEnd);
+
+  // A quoted line, including a quote nested inside another one.
+  if (/^\s{0,3}>/u.test(line)) {
+    return true;
+  }
+
+  // Fenced blocks: an unmatched opening fence before this line encloses it.
+  let fence: string | undefined;
+  for (const earlier of text.slice(0, lineStart).split("\n")) {
+    const marker = /^\s*(`{3,}|~{3,})/u.exec(earlier)?.[1];
+    if (marker === undefined) {
+      continue;
+    }
+    if (fence === undefined) {
+      fence = marker;
+    } else if (marker[0] === fence[0] && marker.length >= fence.length) {
+      fence = undefined;
+    }
+  }
+  if (fence !== undefined) {
+    return true;
+  }
+
+  // Inline code: an odd number of backticks before the tag on its line opens a
+  // span that has not been closed yet.
+  const before = line.slice(0, Math.max(0, index - lineStart));
+  return (before.match(/`/gu) ?? []).length % 2 === 1;
 }
 
 /** Reads the name from a match: a named group wins over the first positional one. */

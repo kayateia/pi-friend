@@ -257,3 +257,35 @@ test("an unknown field under speaker_tags is reported, not fatal", () => {
     ...defaultSpeakerTagPatterns().map((pattern) => pattern.source),
   ]);
 });
+
+test("a tag inside code or a quotation is content, not a signature", () => {
+  // A fenced block that ends the message: the last line looks exactly like a
+  // signature, and it is part of what was pasted.
+  assert.equal(
+    findSpeakerTag("here is the transcript:\n```\nwell-known -Aria\n```"),
+    undefined,
+  );
+  // An inline code span.
+  assert.equal(findSpeakerTag("as written: `-Aria`"), undefined);
+  // A quoted line, which belongs to whoever was quoted.
+  assert.equal(findSpeakerTag("she wrote:\n> -Aria"), undefined);
+  assert.equal(findSpeakerTag("> [Aria] hello"), undefined);
+
+  // Outside those regions the same text still signs the message, so the rule
+  // ignores the quotation rather than the form.
+  assert.equal(findSpeakerTag("she wrote:\n> -Aria\n\nthanks -Iri")?.name, "Iri");
+  assert.equal(findSpeakerTag("`code` then a sign-off -Iri")?.name, "Iri");
+});
+
+test("only a message's own tag counts, not one inside it", () => {
+  // A signer, a quotation, and another member's tag in the middle of the
+  // message. Only the signer heads the message.
+  const message = [
+    "\\>>Iri: Statement about something.",
+    "",
+    "> Quotation from an earlier message in chat.",
+    "",
+    "\\>>Aria: Commentary about the quotation.",
+  ].join("\n");
+  assert.equal(findSpeakerTag(message)?.name, "Iri");
+});
