@@ -47,6 +47,18 @@ interface MemoryReadDetails {
   status?: MemoryStatus;
 }
 
+/** One speaker record, described the same way everywhere a tool accepts it. */
+const SPEAKER_NAME_DESCRIPTION =
+  "A human, plural-system member, or other non-AI entity involved in the exchange. Never an AI agent: those belong in agents.";
+const SPEAKER_CONFIDENT_DESCRIPTION =
+  "False when you did not hear it first-hand: inferred, uncertain, or relayed in someone else's words. Name the relay in note.";
+const SPEAKER_NOTE_DESCRIPTION =
+  "Attribution context, such as fronting at the time, who relayed it, or what was quoted.";
+const SPEAKER_ARRAY_DESCRIPTION =
+  "Speaker attribution records, ordered by confidence. May be empty when only AI agents were involved, or when no speaker could be identified.";
+const AGENTS_DESCRIPTION =
+  "Names of the AI agents involved in the exchange, usually including yourself. When an AI's words prompted this memory and no person spoke, leave speaker empty and list the agents here.";
+
 /** Structured details returned by a successful memory addition. */
 interface MemoryAddDetails {
   slug: string;
@@ -129,7 +141,7 @@ export function registerMemoryTools(
     description: [
       "Create one canonical memory node about a single topic.",
       "Use this when someone asks you to remember something or when a durable preference, fact, event, or relational detail should persist.",
-      "Provide speaker attribution for the actual person or system who supplied the information.",
+      "Provide speaker attribution for the humans and other non-AI participants who supplied the information. AI agents belong in agents, not speaker.",
       "The slug is derived from the title unless an explicit slug is supplied.",
     ].join("\n"),
     parameters: Type.Object({
@@ -145,19 +157,19 @@ export function registerMemoryTools(
       speaker: Type.Array(
         Type.Object({
           name: Type.String({
-            description: "Actual person or system member who supplied it.",
+            description: SPEAKER_NAME_DESCRIPTION,
           }),
           confident: Type.Boolean({
-            description: "False when attribution was inferred or uncertain.",
+            description: SPEAKER_CONFIDENT_DESCRIPTION,
           }),
           note: Type.Optional(
             Type.String({
-              description: "Optional attribution context.",
+              description: SPEAKER_NOTE_DESCRIPTION,
             }),
           ),
         }),
         {
-          description: "Speaker attribution records, ordered by confidence.",
+          description: SPEAKER_ARRAY_DESCRIPTION,
         },
       ),
       slug: Type.Optional(
@@ -167,7 +179,7 @@ export function registerMemoryTools(
       ),
       agents: Type.Optional(
         Type.Array(Type.String(), {
-          description: "AI agents involved in creating or relaying the memory.",
+          description: AGENTS_DESCRIPTION,
         }),
       ),
       emotional_flavor: Type.Optional(
@@ -502,16 +514,21 @@ export function registerMemoryTools(
         Type.Array(
           Type.Object({
             name: Type.String({
-              description: "Actual person or system member who supplied it.",
+              description: SPEAKER_NAME_DESCRIPTION,
             }),
             confident: Type.Boolean({
-              description: "False when attribution was inferred.",
+              description: SPEAKER_CONFIDENT_DESCRIPTION,
             }),
-            note: Type.Optional(Type.String()),
+            note: Type.Optional(
+              Type.String({ description: SPEAKER_NOTE_DESCRIPTION }),
+            ),
           }),
+          { description: SPEAKER_ARRAY_DESCRIPTION },
         ),
       ),
-      agents: Type.Optional(Type.Array(Type.String())),
+      agents: Type.Optional(
+        Type.Array(Type.String(), { description: AGENTS_DESCRIPTION }),
+      ),
       emotional_flavor: Type.Optional(Type.String()),
       tags: Type.Optional(Type.Array(Type.String())),
       links: Type.Optional(Type.Array(Type.String())),

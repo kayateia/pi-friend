@@ -294,7 +294,11 @@ Pi reads the extension entry point from the `pi.extensions` field in
   Configurations created from the earlier example may still contain
   `tool_prefix: memory_`; change that to `""` or remove it.
 - `memory_add` creates a canonical active node, derives a unique slug unless one
-  is supplied, and records speaker attribution.
+  is supplied, and records speaker attribution: `speaker` names the people and
+  other non-AI participants involved, while `agents` names the AI agents,
+  usually including the one writing the memory. When an AI's words prompted the
+  memory and no person spoke, `speaker` is empty and `agents` carries every AI
+  involved.
 - `memory_edit` updates an existing node while preserving creation and usage
   metadata, and stores the version it replaces under `history/edited/<slug>/`
   with the edit's reason.

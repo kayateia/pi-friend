@@ -212,3 +212,32 @@ test("memory_merge passes the target, sources and optional body through", async 
     2,
   );
 });
+
+test("speaker and agents are described as different kinds of participant", () => {
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  registerMemoryTools(pi, () => undefined);
+
+  type Schema = { description?: string; items?: Schema; properties?: Record<string, Schema> };
+  const fields = (name: string): Record<string, Schema> => {
+    const definition = definitions.get(name) as { parameters: Schema };
+    return definition.parameters.properties ?? {};
+  };
+
+  for (const name of ["memory_add", "memory_edit"]) {
+    const speaker = fields(name).speaker ?? {};
+    const nameField = speaker.items?.properties?.name;
+    const confident = speaker.items?.properties?.confident;
+    // `speaker` names people; an AI goes in `agents`. The old wording said
+    // "person or system", and in a plural system "system member" is a human,
+    // which is what led an agent to record itself as a speaker.
+    assert.match(nameField?.description ?? "", /non-AI entity/u);
+    assert.match(nameField?.description ?? "", /Never an AI agent/u);
+    assert.match(confident?.description ?? "", /first-hand|inferred/u);
+    assert.match(fields(name).agents?.description ?? "", /AI agents involved in the exchange/u);
+  }
+});
