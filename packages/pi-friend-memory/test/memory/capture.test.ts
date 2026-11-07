@@ -11,6 +11,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import test from "node:test";
 import {
   buildCapturePrompt,
+  captureStartIndex,
   inferSpeakerName,
   parseCaptureResponse,
   recentTurnStart,
@@ -94,6 +95,41 @@ test("an unknown cursor is bounded to the most recent turns", () => {
   assert.equal(recentTurnStart(entries, 0), 0);
   assert.equal(recentTurnStart(entries, Number.NaN), 0);
   assert.equal(recentTurnStart([], 3), 0);
+});
+
+test("a known cursor starts the read after itself", () => {
+  const entry = (id: string): SessionEntry => ({
+    type: "custom_message",
+    id,
+    parentId: null,
+    timestamp: "2026-10-20T00:00:00Z",
+    customType: "note",
+    content: id,
+    display: false,
+  });
+  const entries = [entry("e1"), entry("e2"), entry("e3")];
+
+  assert.deepEqual(captureStartIndex(entries, "e2", 5), {
+    startIndex: 2,
+    cursorFound: true,
+  });
+  // A cursor at the leaf leaves nothing to read, which is what makes "nothing
+  // pending" distinguishable from "never captured".
+  assert.deepEqual(captureStartIndex(entries, "e3", 5), {
+    startIndex: 3,
+    cursorFound: true,
+  });
+  // No cursor at all is not the same as a cursor that was not found: the first
+  // means nothing has been captured yet, so the whole branch is unread.
+  assert.deepEqual(captureStartIndex(entries, undefined, 5), {
+    startIndex: 0,
+    cursorFound: false,
+  });
+  // A cursor the branch no longer contains falls back to the bounded window.
+  assert.deepEqual(captureStartIndex(entries, "gone", 5), {
+    startIndex: 0,
+    cursorFound: false,
+  });
 });
 
 test("the capture prompt offers exactly the capture-capable memory types", () => {

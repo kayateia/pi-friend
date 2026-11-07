@@ -76,6 +76,64 @@ test("background capture failures are reported", async () => {
   }
 });
 
+test("a loaded session with pending material captures without a new settle", async () => {
+  let captures = 0;
+  const scheduler = new AutoCaptureScheduler({
+    everyTurns: 10,
+    idleTimeoutMs: 10,
+    isIdle: () => true,
+    capture: async () => {
+      captures += 1;
+    },
+  });
+  try {
+    // No settlement arrives: this is a session reopened after a restart.
+    scheduler.armIdleCapture();
+    await delay(30);
+    assert.equal(captures, 1);
+  } finally {
+    scheduler.shutdown();
+  }
+});
+
+test("shutdown cancels an armed capture for a loaded session", async () => {
+  let captures = 0;
+  const scheduler = new AutoCaptureScheduler({
+    everyTurns: 10,
+    idleTimeoutMs: 10,
+    isIdle: () => true,
+    capture: async () => {
+      captures += 1;
+    },
+  });
+  scheduler.armIdleCapture();
+  scheduler.shutdown();
+  await delay(30);
+  assert.equal(captures, 0);
+});
+
+test("arming again replaces the pending timer rather than adding one", async () => {
+  let captures = 0;
+  const scheduler = new AutoCaptureScheduler({
+    everyTurns: 10,
+    idleTimeoutMs: 20,
+    isIdle: () => true,
+    capture: async () => {
+      captures += 1;
+    },
+  });
+  try {
+    scheduler.armIdleCapture();
+    await delay(10);
+    scheduler.armIdleCapture();
+    await delay(30);
+    // One capture: the first arm's timer was cancelled, not left to fire.
+    assert.equal(captures, 1);
+  } finally {
+    scheduler.shutdown();
+  }
+});
+
 /** Waits for timer callbacks in scheduler tests. */
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));

@@ -351,6 +351,15 @@ Capture is also debounced from the last settled run using
 timer. Expiry triggers only while no agent run is active; shutdown cancels a
 pending timer.
 
+A session loaded with material its capture cursor has not passed arms that
+debounce immediately, without waiting for a settlement — so a resume, reload or
+restart captures the work even if nobody speaks in that session again. Whether
+anything is pending is read from the branch and the saved cursor rather than
+stored as a flag, so it cannot disagree with the transcript. A cursor that no
+longer appears in the branch does not count as pending: its fallback re-reads
+the most recent turns, and arming on that would stage duplicates on every
+resume.
+
 Candidates are written to `staging/` with `status: candidate` and may enter RAG
 with a `Candidate - unverified` marker. Exact duplicates of canonical or staged
 memories are skipped. Promotion uses the semantic index to detect
