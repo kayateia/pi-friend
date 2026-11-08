@@ -11,7 +11,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import test from "node:test";
 import {
   buildCapturePrompt,
-  captureSpeakerHint,
+  buildCaptureWindow,
   captureStartIndex,
   parseCaptureResponse,
   recentTurnStart,
@@ -191,22 +191,23 @@ test("speaker names come from tags on the window's own messages", () => {
   // One signed message names the speaker; the tag is not a phrase to infer
   // from, so an unsigned message beside it changes nothing.
   assert.deepEqual(
-    captureSpeakerHint([user("u1", "\\>>Aria: the sweep ran"), user("u2", "thanks")]),
-    { names: ["Aria"] },
+    buildCaptureWindow([user("u1", "\\>>Aria: the sweep ran"), user("u2", "thanks")]).names,
+    ["Aria"],
   );
   // Several people, in the order they first appear, deduplicated by name.
   assert.deepEqual(
-    captureSpeakerHint([
+    buildCaptureWindow([
       user("u1", "\\>>Aria: the sweep ran"),
       user("u2", "[Iri] it did"),
       user("u3", "\\>>aria: and again"),
-    ]),
-    { names: ["Aria", "Iri"] },
+    ]).names,
+    ["Aria", "Iri"],
   );
   // Assistant prose is not a person's signature, even when it looks like one.
   assert.deepEqual(
-    captureSpeakerHint([user("u1", "the sweep ran"), assistant("a1", "-Aria")]),
-    { names: [] },
+    buildCaptureWindow([user("u1", "the sweep ran"), assistant("a1", "-Aria")])
+      .names,
+    [],
   );
 });
 
@@ -230,7 +231,7 @@ test("first-person phrasing no longer becomes a name", () => {
     "I am working on the prompt",
     "my name is Aria",
   ]) {
-    assert.deepEqual(captureSpeakerHint([entry("u1", text)]), { names: [] });
+    assert.deepEqual(buildCaptureWindow([entry("u1", text)]).names, []);
   }
 });
 
@@ -369,4 +370,50 @@ test("generic speaker labels are replaced by a hint only when one person signed"
   );
   assert.equal(ambiguous.length, 1);
   assert.deepEqual(ambiguous[0]?.speaker, []);
+});
+
+test("the names come from the messages the transcript still contains", () => {
+  const user = (id: string, text: string): SessionEntry => ({
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: "2026-10-20T00:00:00Z",
+    message: {
+      role: "user",
+      content: [{ type: "text", text }],
+      timestamp: 1,
+    },
+  });
+  const longAssistantText = "x".repeat(200);
+  const assistant = (id: string): SessionEntry => ({
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: "2026-10-20T00:00:00Z",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: longAssistantText }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "test",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: 1,
+    },
+  });
+
+  const entries = [user("u1", "\\>>Aria: an older message"), assistant("a1")];
+  // Wide enough for both: Aria signed what the model will read.
+  assert.deepEqual(buildCaptureWindow(entries, 10_000).names, ["Aria"]);
+  // Too narrow for Aria's message: it is dropped whole, so naming her would
+  // tell the model about a speaker it cannot see.
+  assert.deepEqual(buildCaptureWindow(entries, 150).names, []);
+  assert.equal(buildCaptureWindow(entries, 150).transcript.includes("Aria"), false);
 });

@@ -86,26 +86,94 @@ function speakerAttributionLines(hint?: CaptureSpeakerHint): string[] {
   ];
 }
 
+/** What one capture window sends, and what it can say about who was speaking. */
+export interface CaptureWindow {
+  /** The transcript, bounded by `maxChars`. */
+  transcript: string;
+  /** Distinct names signing the messages that survive that bound. */
+  names: string[];
+}
+
+/**
+ * Serializes recent session entries into a bounded capture transcript.
+ *
+ * The bound is applied from the end, dropping whole messages rather than
+ * cutting one in half: a truncated sentence is worse than an absent one.
+ *
+ * The names are read from the messages **that remain**, which is why this is one
+ * function rather than two. A window can be larger than its own transcript, so a
+ * hint gathered from every entry could name someone whose message was dropped —
+ * telling the model "more than one person is speaking" about a transcript where
+ * only one is.
+ */
+export function buildCaptureWindow(
+  entries: SessionEntry[],
+  maxChars = 24_000,
+  patterns: readonly CompiledSpeakerTagPattern[] = defaultSpeakerTagPatterns(),
+): CaptureWindow {
+  const lines: Array<{ text: string; name?: string }> = [];
+  for (const entry of entries) {
+    if (entry.type === "message") {
+      const text = formatAgentMessage(entry.message);
+      if (!text) {
+        continue;
+      }
+      const name =
+        entry.message.role === "user"
+          ? findSpeakerTag(formatContent(entry.message.content), patterns)?.name
+          : undefined;
+      lines.push(name === undefined ? { text } : { text, name });
+    } else if (entry.type === "custom_message") {
+      const text = formatContent(entry.content);
+      if (text) {
+        lines.push({ text: `CUSTOM: ${text}` });
+      }
+    }
+  }
+
+  let firstKept = lines.length;
+  let budget = 0;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const cost = lines[index].text.length + (firstKept === lines.length ? 0 : 2);
+    if (budget + cost > maxChars) {
+      break;
+    }
+    budget += cost;
+    firstKept = index;
+  }
+  // A single message larger than the whole budget still leaves its tail; an
+  // empty transcript would look like a window with nothing in it.
+  if (firstKept === lines.length && lines.length > 0) {
+    const last = lines[lines.length - 1];
+    return {
+      transcript: last.text.slice(Math.max(0, last.text.length - maxChars)),
+      names: last.name === undefined ? [] : [last.name],
+    };
+  }
+
+  const kept = lines.slice(firstKept);
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const line of kept) {
+    if (line.name === undefined) {
+      continue;
+    }
+    const key = line.name.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    names.push(line.name);
+  }
+  return { transcript: kept.map((line) => line.text).join("\n\n"), names };
+}
+
 /** Serializes recent session entries into a bounded capture transcript. */
 export function serializeCaptureTranscript(
   entries: SessionEntry[],
   maxChars = 24_000,
 ): string {
-  const lines: string[] = [];
-  for (const entry of entries) {
-    if (entry.type === "message") {
-      const text = formatAgentMessage(entry.message);
-      if (text) lines.push(text);
-    } else if (entry.type === "custom_message") {
-      const text = formatContent(entry.content);
-      if (text) lines.push(`CUSTOM: ${text}`);
-    }
-  }
-
-  const joined = lines.join("\n\n");
-  return joined.length <= maxChars
-    ? joined
-    : joined.slice(joined.length - maxChars);
+  return buildCaptureWindow(entries, maxChars).transcript;
 }
 
 /**
@@ -222,40 +290,6 @@ function attributeSpeakers(speakers: MemorySpeaker[]): MemorySpeaker[] {
     }
   }
   return attributed;
-}
-
-/**
- * Reads the names written into the window's own messages.
- *
- * Only tags count. The previous mechanism inferred a name from first-person
- * phrasing, with a case-insensitive `[A-Z]`, so any word after "I am" became a
- * name: "I am so tired" supplied "so", and the parser then stamped it onto every
- * candidate in the batch. A tag is a name a person wrote on purpose, and the
- * same recogniser is used for query cleaning and the `speaker` index.
- */
-export function captureSpeakerHint(
-  entries: SessionEntry[],
-  patterns: readonly CompiledSpeakerTagPattern[] = defaultSpeakerTagPatterns(),
-): CaptureSpeakerHint {
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of entries) {
-    if (entry.type !== "message" || entry.message.role !== "user") {
-      continue;
-    }
-    const tag = findSpeakerTag(formatContent(entry.message.content), patterns);
-    if (tag === undefined) {
-      continue;
-    }
-    // `Aria` and `aria` are the same person; first spelling wins.
-    const key = tag.name.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    names.push(tag.name);
-  }
-  return { names };
 }
 
 /** Formats one agent message without retaining images or full tool payloads. */
