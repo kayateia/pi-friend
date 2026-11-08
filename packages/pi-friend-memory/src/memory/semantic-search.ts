@@ -69,7 +69,15 @@ export function searchSemanticVectors(
   chunkSize: number = DEFAULT_CHUNK_SIZE,
 ): MemorySearchResult[] {
   const limit = clampLimit(options.limit);
-  const hits = index.search(queryEmbedding, Math.min(100, limit * 4));
+  // The restrictions travel into the vector query, which is the only place they
+  // can act before the `k` cutoff. The checks further down stay as a guard: they
+  // are cheap, and they keep a result set from ever contradicting what was asked
+  // for if the index and the file list disagree about a file.
+  const hits = index.search(queryEmbedding, Math.min(100, limit * 4), {
+    ...(options.kinds === undefined ? {} : { kinds: options.kinds }),
+    ...(options.type === undefined ? {} : { type: options.type }),
+    ...(options.status === undefined ? {} : { status: options.status }),
+  });
   const fileByPath = new Map(files.map((file) => [file.relativePath, file]));
   const chunkCache = new Map<string, string[]>();
   const seenPaths = new Set<string>();

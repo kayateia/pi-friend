@@ -18,6 +18,7 @@ import type {
   VectorIndex,
   VectorEntryMetadata,
   VectorRecord,
+  VectorRecordMetadata,
 } from "./vector-index.ts";
 
 /** Summary of one index synchronization pass. */
@@ -110,7 +111,7 @@ async function synchronizeVectorIndexUnlocked(
             file,
             key: vectorKey(file),
             embeddingText,
-            contentHash: hashVectorInput(file, embeddingText),
+            contentHash: hashVectorInput(embeddingText),
           },
         ];
       }
@@ -121,11 +122,7 @@ async function synchronizeVectorIndexUnlocked(
           file,
           key: vectorChunkKey(vectorKey(file), chunk.index),
           embeddingText,
-          contentHash: hashChunkVectorInput(
-            file,
-            chunk.index,
-            embeddingText,
-          ),
+          contentHash: hashChunkVectorInput(embeddingText),
         };
       });
     });
@@ -147,6 +144,18 @@ async function synchronizeVectorIndexUnlocked(
             existing.get(item.key)?.contentHash !==
             item.contentHash,
         );
+  // An entry whose text is unchanged but whose description is not — a decay
+  // weight after a sweep, a status, a modification date — is rewritten in the
+  // index without asking the provider for a vector it already holds.
+  const metadataOnly = desired.filter((item) => {
+    const entry = existing.get(item.key);
+    return (
+      entry !== undefined &&
+      options.force !== true &&
+      entry.contentHash === item.contentHash &&
+      !metadataMatches(entry, toVectorMetadata(item.key, item.file, item.contentHash))
+    );
+  });
 
   options.signal?.throwIfAborted();
   const embeddings =
@@ -164,6 +173,11 @@ async function synchronizeVectorIndexUnlocked(
 
   for (const key of staleKeys) {
     index.remove(key);
+  }
+  for (const item of metadataOnly) {
+    index.updateMetadata(
+      toVectorMetadata(item.key, item.file, item.contentHash),
+    );
   }
   changed.forEach((item, indexPosition) => {
     const embedding = embeddings[indexPosition];
@@ -243,36 +257,22 @@ export function hashEmbeddingText(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-/** Hashes one chunk's embedding input plus metadata affecting its entry. */
-export function hashChunkVectorInput(
-  file: IndexedMarkdownFile,
-  chunkIndex: number,
-  embeddingText: string,
-): string {
-  const metadata = JSON.stringify({
-    title: file.title ?? null,
-    tags: file.tags,
-    type: file.type ?? null,
-    status: file.status ?? null,
-    decayWeight: file.decayWeight ?? null,
-    chunkIndex,
-  });
-  return hashEmbeddingText(`${embeddingText}\n--metadata--\n${metadata}`);
+/**
+ * Hashes one chunk's embedding input.
+ *
+ * Only the text that is embedded contributes. Anything else — a decay weight,
+ * a status, a date — can be rewritten in the index without paying the provider
+ * for a vector identical to the one already stored, and `synchronizeVectorIndex`
+ * updates those fields separately. Including them here is what made a sweep's
+ * decay pass re-embed most of the store.
+ */
+export function hashChunkVectorInput(embeddingText: string): string {
+  return hashEmbeddingText(embeddingText);
 }
 
-/** Hashes embedding input plus metadata that affects stored index entries. */
-export function hashVectorInput(
-  file: IndexedMarkdownFile,
-  embeddingText: string,
-): string {
-  const metadata = JSON.stringify({
-    title: file.title ?? null,
-    tags: file.tags,
-    type: file.type ?? null,
-    status: file.status ?? null,
-    decayWeight: file.decayWeight ?? null,
-  });
-  return hashEmbeddingText(`${embeddingText}\n--metadata--\n${metadata}`);
+/** Hashes one file's embedding input; see `hashChunkVectorInput`. */
+export function hashVectorInput(embeddingText: string): string {
+  return hashEmbeddingText(embeddingText);
 }
 
 /** Converts one indexed file plus its current embedding into a vector record. */
@@ -283,19 +283,50 @@ function toVectorRecord(
   embedding: Float32Array,
 ): VectorRecord {
   return {
+    ...toVectorMetadata(key, file, contentHash),
+    embedding,
+  };
+}
+
+/** Describes one indexed file the way the index stores it, minus its vector. */
+function toVectorMetadata(
+  key: string,
+  file: IndexedMarkdownFile,
+  contentHash: string,
+): VectorRecordMetadata {
+  return {
     key,
     kind: file.kind,
     sourcePath: file.relativePath,
     contentHash,
-    embedding,
     ...(file.title === undefined ? {} : { title: file.title }),
     ...(file.type === undefined ? {} : { type: file.type }),
     ...(file.status === undefined ? {} : { status: file.status }),
     ...(file.decayWeight === undefined
       ? {}
       : { decayWeight: file.decayWeight }),
+    ...(file.modifiedAt === undefined ? {} : { modifiedAt: file.modifiedAt }),
     tags: file.tags,
   };
+}
+
+/** Returns whether a stored entry already describes one file exactly. */
+function metadataMatches(
+  entry: VectorEntryMetadata,
+  metadata: VectorRecordMetadata,
+): boolean {
+  return (
+    entry.kind === metadata.kind &&
+    entry.sourcePath === metadata.sourcePath &&
+    entry.contentHash === metadata.contentHash &&
+    (entry.title ?? null) === (metadata.title ?? null) &&
+    (entry.type ?? null) === (metadata.type ?? null) &&
+    (entry.status ?? null) === (metadata.status ?? null) &&
+    (entry.decayWeight ?? null) === (metadata.decayWeight ?? null) &&
+    (entry.modifiedAt ?? null) === (metadata.modifiedAt ?? null) &&
+    entry.tags.length === (metadata.tags ?? []).length &&
+    entry.tags.every((tag, position) => tag === (metadata.tags ?? [])[position])
+  );
 }
 
 /** Returns the stable vector key or the ordinary memory-relative path. */

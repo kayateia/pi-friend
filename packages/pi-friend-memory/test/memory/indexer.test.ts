@@ -126,3 +126,73 @@ Still searchable content.
     assert.match(broken?.body ?? "", /Still searchable content/);
   });
 });
+
+test("a memory's indexed date is edited, else created, normalised to UTC", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    await repository.store.writeTextFile(
+      "nodes/edited-node.md",
+      `---
+title: Edited Node
+type: fact
+speaker: []
+agents: []
+created: 2026-10-01T00:00:00Z
+last_used: 2026-10-01T00:00:00Z
+edited: 2026-11-08T00:00:00-05:00
+use_count: 0
+decay_weight: 1
+status: active
+emotional_flavor: neutral
+tags: []
+supersedes: []
+superseded_by: ""
+links: []
+source: ""
+---
+
+Body.
+`,
+    );
+    await repository.store.writeTextFile(
+      "nodes/unedited-node.md",
+      `---
+title: Unedited Node
+type: fact
+speaker: []
+agents: []
+created: 2026-10-02T00:00:00Z
+last_used: 2026-10-02T00:00:00Z
+use_count: 0
+decay_weight: 1
+status: active
+emotional_flavor: neutral
+tags: []
+supersedes: []
+superseded_by: ""
+links: []
+source: ""
+---
+
+Body.
+`,
+    );
+
+    const index = await buildMemoryDocumentIndex(repository.store);
+    const bySlug = new Map(index.map((file) => [file.slug, file]));
+
+    // An edit later than creation decides the date, and an offset is converted
+    // so that a text comparison against a UTC bound is still correct.
+    assert.equal(
+      bySlug.get("edited-node")?.modifiedAt,
+      "2026-11-08T05:00:00.000Z",
+    );
+    assert.equal(
+      bySlug.get("unedited-node")?.modifiedAt,
+      "2026-10-02T00:00:00.000Z",
+    );
+  });
+});

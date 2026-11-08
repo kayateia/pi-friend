@@ -589,6 +589,11 @@ function createSemanticSearch(
       model: provider.model,
       dimensions: provider.dimensions,
     });
+    if (index.rebuilt) {
+      reportWarning(
+        "pi-friend semantic index was discarded and is being rebuilt: its schema or embedding model changed. Every entry will be embedded again.",
+      );
+    }
     return { provider, index };
   } catch (error) {
     logError("semantic index initialization", error);
