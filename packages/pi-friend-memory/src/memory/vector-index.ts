@@ -134,7 +134,15 @@ const DEFAULT_SEARCH_LIMIT = 5;
  * discards the index rather than migrating it, an existing table is never
  * altered here: it is dropped with the file it lives in.
  */
-const INDEX_SCHEMA_SQL = `
+/**
+ * Tables that identify and describe the index, created when absent.
+ *
+ * Only statements that are safe against any older layout belong here: they run
+ * before the recorded version is known, because the version lives in one of
+ * them. Anything that depends on a column a previous version lacked is in
+ * {@link CURRENT_SCHEMA_SQL} and runs after the version has been checked.
+ */
+const CORE_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS vector_index_meta (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     schema_version INTEGER NOT NULL,
@@ -156,7 +164,16 @@ const INDEX_SCHEMA_SQL = `
     tags_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+`;
 
+/**
+ * Statements that assume the current layout, run only once it is confirmed.
+ *
+ * `modified_at` arrived with schema version 2. Creating its index against a
+ * version 1 table fails with "no such column", which would abort the open
+ * before the mismatch could be noticed and the index regenerated.
+ */
+const CURRENT_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS vector_entries_modified_at
     ON vector_entries(modified_at);
 `;
@@ -471,20 +488,42 @@ function openIndex(
 ): { database: DatabaseSync; rebuilt: boolean } {
   try {
     const first = openDatabase(metadata, databasePath);
-    if (first.stored === null || sameSpace(first.stored, metadata)) {
-      return { database: first.database, rebuilt: false };
+    if (first.stored !== null && !sameSpace(first.stored, metadata)) {
+      first.database.close();
+      removeDatabaseFiles(databasePath);
+      const fresh = openDatabase(metadata, databasePath);
+      applyCurrentSchema(fresh.database, metadata);
+      return { database: fresh.database, rebuilt: true };
     }
 
-    first.database.close();
-    removeDatabaseFiles(databasePath);
-    const fresh = openDatabase(metadata, databasePath);
-    return { database: fresh.database, rebuilt: true };
+    applyCurrentSchema(first.database, metadata);
+    return { database: first.database, rebuilt: false };
   } catch (error) {
     throw new VectorIndexError(
       `Could not initialize sqlite-vec index at ${databasePath}.`,
       { cause: error },
     );
   }
+}
+
+/**
+ * Adds what the current layout assumes, once that layout is confirmed.
+ *
+ * Deliberately after the version check: an index a version behind does not have
+ * the column, and creating an index over it fails before anything can notice
+ * the version, which is the state that has to be recovered from rather than
+ * reported as a startup error.
+ */
+function applyCurrentSchema(
+  database: DatabaseSync,
+  metadata: Required<VectorIndexMetadata>,
+): void {
+  database.exec(CURRENT_SCHEMA_SQL);
+  database.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS vector_embeddings USING vec0(
+      embedding float[${metadata.dimensions}] distance_metric=cosine
+    );
+  `);
 }
 
 /** One open connection, plus whatever schema it already carried. */
@@ -502,7 +541,7 @@ function openDatabase(
     database.enableLoadExtension(false);
     database.exec("PRAGMA journal_mode = WAL");
     database.exec("PRAGMA synchronous = NORMAL");
-    database.exec(INDEX_SCHEMA_SQL);
+    database.exec(CORE_SCHEMA_SQL);
 
     const stored = readStoredMetadata(database);
     if (stored === null) {
@@ -516,12 +555,6 @@ function openDatabase(
           metadata.dimensions,
         );
     }
-
-    database.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS vector_embeddings USING vec0(
-        embedding float[${metadata.dimensions}] distance_metric=cosine
-      );
-    `);
 
     return { database, stored };
   } catch (error) {

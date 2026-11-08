@@ -9,7 +9,9 @@
 import assert from "node:assert/strict";
 import { lstat } from "node:fs/promises";
 import * as path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import * as sqliteVec from "sqlite-vec";
 import {
   SqliteVectorIndex,
   VectorIndexError,
@@ -380,6 +382,71 @@ test("filters restrict the search before the nearest-neighbour cutoff", async ()
           }),
         ),
         ["new-1"],
+      );
+    } finally {
+      index.close();
+    }
+  });
+});
+
+test("a version 1 index, which lacks modified_at, is replaced rather than refused", async () => {
+  await withTempDir(async (directory) => {
+    const databasePath = path.join(directory, "vectors.sqlite");
+
+    // The real upgrade path: a file written by the previous release, so its
+    // table has no `modified_at` column. Building the fixture with the current
+    // DDL would hide the failure this test exists for.
+    const legacy = new DatabaseSync(databasePath, { allowExtension: true });
+    sqliteVec.load(legacy);
+    legacy.enableLoadExtension(false);
+    legacy.exec(`
+      CREATE TABLE vector_index_meta (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        schema_version INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL
+      );
+      CREATE TABLE vector_entries (
+        rowid INTEGER PRIMARY KEY,
+        entry_key TEXT NOT NULL UNIQUE,
+        entry_kind TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        title TEXT,
+        memory_type TEXT,
+        memory_status TEXT,
+        decay_weight REAL,
+        tags_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE VIRTUAL TABLE vector_embeddings USING vec0(
+        embedding float[3] distance_metric=cosine
+      );
+      INSERT INTO vector_index_meta(id, schema_version, model, dimensions)
+        VALUES (1, 1, 'test/three-dimensional', 3);
+    `);
+    legacy.close();
+
+    const index = openIndex(databasePath);
+    try {
+      assert.equal(index.rebuilt, true);
+      assert.equal(index.count(), 0);
+      index.upsert({
+        key: "east",
+        kind: "node",
+        sourcePath: "nodes/east.md",
+        contentHash: "hash-east",
+        embedding: new Float32Array([1, 0, 0]),
+        modifiedAt: "2026-11-08T00:00:00.000Z",
+        tags: [],
+      });
+      assert.deepEqual(
+        index
+          .search(new Float32Array([1, 0, 0]), 5, {
+            since: "2026-11-01T00:00:00.000Z",
+          })
+          .map((hit) => hit.key),
+        ["east"],
       );
     } finally {
       index.close();
