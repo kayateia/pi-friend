@@ -16,6 +16,10 @@ import {
   serializeMemoryNode,
 } from "../memory/schema.ts";
 import { ATTRIBUTION_LABEL, formatAttribution } from "../memory/attribution.ts";
+import {
+  formatRagDiagnostics,
+  type RagRetrievalDiagnostics,
+} from "../memory/rag.ts";
 import type {
   MemoryStatus,
   MemoryType,
@@ -126,14 +130,87 @@ export function formatMemoryToolName(
  * service. Tool execution remains unavailable until storage initialization
  * succeeds.
  */
+/**
+ * Registers the retrieval diagnostics command.
+ *
+ * A command rather than a tool: reading them should cost nothing, and asking a
+ * model to recite numbers it already has is both slower and billable. Pi runs
+ * the handler locally, and PI WEB surfaces `ctx.ui.notify` output from it, so
+ * the report appears where a person is already looking.
+ */
+export function registerMemoryCommands(
+  pi: ExtensionAPI,
+  getLastRetrieval: () =>
+    | { diagnostics: RagRetrievalDiagnostics; at: string }
+    | undefined = () => undefined,
+  toolPrefix: string = DEFAULT_MEMORY_TOOL_PREFIX,
+): void {
+  pi.registerCommand(`${toolPrefix}memory-last-rag`, {
+    description:
+      "Show what pi-friend-memory injected on the last user turn, and why each result ranked where it did",
+    handler: async (_args, ctx) => {
+      const last = getLastRetrieval();
+      ctx.ui.notify(
+        last === undefined
+          ? "pi-friend-memory: no retrieval has run in this session yet."
+          : formatRagDiagnostics(last.diagnostics, last.at),
+        "info",
+      );
+    },
+  });
+}
+
 export function registerMemoryTools(
   pi: ExtensionAPI,
   getService: () => MemoryNodeService | undefined,
   toolPrefix: string = DEFAULT_MEMORY_TOOL_PREFIX,
+  getLastRetrieval: () =>
+    | { diagnostics: RagRetrievalDiagnostics; at: string }
+    | undefined = () => undefined,
 ): void {
   // Tool descriptions refer to each other, so resolve prefixed names once.
   const toolName = (suffix: string): string =>
     formatMemoryToolName(toolPrefix, suffix);
+
+  pi.registerTool({
+    name: toolName("memory_last_rag"),
+    label: "Memory Last Retrieval",
+    description: [
+      "Report what this extension injected into the prompt on the last user turn, and why each result ranked where it did.",
+      "Shows the cleaned query, the mode used (and any fallback), and per result: its keyword score and the points each field contributed, its semantic similarity, both ranks, the final fused score, and whether it was injected.",
+      "Use it to explain an injection, or to judge whether a weighting is too strong.",
+    ].join("\n"),
+    parameters: Type.Object({}),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async execute(): Promise<AgentToolResult<{ recorded: boolean }>> {
+      const last = getLastRetrieval();
+      if (last === undefined) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No pi-friend-memory retrieval has run in this session yet.",
+            },
+          ],
+          details: { recorded: false },
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: formatRagDiagnostics(last.diagnostics, last.at),
+          },
+        ],
+        details: { recorded: true },
+      };
+    },
+  });
 
   pi.registerTool({
     name: toolName("memory_add"),

@@ -60,12 +60,52 @@ export function latestUserPrompt(
 }
 
 /**
+ * The local time a sibling extension prefixes to person-authored messages.
+ *
+ * Mirrors `pi-time-awareness`'s `TIMESTAMP_PREFIX_PATTERN`: the text arrives
+ * through `context`, so a name tag behind it is no longer at the start of the
+ * message. It is stripped for the query only; nothing rewrites the transcript.
+ * The format is that extension's, so it needs revising if that changes.
+ */
+/** One configured prefix, compiled once and applied to every line. */
+export interface QueryPrefix {
+  readonly source: string;
+  readonly regex: RegExp;
+}
+
+/**
+ * Removes configured prefixes from the start of each line.
+ *
+ * What a deployment puts in front of a person's words is that deployment's
+ * business — a timestamp here, a channel name there — so the shapes are
+ * configuration rather than a pattern this extension knows. A prefix is markup
+ * and must not reach matching, an embedding or the access log.
+ */
+function withoutPrefixes(text: string, prefixes: readonly QueryPrefix[]): string {
+  if (prefixes.length === 0) {
+    return text;
+  }
+  return text
+    .split("\n")
+    .map((line) => {
+      let stripped = line;
+      for (const prefix of prefixes) {
+        stripped = stripped.replace(prefix.regex, "");
+      }
+      return stripped;
+    })
+    .join("\n")
+    .trim();
+}
+
+/**
  * Builds the RAG query from the latest user turn and the most recent visible
  * assistant prose before it. Thinking blocks, tool calls, and tool results are
  * deliberately excluded.
  */
 export function buildRagQuery(
   messages: RagAgentMessage[],
+  prefixes: readonly QueryPrefix[] = [],
 ): RagQuery | undefined {
   const latest = latestUserPrompt(messages);
   if (!latest) {
@@ -88,14 +128,15 @@ export function buildRagQuery(
     }
   }
 
+  const userPrompt = withoutPrefixes(latest.prompt, prefixes);
   return {
     userIndex: latest.index,
     userPrompt: latest.prompt,
     ...(assistantText === undefined ? {} : { assistantText }),
     query:
       assistantText === undefined
-        ? latest.prompt
-        : `${assistantText}\n\n${latest.prompt}`,
+        ? userPrompt
+        : `${assistantText}\n\n${userPrompt}`,
   };
 }
 

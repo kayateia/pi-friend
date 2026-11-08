@@ -129,6 +129,7 @@ export function searchSemanticVectors(
         chunkCache,
       ),
       score: Math.max(0, 1 - hit.distance),
+      semanticScore: Math.max(0, 1 - hit.distance),
       matchedFields: ["semantic"],
       semanticRank: rank,
       ...(file.schemaError === undefined

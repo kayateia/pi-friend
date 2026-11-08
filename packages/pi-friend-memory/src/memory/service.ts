@@ -45,6 +45,11 @@ import { searchHybrid } from "./hybrid-search.ts";
 import type { EmbeddingProvider } from "./embedding.ts";
 import type { MemorySearchOptions, MemorySearchResult } from "./search.ts";
 import { kindsForCorpus, searchIndexedFiles } from "./search.ts";
+import {
+  compileSpeakerTagPatterns,
+  stripSpeakerTag,
+  type CompiledSpeakerTagPattern,
+} from "./speaker-tags.ts";
 import { searchSemantically } from "./semantic-search.ts";
 import type { VectorIndex } from "./vector-index.ts";
 import { buildEmbeddingText } from "./vector-sync.ts";
@@ -325,18 +330,26 @@ export class MemoryNodeService {
 
   /** Searches all indexed Markdown files and records returned tool hits. */
   async search(options: MemorySearchOptions): Promise<MemorySearchResult[]> {
-    if (options.query.trim() === "") {
+    // A speaker tag marks who is speaking and is not part of what was asked, so
+    // it leaves the query before keyword matching, the embedding and the access
+    // log see it. The names it carried are not thrown away: a memory attributed
+    // to the person speaking is more relevant to this conversation, and that is
+    // the one thing a tag is allowed to score.
+    const { text: query, tags } = this.prepareQuery(options.query);
+    if (query.trim() === "") {
       throw new MemoryServiceError("Search query must not be empty.");
     }
+    const speakerNames = [...new Set(tags.map((tag) => tag.name))];
     if (options.corpus !== undefined && options.kinds !== undefined) {
       throw new MemoryServiceError(
         "Search options cannot set both corpus and kinds.",
       );
     }
+    const cleaned: MemorySearchOptions = { ...options, query, ...(speakerNames.length === 0 ? {} : { speakerNames }) };
     const resolved: MemorySearchOptions =
-      options.corpus === undefined
-        ? options
-        : { ...options, kinds: kindsForCorpus(options.corpus) };
+      cleaned.corpus === undefined
+        ? cleaned
+        : { ...cleaned, kinds: kindsForCorpus(cleaned.corpus) };
 
     const index = await this.buildSearchIndex();
     const mode = options.mode ?? this.store.config.search.defaultMode;
@@ -1147,6 +1160,29 @@ export class MemoryNodeService {
       }
     }
     return null;
+  }
+
+  /**
+   * Splits a query into the text that will be matched and the names its tags
+   * carried. Public because the diagnostic reports the text that was searched,
+   * not the message it came from.
+   */
+  prepareQuery(query: string): {
+    text: string;
+    tags: ReturnType<typeof stripSpeakerTag>["tags"];
+  } {
+    const { text, tags } = stripSpeakerTag(query, this.speakerTagPatterns());
+    return { text, tags };
+  }
+
+  /** Compiled tag patterns, built once per service. */
+  private speakerTagCache: CompiledSpeakerTagPattern[] | undefined;
+
+  private speakerTagPatterns(): CompiledSpeakerTagPattern[] {
+    this.speakerTagCache ??= compileSpeakerTagPatterns(
+      this.store.config.speakerTags.patterns,
+    );
+    return this.speakerTagCache;
   }
 
   /** Serializes state-changing operations, except when already inside a lock. */

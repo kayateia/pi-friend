@@ -37,6 +37,7 @@ import {
   buildCaptureWindow,
   captureStartIndex,
 } from "./src/memory/capture.ts";
+import { compileQueryPrefixes } from "./src/memory/query-prefixes.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
 import { createMergeWriter } from "./src/memory/merge-writer.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
@@ -52,17 +53,22 @@ import {
 import { ExternalIndexManager } from "./src/memory/external-index-manager.ts";
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
+import type { RagRetrievalDiagnostics } from "./src/memory/rag.ts";
 import {
   buildRagQuery,
   containsRagContext,
   injectRagContext,
   ragBlockForDelivery,
+  type QueryPrefix,
 } from "./src/memory/rag-injection.ts";
 import { runDailySweep } from "./src/memory/sweep.ts";
 import type { SemanticSearchDependencies } from "./src/memory/service.ts";
 import { MemoryNodeService } from "./src/memory/service.ts";
 import { SqliteVectorIndex } from "./src/memory/vector-index.ts";
-import { registerMemoryTools } from "./src/tools/memory-tools.ts";
+import {
+  registerMemoryCommands,
+  registerMemoryTools,
+} from "./src/tools/memory-tools.ts";
 
 /** Request-local RAG result cached for one user turn within a session. */
 interface RagSessionState {
@@ -88,6 +94,11 @@ export default async function registerPiFriend(
   let externalIndexManager: ExternalIndexManager | undefined;
   const ragSessions = new Map<string, RagSessionState>();
   let injectionConfig = defaultRagInjectionConfig();
+  let queryPrefixes: readonly QueryPrefix[] = [];
+  // The last injection this session produced, for the memory_last_rag tool.
+  let lastRetrieval:
+    | { diagnostics: RagRetrievalDiagnostics; at: string }
+    | undefined;
   let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
   let captureScheduler: AutoCaptureScheduler | undefined;
   let sweepConfig: SweepConfig = defaultSweepConfig();
@@ -110,7 +121,8 @@ export default async function registerPiFriend(
 
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
-  registerMemoryTools(pi, () => memoryService, toolPrefix);
+  registerMemoryTools(pi, () => memoryService, toolPrefix, () => lastRetrieval);
+  registerMemoryCommands(pi, () => lastRetrieval, toolPrefix);
 
   /** Runs one transcript capture and advances the cursor on success. */
   const executeCapture = async (
@@ -318,6 +330,9 @@ export default async function registerPiFriend(
 
       const repository = await MemoryNodeRepository.open();
       injectionConfig = repository.store.config.injection;
+      queryPrefixes = compileQueryPrefixes(
+        repository.store.config.queryPrefixes.patterns,
+      );
       autoCaptureConfig = repository.store.config.autoCapture;
       sweepConfig = repository.store.config.sweep;
       mergeConfig = repository.store.config.merge;
@@ -412,7 +427,7 @@ export default async function registerPiFriend(
       return;
     }
 
-    const ragQuery = buildRagQuery(event.messages);
+    const ragQuery = buildRagQuery(event.messages, queryPrefixes);
     if (!ragQuery) {
       return;
     }
@@ -436,8 +451,12 @@ export default async function registerPiFriend(
           },
         )
           .then((rag) => {
+            lastRetrieval = {
+              diagnostics: rag.diagnostics,
+              at: new Date().toISOString(),
+            };
             debugRag("retrieved", {
-              query: ragQuery.query,
+              rawQuery: ragQuery.query,
               userPromptChars: ragQuery.userPrompt.length,
               assistantTextChars: ragQuery.assistantText?.length ?? 0,
               contextChars: rag.text.length,

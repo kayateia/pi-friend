@@ -44,6 +44,15 @@ memory:
       # A signature at the end: -Sam or ~Sam
       - '(?:^|\s)[-~]([A-Za-z][A-Za-z''’]*(?:-[A-Za-z][A-Za-z''’]*)*)\s*$'
 
+  # Markup a deployment puts in front of a person's words is removed from the
+  # RAG query rather than searched for: a timestamp, a channel name, anything a
+  # front end injects. Each entry is a regular expression anchored at the start
+  # of a line; there is no default, because what gets injected is the
+  # deployment's business. Uncomment and adapt to strip one.
+  query_prefixes:
+    patterns: []
+    #  - '^\[[A-Z][a-z]{2} \d{4}-\d{2}-\d{2} \d{2}:\d{2} [^\]\n]{1,40}\] '
+
   vector:
     chunk_size: 4000
 

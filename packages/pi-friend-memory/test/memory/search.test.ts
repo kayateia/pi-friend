@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
+import { searchIndexedFiles } from "../../src/memory/search.ts";
 import { withTempDir } from "../helpers.ts";
 
 /** Creates a service backed by an isolated memory tree. */
@@ -67,7 +68,7 @@ test("keyword search ranks exact slug, title, tag, and body matches", async () =
       results.map((result) => result.slug),
       ["lantern", "title-match", "tag-match", "body-match"],
     );
-    assert.deepEqual(results[0]?.matchedFields, ["slug", "path"]);
+    assert.deepEqual(results[0]?.matchedFields, ["slug"]);
     assert.deepEqual(results[1]?.matchedFields, ["title"]);
     assert.deepEqual(results[2]?.matchedFields, ["tags"]);
     assert.deepEqual(results[3]?.matchedFields, ["body"]);
@@ -275,4 +276,174 @@ test("search results carry speaker attribution", async () => {
     });
     assert.equal(document[0]?.speaker, undefined);
   });
+});
+
+/** Three memories that separate "said by Aria" from "mentions Aria" from neither. */
+async function speakerFixture(agentDir: string): Promise<MemoryNodeService> {
+  const { service } = await makeService(agentDir);
+  await service.add({
+    slug: "by-aria-about-tea",
+    title: "Tea",
+    type: "fact",
+    body: "The kettle boils for four minutes.",
+    speaker: [{ name: "Aria", confident: true }],
+  });
+  await service.add({
+    slug: "mentions-aria",
+    title: "Aroha",
+    type: "fact",
+    body: "Aria prefers green tea.",
+    speaker: [{ name: "Iri", confident: true }],
+  });
+  return service;
+}
+
+const scored = (results: Awaited<ReturnType<MemoryNodeService["search"]>>) =>
+  new Map(results.map((result) => [result.slug, result.score]));
+
+test("a name tag never enters the keyword text", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await speakerFixture(agentDir);
+
+    // "mentions-aria" is found by the word Aria when it is *said*.
+    const typed = await service.search({ query: "Aria green tea", mode: "keyword" });
+    assert.ok(typed.some((result) => result.slug === "mentions-aria"));
+
+    // The tag contributes no word of its own: "kettle" is the only term left,
+    // and this memory does not contain it.
+    const tagged = await service.search({
+      query: "\\>>Aria: kettle",
+      mode: "keyword",
+    });
+    assert.equal(
+      tagged.some((result) => result.slug === "mentions-aria"),
+      false,
+    );
+  });
+});
+
+test("a tag boosts memories attributed to that speaker", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await speakerFixture(agentDir);
+
+    const plain = scored(await service.search({ query: "kettle", mode: "keyword" }));
+    const tagged = await service.search({
+      query: "\\>>Aria: kettle",
+      mode: "keyword",
+    });
+    const boosted = scored(tagged);
+
+    assert.ok((boosted.get("by-aria-about-tea") ?? 0) > (plain.get("by-aria-about-tea") ?? 0));
+    assert.ok(
+      tagged.find((result) => result.slug === "by-aria-about-tea")?.matchedFields
+        .includes("speaker"),
+    );
+    // Another memory's attribution is untouched by a different name.
+    assert.equal(boosted.get("mentions-aria"), plain.get("mentions-aria"));
+  });
+});
+
+test("a name typed as text keeps ordinary scoring, tag or no tag", async () => {
+  await withTempDir(async (agentDir) => {
+    const service = await speakerFixture(agentDir);
+
+    // Said as text, the name matches prose for everyone, attributed or not.
+    const typed = await service.search({ query: "Aria", mode: "keyword" });
+    const mentioned = typed.find((result) => result.slug === "mentions-aria");
+    assert.ok(mentioned);
+    assert.ok(mentioned.matchedFields.includes("body"));
+
+    // A tag beside that text neither helps nor hurts a memory it is not
+    // attributed to: only the words that were said are scored.
+    const plain = scored(await service.search({ query: "green tea", mode: "keyword" }));
+    const tagged = scored(
+      await service.search({ query: "\\>>Aria: green tea", mode: "keyword" }),
+    );
+    assert.equal(tagged.get("mentions-aria"), plain.get("mentions-aria"));
+
+    // Both at once on a memory that *is* attributed to her: one speaker boost,
+    // and the typed name still scores as text.
+    const both = await service.search({
+      query: "\\>>Aria: four minutes",
+      mode: "keyword",
+    });
+    const byAria = both.find((result) => result.slug === "by-aria-about-tea");
+    assert.ok(byAria);
+    assert.equal(
+      byAria.matchedFields.filter((field) => field === "speaker").length,
+      1,
+    );
+    assert.ok(byAria.matchedFields.includes("body"));
+  });
+});
+
+test("a speaker match scores once per name, however many records carry it", async () => {
+  await withTempDir(async (agentDir) => {
+    const { service } = await makeService(agentDir);
+    await service.add({
+      slug: "one-record",
+      title: "One record",
+      type: "fact",
+      body: "The kettle boils in four minutes.",
+      speaker: [{ name: "Aria", confident: true }],
+    });
+    await service.add({
+      slug: "three-records",
+      title: "Three records",
+      type: "fact",
+      body: "The kettle boils in four minutes.",
+      speaker: [
+        { name: "Aria", confident: true },
+        { name: "aria", confident: false },
+        { name: "Aria", confident: true },
+      ],
+    });
+
+    const results = await service.search({
+      query: "\\>>Aria: kettle",
+      mode: "keyword",
+    });
+    const bySlug = scored(results);
+    assert.deepEqual(bySlug.get("one-record"), bySlug.get("three-records"));
+  });
+});
+
+test("a query that is only a speaker tag is empty", async () => {
+  await withTempDir(async (agentDir) => {
+    const { service } = await makeService(agentDir);
+    await assert.rejects(
+      () => service.search({ query: "\\>>Aria:", mode: "keyword" }),
+      /must not be empty/u,
+    );
+  });
+});
+
+test("a document's path still scores; a memory's path does not", () => {
+  const file = (kind: "node" | "document", relativePath: string) => ({
+    relativePath,
+    absolutePath: `/tmp/${relativePath}`,
+    storageKind: kind,
+    kind,
+    ...(kind === "node" ? { slug: "kettle" } : {}),
+    title: "Something else",
+    type: "fact" as const,
+    status: "active" as const,
+    decayWeight: 1,
+    tags: [],
+    body: "Nothing relevant here.",
+  });
+
+  const results = searchIndexedFiles(
+    [
+      file("document", "notes/2026-11-02.md"),
+      file("node", "nodes/kettle.md"),
+    ],
+    { query: "2026", minTokenMatches: 1 },
+  );
+  // Only the document earns path points: for a node the path repeats the slug,
+  // so scoring it would pay twice for the same word.
+  assert.deepEqual(
+    results.map((result) => [result.relativePath, result.matchedFields]),
+    [["notes/2026-11-02.md", ["path"]]],
+  );
 });
