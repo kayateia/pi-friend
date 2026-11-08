@@ -249,9 +249,11 @@ test("the capture prompt states the attribution the window supports", () => {
   const one = buildCapturePrompt("USER: hi", 2, { names: ["Aria"] });
   assert.match(one, /The human speaker is Aria; use that concrete attribution name\./u);
 
-  // Two names are stated as two, not collapsed into "the current speaker".
+  // Several names are listed for the model, with what a tag means, rather than
+  // collapsed into "the current speaker".
   const two = buildCapturePrompt("USER: hi", 2, { names: ["Aria", "Iri"] });
   assert.match(two, /More than one person is speaking: Aria, Iri\./u);
+  assert.match(two, /A name tag marks the speaker of its message/u);
   assert.doesNotMatch(two, /The human speaker is/u);
 
   // Nothing to say means nothing said: the system prompt forbids inventing one.
@@ -426,4 +428,36 @@ test("the names come from the messages the transcript still contains", () => {
   // tell the model about a speaker it cannot see.
   assert.deepEqual(buildCaptureWindow(entries, 150).names, []);
   assert.equal(buildCaptureWindow(entries, 150).transcript.includes("Aria"), false);
+});
+
+test("every tag a message carries is handed to the model", () => {
+  const names = (text: string): string[] =>
+    buildCaptureWindow([
+      {
+        type: "message",
+        id: "u1",
+        parentId: null,
+        timestamp: "2026-10-20T00:00:00Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text }],
+          timestamp: 1,
+        },
+      },
+    ]).names;
+
+  // Heading the message: the ordinary case.
+  assert.deepEqual(names("\\>>Iri: the sweep ran"), ["Iri"]);
+  // A signature on its own last line.
+  assert.deepEqual(names("that was the day.\n\n-Aria"), ["Aria"]);
+  // A transcript pasted into a message brings its speakers with it, and the
+  // model is told every one of them.
+  const pasted = [
+    "---",
+    "",
+    "\\>>Aria: hello",
+    "",
+    "\\>>Iri: it was interesting",
+  ].join("\n");
+  assert.deepEqual(names(pasted), ["Aria", "Iri"]);
 });

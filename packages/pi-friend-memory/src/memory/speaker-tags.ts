@@ -187,80 +187,102 @@ function captureGroupCount(regex: RegExp): number {
 }
 
 /**
- * Finds the speaker tag in one message, or returns undefined.
+ * Finds every speaker tag in a message, in the order they appear.
  *
- * The first pattern that matches at the position it was anchored to decides:
- * a message carries one tag, and guessing between several would invent
- * attribution rather than read it. A match inside code or a quotation is not the
- * author signing and is skipped, so a later form can still be found.
+ * Matching is per line: a prefix form has to begin its line and a suffix form
+ * has to end one. A message can therefore carry several tags — a person's own
+ * sign-off, and the ones inside the conversation they pasted — and all of them
+ * are names that were written on purpose.
+ *
+ * Lines inside a fenced block, lines beginning with `>` (a quotation), and a
+ * match inside an inline code span are skipped: those are quoted material, not
+ * the author signing. Names are deduplicated case-insensitively, keeping the
+ * first spelling and position, so `Aria` at the top and `aria` at the bottom are
+ * one person.
  */
+export function findSpeakerTags(
+  text: string,
+  patterns: readonly CompiledSpeakerTagPattern[] = defaultSpeakerTagPatterns(),
+): SpeakerTag[] {
+  const tags: SpeakerTag[] = [];
+  const seen = new Set<string>();
+  let fence: string | undefined;
+  let offset = 0;
+
+  for (const line of text.split("\n")) {
+    const lineStart = offset;
+    offset += line.length + 1;
+
+    const marker = /^\s*(`{3,}|~{3,})/u.exec(line)?.[1];
+    if (fence !== undefined) {
+      if (
+        marker !== undefined &&
+        marker[0] === fence[0] &&
+        marker.length >= fence.length
+      ) {
+        fence = undefined;
+      }
+      continue;
+    }
+    if (marker !== undefined) {
+      fence = marker;
+      continue;
+    }
+    if (/^\s{0,3}>/u.test(line)) {
+      continue;
+    }
+
+    const lineTags: SpeakerTag[] = [];
+    for (const pattern of patterns) {
+      const match = pattern.regex.exec(line);
+      if (match === null) {
+        continue;
+      }
+      const name = matchName(match);
+      if (name === undefined || name === "") {
+        continue;
+      }
+      const whole = match[0];
+      // The anchors may consume whitespace that is not part of the tag; the
+      // span covers the tag itself so a caller can remove exactly that.
+      const start = match.index + (whole.length - whole.trimStart().length);
+      const end =
+        match.index + whole.length - (whole.length - whole.trimEnd().length);
+      if (insideInlineCode(line, start)) {
+        continue;
+      }
+      lineTags.push({ name, start: lineStart + start, end: lineStart + end });
+    }
+
+    lineTags.sort((left, right) => left.start - right.start);
+    for (const tag of lineTags) {
+      const key = tag.name.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      tags.push(tag);
+    }
+  }
+  return tags;
+}
+
+/** Finds the first speaker tag in a message, or returns undefined. */
 export function findSpeakerTag(
   text: string,
   patterns: readonly CompiledSpeakerTagPattern[] = defaultSpeakerTagPatterns(),
 ): SpeakerTag | undefined {
-  for (const pattern of patterns) {
-    const match = pattern.regex.exec(text);
-    if (match === null) {
-      continue;
-    }
-    const name = matchName(match);
-    if (name === undefined || name === "") {
-      continue;
-    }
-    const whole = match[0];
-    // The anchors may consume whitespace that is not part of the tag; the span
-    // covers the tag itself so a caller can remove exactly that.
-    const start = match.index + (whole.length - whole.trimStart().length);
-    const end =
-      match.index + whole.length - (whole.length - whole.trimEnd().length);
-    if (isVerbatim(text, start)) {
-      continue;
-    }
-    return { name, start, end };
-  }
-  return undefined;
+  return findSpeakerTags(text, patterns)[0];
 }
 
 /**
- * Reports whether an offset falls inside code or a quotation.
+ * Reports whether an offset falls inside an inline code span on its line.
  *
- * A tag is a person signing; the same characters inside a fenced block, an
- * inline code span, or a line beginning with `>` are being quoted, not written
- * as attribution, and treating them as a signature would attribute the author's
- * memory to whoever they were quoting.
+ * An odd number of backticks before the tag means the span that would close it
+ * has not started yet, so the text between them is code.
  */
-function isVerbatim(text: string, index: number): boolean {
-  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
-  const newline = text.indexOf("\n", index);
-  const lineEnd = newline === -1 ? text.length : newline;
-  const line = text.slice(lineStart, lineEnd);
-
-  // A quoted line, including a quote nested inside another one.
-  if (/^\s{0,3}>/u.test(line)) {
-    return true;
-  }
-
-  // Fenced blocks: an unmatched opening fence before this line encloses it.
-  let fence: string | undefined;
-  for (const earlier of text.slice(0, lineStart).split("\n")) {
-    const marker = /^\s*(`{3,}|~{3,})/u.exec(earlier)?.[1];
-    if (marker === undefined) {
-      continue;
-    }
-    if (fence === undefined) {
-      fence = marker;
-    } else if (marker[0] === fence[0] && marker.length >= fence.length) {
-      fence = undefined;
-    }
-  }
-  if (fence !== undefined) {
-    return true;
-  }
-
-  // Inline code: an odd number of backticks before the tag on its line opens a
-  // span that has not been closed yet.
-  const before = line.slice(0, Math.max(0, index - lineStart));
-  return (before.match(/`/gu) ?? []).length % 2 === 1;
+function insideInlineCode(line: string, index: number): boolean {
+  return (line.slice(0, index).match(/`/gu) ?? []).length % 2 === 1;
 }
 
 /** Reads the name from a match: a named group wins over the first positional one. */
@@ -273,22 +295,32 @@ function matchName(match: RegExpExecArray): string | undefined {
 /**
  * Removes the tag a message carries, leaving everything it was attached to.
  *
- * The tag is not part of what was said: it marks who said it. Search text is
+ * Tags are not part of what was said: they mark who said it. Search text is
  * cleaned with this so a name tag cannot bias matching, while the transcript
- * keeps the tag exactly as written.
+ * keeps the tag exactly as written. Every tag goes, not only the first, because
+ * a pasted conversation brings its own names with it.
  */
 export function stripSpeakerTag(
   text: string,
   patterns: readonly CompiledSpeakerTagPattern[] = defaultSpeakerTagPatterns(),
-): { text: string; tag?: SpeakerTag } {
-  const tag = findSpeakerTag(text, patterns);
-  if (tag === undefined) {
-    return { text };
+): { text: string; tags: SpeakerTag[] } {
+  const tags = findSpeakerTags(text, patterns);
+  if (tags.length === 0) {
+    return { text, tags };
   }
-  const before = text.slice(0, tag.start);
-  const after = text.slice(tag.end);
-  return {
-    text: `${before}${after}`.trim(),
-    tag,
-  };
+  let cleaned = "";
+  let cursor = 0;
+  for (const tag of tags) {
+    cleaned += text.slice(cursor, tag.start);
+    cursor = tag.end;
+  }
+  cleaned += text.slice(cursor);
+  // Removing a tag leaves the space that followed it and the line break it sat
+  // on; neither belongs in the cleaned text a query is built from.
+  const tidied = cleaned
+    .replace(/^[ \t]+/gmu, "")
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n{2,}/gu, "\n")
+    .trim();
+  return { text: tidied, tags };
 }

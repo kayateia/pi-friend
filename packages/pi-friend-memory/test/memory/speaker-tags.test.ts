@@ -14,6 +14,7 @@ import {
   compileSpeakerTagPatterns,
   defaultSpeakerTagPatterns,
   findSpeakerTag,
+  findSpeakerTags,
   stripSpeakerTag,
 } from "../../src/memory/speaker-tags.ts";
 
@@ -111,11 +112,22 @@ test("a bracketed timestamp is not a name, but it hides a tag behind it", () => 
   assert.equal(findSpeakerTag(unstamped)?.name, "Aria");
 });
 
-test("stripping removes only the tag", () => {
+test("stripping removes every tag and nothing else", () => {
   assert.deepEqual(stripSpeakerTag("\\>>Aria: hello there").text, "hello there");
   assert.deepEqual(stripSpeakerTag("hello there -Aria").text, "hello there");
   assert.deepEqual(stripSpeakerTag("no tag here").text, "no tag here");
-  assert.equal(stripSpeakerTag("no tag here").tag, undefined);
+  assert.deepEqual(stripSpeakerTag("no tag here").tags, []);
+
+  // A pasted conversation brings its own names; the query should not carry them.
+  const pasted = [
+    "\\>>Aria: hello",
+    "",
+    "\\>>Iri: it was interesting",
+  ].join("\n");
+  assert.deepEqual(
+    stripSpeakerTag(pasted).text,
+    "hello\nit was interesting",
+  );
 });
 
 test("configured patterns replace the defaults", () => {
@@ -288,4 +300,35 @@ test("only a message's own tag counts, not one inside it", () => {
     "\\>>Aria: Commentary about the quotation.",
   ].join("\n");
   assert.equal(findSpeakerTag(message)?.name, "Iri");
+});
+
+test("every tag in a message is a name, except the quoted ones", () => {
+  // The sample as written: a rule, two signed lines, a quotation, a fenced
+  // block, a signed-off paragraph, and a closing signed line.
+  const message = [
+    "---",
+    "",
+    "\\>>Aria: Hello!",
+    "",
+    "> Quotation from an article.",
+    "",
+    "\\>>Iri: This was interesting.",
+    "",
+    "```",
+    "\\>>Destiny: Why are you putting me in a code block fence?",
+    "```",
+    "",
+    "Hmm, how fascinating that I have been called upon to be contrarian. Very well! I shall demonstrate the suffix form. -Infer",
+    "",
+    "\\>>Aria: And now, a second message from me to round out the sample transcript.",
+  ].join("\n");
+
+  assert.deepEqual(
+    findSpeakerTags(message).map((tag) => tag.name),
+    ["Aria", "Iri", "Infer"],
+  );
+  // A name may appear twice; it is still one person.
+  assert.equal(findSpeakerTags(message).filter((tag) => tag.name === "Aria").length, 1);
+  // And the first tag is the one a capture would read as the signer.
+  assert.equal(findSpeakerTag(message)?.name, "Aria");
 });

@@ -15,7 +15,7 @@ import {
 } from "./schema.ts";
 import {
   defaultSpeakerTagPatterns,
-  findSpeakerTag,
+  findSpeakerTags,
   type CompiledSpeakerTagPattern,
 } from "./speaker-tags.ts";
 
@@ -82,7 +82,7 @@ function speakerAttributionLines(hint?: CaptureSpeakerHint): string[] {
     ];
   }
   return [
-    `More than one person is speaking: ${names.join(", ")}. Attribute each candidate to the person whose message it comes from.`,
+    `More than one person is speaking: ${names.join(", ")}. A name tag marks the speaker of its message and is not part of what was said; attribute each candidate to the person whose message it comes from.`,
   ];
 }
 
@@ -129,18 +129,25 @@ export function buildCaptureWindow(
   maxChars = 24_000,
   patterns: readonly CompiledSpeakerTagPattern[] = defaultSpeakerTagPatterns(),
 ): CaptureWindow {
-  const lines: Array<{ text: string; name?: string }> = [];
+  const lines: Array<{ text: string; names?: string[] }> = [];
   for (const entry of entries) {
     if (entry.type === "message") {
       const text = formatAgentMessage(entry.message);
       if (!text) {
         continue;
       }
-      const name =
+      // Every tag a person wrote is handed to the model: they name speakers,
+      // and a message that pastes a conversation carries that conversation's
+      // speakers too. Which of them a candidate belongs to is the model's
+      // judgement, made with the names in front of it rather than guessed from
+      // the form of the text.
+      const names =
         entry.message.role === "user"
-          ? findSpeakerTag(formatContent(entry.message.content), patterns)?.name
-          : undefined;
-      lines.push(name === undefined ? { text } : { text, name });
+          ? findSpeakerTags(formatContent(entry.message.content), patterns).map(
+              (tag) => tag.name,
+            )
+          : [];
+      lines.push(names.length === 0 ? { text } : { text, names });
     } else if (
       entry.type === "custom_message" &&
       PERSON_AUTHORED_CUSTOM_TYPES.has(entry.customType)
@@ -168,7 +175,7 @@ export function buildCaptureWindow(
     const last = lines[lines.length - 1];
     return {
       transcript: last.text.slice(Math.max(0, last.text.length - maxChars)),
-      names: last.name === undefined ? [] : [last.name],
+      names: last.names ?? [],
     };
   }
 
@@ -176,15 +183,14 @@ export function buildCaptureWindow(
   const names: string[] = [];
   const seen = new Set<string>();
   for (const line of kept) {
-    if (line.name === undefined) {
-      continue;
+    for (const name of line.names ?? []) {
+      const key = name.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      names.push(name);
     }
-    const key = line.name.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    names.push(line.name);
   }
   return { transcript: kept.map((line) => line.text).join("\n\n"), names };
 }
