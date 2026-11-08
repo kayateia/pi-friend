@@ -300,20 +300,20 @@ function formatAgentMessage(message: AgentMessage): string | null {
       return content ? `USER: ${content}` : null;
     }
     case "assistant": {
-      const parts: string[] = [];
-      for (const block of message.content) {
-        if (block.type === "text" && block.text.trim() !== "") {
-          parts.push(block.text);
-        } else if (block.type === "toolCall") {
-          parts.push(`[tool call: ${block.name}]`);
-        }
-      }
+      // Visible prose only: commentary before a tool call and the reply after
+      // it. Tool calls are machinery, and a message that is nothing but calls
+      // contributes nothing.
+      const parts = message.content.flatMap((block) =>
+        block.type === "text" && block.text.trim() !== "" ? [block.text] : [],
+      );
       return parts.length > 0 ? `ASSISTANT: ${parts.join("\n")}` : null;
     }
-    case "toolResult": {
-      const content = formatContent(message.content);
-      return content ? `TOOL ${message.toolName}: ${content}` : null;
-    }
+    case "toolResult":
+      // Tool output is the bulk of a working transcript and says what the
+      // agent read, not what anyone meant. A durable fact learned from a tool
+      // reaches capture through the reply that states it; the raw output only
+      // crowds the window and competes with the conversation for its budget.
+      return null;
     case "system":
       return null;
     default:

@@ -378,8 +378,13 @@ it reads the transcript, which the extension never edits.
 
 After every configured number of completed agent runs, a separate no-tools
 model request reviews only the transcript entries added since the prior
-successful capture. The prompt treats conversation content as observed data,
-requires concrete speaker attribution, and allows only active memory types.
+successful capture. What it reads is the conversation: user messages, and
+assistant prose — commentary before a tool call and the reply after it. Tool
+calls and their output are excluded: the output is the bulk of a working
+transcript and says what the agent read rather than what anyone meant, and a
+fact learned from a tool reaches capture through the reply that states it. The
+prompt treats conversation content as observed data, requires concrete speaker
+attribution, and allows only active memory types.
 
 Attribution comes from speaker tags, not from guessing. The capture window is
 read for tags using the same recogniser described above, and the prompt is told
