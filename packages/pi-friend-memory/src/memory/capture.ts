@@ -53,7 +53,7 @@ export function buildCapturePrompt(
   return [
     `Extract at most ${maxCandidates} durable memory candidates from the transcript below.`,
     ...speakerAttributionLines(speakerHint),
-    'Use this JSON shape: {"candidates":[{"title":"string","type":"fact|preference|event|person-note","body":"concise Markdown","speaker":[{"name":"string","confident":true}],"agents":[],"emotional_flavor":"neutral","tags":[],"links":[]}]}',
+    'Use this JSON shape: {"candidates":[{"title":"string","type":"fact|preference|event|person-note","body":"concise Markdown","speaker":[{"name":"string","confident":true,"note":"optional"}],"agents":["string"],"emotional_flavor":"neutral","tags":[],"links":[]}]}',
     'Return {"candidates":[]} when nothing durable was learned.',
     "",
     "<transcript>",
@@ -178,21 +178,50 @@ export function parseCaptureResponse(
   }
 
   // A generic label is replaced only when exactly one person signed the window:
-  // with several names in play there is no safe answer, and the candidate is
-  // dropped by the filter below rather than attributed to whoever spoke last.
+  // with several names in play there is no safe answer. The label is removed in
+  // that case rather than guessed at, and the candidate is kept — an unidentified
+  // speaker is a gap in the record, not a reason to lose the memory.
   const soleSpeaker =
     speakerHint?.names.length === 1 ? speakerHint.names[0] : undefined;
 
   return object.candidates
     .slice(0, maxCandidates)
     .map((candidate) => parseCandidate(candidate, soleSpeaker))
-    .filter(
-      (candidate) =>
-        !isQuarantinedMemoryType(candidate.type) &&
-        candidate.speaker.every(
-          (speaker) => !isGenericSpeakerName(speaker.name),
-        ),
+    .map((candidate) => ({
+      ...candidate,
+      speaker: attributeSpeakers(candidate.speaker),
+    }))
+    .filter((candidate) => !isQuarantinedMemoryType(candidate.type));
+}
+
+/**
+ * Removes generic labels and folds repeated names into one record.
+ *
+ * A candidate whose speakers are all generic ends up with an empty list, which
+ * is the honest record: nobody identifiable was named. Dropping the candidate
+ * instead would lose a durable fact for the absence of a name, and the loss
+ * would look like "nothing was worth remembering".
+ */
+function attributeSpeakers(speakers: MemorySpeaker[]): MemorySpeaker[] {
+  const attributed: MemorySpeaker[] = [];
+  for (const speaker of speakers) {
+    if (isGenericSpeakerName(speaker.name)) {
+      continue;
+    }
+    const existing = attributed.findIndex(
+      (candidate) => candidate.name.toLowerCase() === speaker.name.toLowerCase(),
     );
+    if (existing < 0) {
+      attributed.push(speaker);
+      continue;
+    }
+    // A later confident claim upgrades an uncertain one; otherwise the first
+    // spelling and its note stand.
+    if (!attributed[existing].confident && speaker.confident) {
+      attributed[existing] = { ...attributed[existing], confident: true };
+    }
+  }
+  return attributed;
 }
 
 /**

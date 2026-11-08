@@ -294,12 +294,61 @@ test("capture response parsing rejects malformed candidates", () => {
   );
 });
 
-test("capture response parsing drops generic speaker labels", () => {
+test("an unidentified speaker leaves an empty list, not a lost candidate", () => {
   const candidates = parseCaptureResponse(
     '{"candidates":[{"title":"Generic","type":"fact","body":"x","speaker":[{"name":"USER","confident":true}]}]}',
     3,
   );
-  assert.deepEqual(candidates, []);
+  // The generic label is removed; the memory survives. Losing it would lose a
+  // durable fact for the absence of a name.
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(candidates[0]?.speaker, []);
+});
+
+test("a candidate may name several speakers, and generic labels drop out of them", () => {
+  const candidates = parseCaptureResponse(
+    JSON.stringify({
+      candidates: [
+        {
+          title: "Two people",
+          type: "event",
+          body: "They both agreed.",
+          speaker: [
+            { name: "Aisling", confident: true },
+            { name: "Iri", confident: true },
+            { name: "USER", confident: true },
+          ],
+        },
+      ],
+    }),
+    3,
+  );
+  assert.deepEqual(
+    candidates[0]?.speaker.map((speaker) => speaker.name),
+    ["Aisling", "Iri"],
+  );
+});
+
+test("a repeated name is folded into one record, and confidence upgrades", () => {
+  const candidates = parseCaptureResponse(
+    JSON.stringify({
+      candidates: [
+        {
+          title: "Twice",
+          type: "fact",
+          body: "Said twice.",
+          speaker: [
+            { name: "Aisling", confident: false },
+            { name: "aisling", confident: true },
+          ],
+        },
+      ],
+    }),
+    3,
+  );
+  assert.equal(candidates[0]?.speaker.length, 1);
+  assert.equal(candidates[0]?.speaker[0]?.name, "Aisling");
+  assert.equal(candidates[0]?.speaker[0]?.confident, true);
 });
 
 test("generic speaker labels are replaced by a hint only when one person signed", () => {
@@ -310,12 +359,14 @@ test("generic speaker labels are replaced by a hint only when one person signed"
   );
   assert.equal(candidates[0]?.speaker[0]?.name, "Aisling");
 
-  // With two people in the window there is no safe answer, so the candidate is
-  // dropped rather than handed to whoever spoke last.
+  // With two people in the window there is no safe answer, so the label is
+  // removed rather than handed to whoever spoke last — and the candidate stays,
+  // with an empty speaker list.
   const ambiguous = parseCaptureResponse(
     '{"candidates":[{"title":"Tea","type":"preference","body":"Jasmine tea.","speaker":[{"name":"USER","confident":true}]}]}',
     3,
     { names: ["Aisling", "Iri"] },
   );
-  assert.deepEqual(ambiguous, []);
+  assert.equal(ambiguous.length, 1);
+  assert.deepEqual(ambiguous[0]?.speaker, []);
 });
