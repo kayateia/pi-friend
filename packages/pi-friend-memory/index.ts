@@ -34,8 +34,8 @@ import {
   type MergeConfig,
 } from "./src/memory/config.ts";
 import {
+  buildCaptureWindow,
   captureStartIndex,
-  serializeCaptureTranscript,
 } from "./src/memory/capture.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
 import { createMergeWriter } from "./src/memory/merge-writer.ts";
@@ -153,7 +153,10 @@ export default async function registerPiFriend(
         );
       }
       const entries = branch.slice(startIndex);
-      const transcript = serializeCaptureTranscript(entries);
+      // One call yields the transcript and the names it can support: the
+      // transcript is bounded, so a hint gathered from the whole window could
+      // name a person whose message was dropped from it.
+      const { transcript, names } = buildCaptureWindow(entries);
       if (transcript.trim() === "") {
         return;
       }
@@ -162,6 +165,7 @@ export default async function registerPiFriend(
         ctx,
         config,
         transcript,
+        { names },
         (message) => reportCaptureWarning(ctx, message),
       );
       for (const draft of drafts) {
@@ -241,9 +245,7 @@ export default async function registerPiFriend(
     if (cursor !== undefined && !cursorFound) {
       return false;
     }
-    return (
-      serializeCaptureTranscript(branch.slice(startIndex)).trim() !== ""
-    );
+    return buildCaptureWindow(branch.slice(startIndex)).transcript.trim() !== "";
   };
 
   /** Runs one sweep and reports its outcome without throwing to Pi hooks. */

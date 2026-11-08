@@ -11,9 +11,9 @@ import type { AutoCaptureConfig } from "./config.ts";
 import { debugLog } from "../debug/log.ts";
 import {
   buildCapturePrompt,
-  inferSpeakerName,
   parseCaptureResponse,
   type CaptureCandidateDraft,
+  type CaptureSpeakerHint,
 } from "./capture.ts";
 import {
   CAPTURE_SYSTEM_PROMPT,
@@ -33,6 +33,7 @@ export async function runCaptureModel(
   ctx: ExtensionContext,
   config: AutoCaptureConfig,
   transcript: string,
+  speakerHint: CaptureSpeakerHint,
   reportWarning: (message: string) => void,
 ): Promise<CaptureCandidateDraft[]> {
   const model = resolveConfiguredModel(
@@ -46,7 +47,6 @@ export async function runCaptureModel(
   }
 
   const signal = AbortSignal.timeout(CAPTURE_TIMEOUT_MS);
-  const speakerHint = inferSpeakerName(transcript);
   const response = await runNestedModel(ctx, model, {
     systemPrompt: resolveSystemPrompt(CAPTURE_SYSTEM_PROMPT, config),
     userContent: buildCapturePrompt(

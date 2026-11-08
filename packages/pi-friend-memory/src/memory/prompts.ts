@@ -24,8 +24,11 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "Each candidate must cover one durable topic, and its `type` must be exactly one of `fact`, `preference`, `event`, or `person-note`; invent no other category.",
   "Ignore transient tasks, plans, and content that should not persist.",
   "Use the actual speaker names present in the transcript.",
+  "A name tag at the start or end of a message (`\\>>Sam:`, `<Sam>`, `Sam>`, `[Sam]`, `-Sam`) names its speaker; the tag is attribution, not part of what was said.",
+  "A candidate may name more than one speaker, and more than one agent, when the exchange involved several.",
+  "`speaker` names people and other non-AI participants; `agents` names AI agents, including yourself.",
   "Never use generic labels such as USER, ASSISTANT, or system as speaker names.",
-  "If a concrete speaker name cannot be determined, omit that candidate.",
+  "When no speaker can be identified, leave `speaker` empty; never omit a candidate for lack of a name.",
   "Never create dream nodes.",
 ].join("\n");
 
