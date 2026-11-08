@@ -350,11 +350,13 @@ recogniser handles every caller that needs that distinction, so the search
 query cleaner, the capture hint, and the `speaker` index cannot disagree about
 what counts as a tag.
 
-The default forms are `\>>Sam:`, `<Sam>`, `Sam>`, `[Sam]` at the start of a
-message, and `-Sam` or `~Sam` at the end. Prefix forms must be followed by
-whitespace or the end; suffix forms must be preceded by whitespace or the
-start. A name is one word — letters in either case, apostrophes, hyphens — with
-no digits or periods, so `Note:`, `TODO:`, a Markdown link's `[text]`, a
+The default forms are `\>>Sam:`, `<Sam>`, `Sam>` and `[Sam]` at the start of a
+line, and `-Sam` or `~Sam` at the end of one. A message may carry several tags —
+a pasted conversation brings its own speakers with it — and every one of them is
+a name that was written on purpose. Lines inside a fenced block, lines beginning
+with `>` and matches inside inline code are skipped, because those are
+quotations rather than the author signing. A name is one word — letters in
+either case, apostrophes, hyphens — with no digits or periods, so `Note:`, `TODO:`, a Markdown link's `[text]`, a
 bracketed timestamp, and a full name are not tags. One word is deliberate:
 plural systems generally sign with a first name, a nickname or another
 contraction, and admitting spaces lets a prefix tag swallow the start of a
@@ -367,6 +369,11 @@ An empty list, a pattern that does not compile, has no capture group, or exceeds
 a warning. Recognition cannot be switched off by emptying the list: a silent
 "no patterns" would let a name in a query pull results toward it again, which is
 the bias the tags are recognised to remove.
+
+A query is cleaned of every tag, not only the first. Capture is the one caller
+that needs a single name, and it reads the tag heading the message or one
+standing alone on its last line, so a pasted transcript does not attribute the
+message to whoever it quotes.
 
 `pi-time-awareness` puts `[Mon 2026-11-02 16:31 EST] ` in front of
 person-authored messages at the provider-payload layer, so a tag behind that

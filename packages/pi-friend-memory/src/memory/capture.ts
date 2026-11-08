@@ -15,7 +15,7 @@ import {
 } from "./schema.ts";
 import {
   defaultSpeakerTagPatterns,
-  findSpeakerTag,
+  findSpeakerTags,
   type CompiledSpeakerTagPattern,
 } from "./speaker-tags.ts";
 
@@ -138,7 +138,7 @@ export function buildCaptureWindow(
       }
       const name =
         entry.message.role === "user"
-          ? findSpeakerTag(formatContent(entry.message.content), patterns)?.name
+          ? messageSignerName(formatContent(entry.message.content), patterns)
           : undefined;
       lines.push(name === undefined ? { text } : { text, name });
     } else if (
@@ -311,6 +311,56 @@ function attributeSpeakers(speakers: MemorySpeaker[]): MemorySpeaker[] {
     }
   }
   return attributed;
+}
+
+/**
+ * Reads the name a message is signed with, from its head or its foot.
+ *
+ * A message can carry several tags — a pasted conversation brings its own
+ * speakers with it — and taking one of those as the author would attribute the
+ * whole message to whoever was quoted. Only a tag heading the first line, or a
+ * line that is nothing but a tag, signs the message.
+ */
+export function messageSignerName(
+  text: string,
+  patterns: readonly CompiledSpeakerTagPattern[] = defaultSpeakerTagPatterns(),
+): string | undefined {
+  const tags = findSpeakerTags(text, patterns);
+  if (tags.length === 0) {
+    return undefined;
+  }
+
+  let offset = 0;
+  const lines = text.split("\n").map((line) => {
+    const range = { start: offset, end: offset + line.length, text: line };
+    offset += line.length + 1;
+    return range;
+  });
+  const visible = lines.filter((line) => line.text.trim() !== "");
+  const head = visible[0];
+  const foot = visible[visible.length - 1];
+  if (head === undefined || foot === undefined) {
+    return undefined;
+  }
+
+  const heading = tags.find(
+    (tag) => tag.start >= head.start && tag.start <= head.end,
+  );
+  if (heading !== undefined) {
+    return heading.name;
+  }
+
+  // A signature on its own line, as in "…and that was the day.\n-Aria".
+  const signing = tags.find(
+    (tag) => tag.start >= foot.start && tag.start <= foot.end,
+  );
+  if (
+    signing !== undefined &&
+    foot.text.trim() === foot.text.slice(signing.start - foot.start, signing.end - foot.start)
+  ) {
+    return signing.name;
+  }
+  return undefined;
 }
 
 /** Formats one agent message without retaining images or full tool payloads. */
