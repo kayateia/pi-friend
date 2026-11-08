@@ -71,6 +71,13 @@ export async function buildMemoryDocumentIndex(
             kind: file.kind,
             relativePath: file.relativePath,
           });
+          // When the content last changed. `edited` is set by every operation
+          // that rewrites a node — an edit, a merge, a promotion, a restore —
+          // and the schema rejects an `edited` earlier than `created`, so this
+          // is "whichever is later" without needing to compare them.
+          const modifiedAt = toIsoInstant(
+            node.frontMatter.edited ?? node.frontMatter.created,
+          );
           return {
             absolutePath: file.absolutePath,
             relativePath: file.relativePath,
@@ -88,6 +95,7 @@ export async function buildMemoryDocumentIndex(
                 })) }),
             tags: [...node.frontMatter.tags],
             body: node.body,
+            ...(modifiedAt === undefined ? {} : { modifiedAt }),
           };
         } catch (error) {
           if (!(error instanceof MemorySchemaError)) {
@@ -159,8 +167,18 @@ export function buildDocumentIndexEntry(
   };
 }
 
-/** Uses the first Markdown heading as a document title fallback. */
-function extractMarkdownTitle(body: string): string | undefined {
+/**
+ * Normalises a validated timestamp to a UTC ISO instant.
+ *
+ * The schema accepts explicit offsets, while stored dates are compared as text
+ * against bounds the caller computes; only one spelling sorts correctly.
+ */
+function toIsoInstant(value: string): string | undefined {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
+}
+
+/** Uses the first Markdown heading as a document title fallback. */function extractMarkdownTitle(body: string): string | undefined {
   const match = /^#{1,6}[ \t]+(.+?)[ \t]*$/mu.exec(body);
   return match?.[1]?.trim() || undefined;
 }

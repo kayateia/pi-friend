@@ -107,11 +107,8 @@ test("vector synchronization hashes content and only embeds changes", async () =
     const entries = index.listEntries();
     const two = entries.find((entry) => entry.key === "docs/two.md");
     assert.equal(
-        two?.contentHash,
-        hashVectorInput(
-          changedFiles[1]!,
-          buildEmbeddingText(changedFiles[1]!),
-        ),
+      two?.contentHash,
+      hashVectorInput(buildEmbeddingText(changedFiles[1]!)),
     );
   } finally {
     index.close();
@@ -161,7 +158,7 @@ test("vector synchronization removes stale entries and is failure-safe", async (
   }
 });
 
-test("metadata-only changes refresh vector metadata", async () => {
+test("metadata-only changes refresh vector metadata without re-embedding", async () => {
   const index = SqliteVectorIndex.open({
     databasePath: ":memory:",
     model: "fake/model",
@@ -181,7 +178,10 @@ test("metadata-only changes refresh vector metadata", async () => {
     const updated = { ...original, decayWeight: 0.5 };
     const result = await synchronizeVectorIndex([updated], provider, index);
 
-    assert.equal(result.embedded, 1);
+    // The text that gets embedded has not changed, so there is nothing to pay
+    // the provider for: the entry is rewritten in place.
+    assert.equal(result.embedded, 0);
+    assert.equal(provider.calls.length, 1);
     assert.equal(index.listEntries()[0]?.decayWeight, 0.5);
   } finally {
     index.close();

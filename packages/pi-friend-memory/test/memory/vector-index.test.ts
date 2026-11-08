@@ -9,7 +9,9 @@
 import assert from "node:assert/strict";
 import { lstat } from "node:fs/promises";
 import * as path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import * as sqliteVec from "sqlite-vec";
 import {
   SqliteVectorIndex,
   VectorIndexError,
@@ -140,20 +142,11 @@ test("index persists across reopen and rebuild clears stale rows", async () => {
   });
 });
 
-test("index rejects embedding-space mismatches and invalid vectors", async () => {
+test("index rejects invalid vectors", async () => {
   await withTempDir(async (directory) => {
     const databasePath = path.join(directory, "vectors.sqlite");
     const index = openIndex(databasePath);
     try {
-      assert.throws(
-        () =>
-          SqliteVectorIndex.open({
-            databasePath,
-            model: "different/model",
-            dimensions: 4,
-          }),
-        VectorIndexError,
-      );
       assert.throws(
         () =>
           index.upsert({
@@ -177,6 +170,283 @@ test("index rejects embedding-space mismatches and invalid vectors", async () =>
             tags: [],
           }),
         /non-finite/,
+      );
+    } finally {
+      index.close();
+    }
+  });
+});
+
+test("an index written under an older schema is discarded and rebuilt", async () => {
+  await withTempDir(async (directory) => {
+    const databasePath = path.join(directory, "vectors.sqlite");
+    const old = SqliteVectorIndex.open({
+      databasePath,
+      model: "test/three-dimensional",
+      dimensions: 3,
+      schemaVersion: 1,
+    });
+    try {
+      old.upsert({
+        key: "east",
+        kind: "node",
+        sourcePath: "nodes/east.md",
+        contentHash: "hash-east",
+        embedding: new Float32Array([1, 0, 0]),
+        tags: [],
+      });
+      assert.equal(old.count(), 1);
+    } finally {
+      old.close();
+    }
+
+    const current = openIndex(databasePath);
+    try {
+      assert.equal(current.rebuilt, true);
+      assert.equal(current.count(), 0);
+      current.upsert({
+        key: "east",
+        kind: "node",
+        sourcePath: "nodes/east.md",
+        contentHash: "hash-east",
+        embedding: new Float32Array([1, 0, 0]),
+        modifiedAt: "2026-11-08T00:00:00.000Z",
+        tags: [],
+      });
+      assert.equal(current.listEntries()[0]?.modifiedAt, "2026-11-08T00:00:00.000Z");
+    } finally {
+      current.close();
+    }
+  });
+});
+
+test("an index written for a different embedding space is discarded and rebuilt", async () => {
+  await withTempDir(async (directory) => {
+    const databasePath = path.join(directory, "vectors.sqlite");
+    const original = openIndex(databasePath);
+    try {
+      original.upsert({
+        key: "east",
+        kind: "node",
+        sourcePath: "nodes/east.md",
+        contentHash: "hash-east",
+        embedding: new Float32Array([1, 0, 0]),
+        tags: [],
+      });
+    } finally {
+      original.close();
+    }
+
+    const replaced = SqliteVectorIndex.open({
+      databasePath,
+      model: "different/model",
+      dimensions: 4,
+    });
+    try {
+      assert.equal(replaced.rebuilt, true);
+      assert.equal(replaced.count(), 0);
+    } finally {
+      replaced.close();
+    }
+  });
+});
+
+test("filters restrict the search before the nearest-neighbour cutoff", async () => {
+  await withTempDir(async (directory) => {
+    const index = openIndex(path.join(directory, "vectors.sqlite"));
+    try {
+      // Four old memories sit closer to the query than the two new ones, which
+      // is the case a filter applied to results cannot survive: the top `k` are
+      // all outside the window, so the window looks empty.
+      index.upsert({
+        key: "old-1",
+        kind: "node",
+        sourcePath: "nodes/old-1.md",
+        contentHash: "h1",
+        embedding: new Float32Array([1, 0, 0]),
+        type: "fact",
+        status: "active",
+        modifiedAt: "2026-01-01T00:00:00.000Z",
+        tags: [],
+      });
+      index.upsert({
+        key: "old-2",
+        kind: "node",
+        sourcePath: "nodes/old-2.md",
+        contentHash: "h2",
+        embedding: new Float32Array([0.99, 0.1, 0]),
+        type: "event",
+        status: "active",
+        modifiedAt: "2026-01-02T00:00:00.000Z",
+        tags: [],
+      });
+      index.upsert({
+        key: "old-3",
+        kind: "document",
+        sourcePath: "docs/old-3.md",
+        contentHash: "h3",
+        embedding: new Float32Array([0.98, 0.2, 0]),
+        modifiedAt: "2026-01-03T00:00:00.000Z",
+        tags: [],
+      });
+      index.upsert({
+        key: "old-4",
+        kind: "node",
+        sourcePath: "nodes/old-4.md",
+        contentHash: "h4",
+        embedding: new Float32Array([0.97, 0.3, 0]),
+        type: "fact",
+        status: "candidate",
+        modifiedAt: "2026-01-04T00:00:00.000Z",
+        tags: [],
+      });
+      index.upsert({
+        key: "undated",
+        kind: "node",
+        sourcePath: "nodes/undated.md",
+        contentHash: "h5",
+        embedding: new Float32Array([0.999, 0.001, 0]),
+        type: "fact",
+        status: "active",
+        tags: [],
+      });
+      index.upsert({
+        key: "new-1",
+        kind: "node",
+        sourcePath: "nodes/new-1.md",
+        contentHash: "h6",
+        embedding: new Float32Array([0.2, 1, 0]),
+        type: "fact",
+        status: "active",
+        modifiedAt: "2026-11-01T00:00:00.000Z",
+        tags: [],
+      });
+      index.upsert({
+        key: "new-2",
+        kind: "node",
+        sourcePath: "nodes/new-2.md",
+        contentHash: "h7",
+        embedding: new Float32Array([0.1, 1, 0]),
+        type: "fact",
+        status: "active",
+        modifiedAt: "2026-11-02T00:00:00.000Z",
+        tags: [],
+      });
+
+      const query = new Float32Array([1, 0, 0]);
+      const keys = (hits: { key: string }[]): string[] =>
+        hits.map((hit) => hit.key);
+
+      assert.deepEqual(keys(index.search(query, 3)), [
+        "old-1",
+        "undated",
+        "old-2",
+      ]);
+      // The same three-slot budget, with the window applied first: the nearest
+      // entries *inside* it, rather than the survivors of a top-three list.
+      assert.deepEqual(
+        keys(index.search(query, 3, { since: "2026-10-01T00:00:00.000Z" })),
+        ["new-1", "new-2"],
+      );
+      // A bound that every dated entry satisfies still excludes the undated
+      // one, which would otherwise be second-nearest of all: a date condition
+      // is a requirement, not a comparison that a NULL may quietly fail.
+      assert.deepEqual(
+        keys(index.search(query, 3, { since: "2020-01-01T00:00:00.000Z" })),
+        ["old-1", "old-2", "old-3"],
+      );
+      assert.deepEqual(
+        keys(index.search(query, 3, { kinds: ["document"] })),
+        ["old-3"],
+      );
+      assert.deepEqual(
+        keys(index.search(query, 3, { type: "event" })),
+        ["old-2"],
+      );
+      assert.deepEqual(
+        keys(index.search(query, 3, { status: "candidate" })),
+        ["old-4"],
+      );
+      assert.deepEqual(
+        keys(index.search(query, 3, { kinds: [] })),
+        [],
+      );
+      assert.deepEqual(
+        keys(
+          index.search(query, 3, {
+            kinds: ["node"],
+            type: "fact",
+            status: "active",
+            since: "2026-10-01T00:00:00.000Z",
+            until: "2026-11-01T00:00:00.000Z",
+          }),
+        ),
+        ["new-1"],
+      );
+    } finally {
+      index.close();
+    }
+  });
+});
+
+test("a version 1 index, which lacks modified_at, is replaced rather than refused", async () => {
+  await withTempDir(async (directory) => {
+    const databasePath = path.join(directory, "vectors.sqlite");
+
+    // The real upgrade path: a file written by the previous release, so its
+    // table has no `modified_at` column. Building the fixture with the current
+    // DDL would hide the failure this test exists for.
+    const legacy = new DatabaseSync(databasePath, { allowExtension: true });
+    sqliteVec.load(legacy);
+    legacy.enableLoadExtension(false);
+    legacy.exec(`
+      CREATE TABLE vector_index_meta (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        schema_version INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL
+      );
+      CREATE TABLE vector_entries (
+        rowid INTEGER PRIMARY KEY,
+        entry_key TEXT NOT NULL UNIQUE,
+        entry_kind TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        title TEXT,
+        memory_type TEXT,
+        memory_status TEXT,
+        decay_weight REAL,
+        tags_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE VIRTUAL TABLE vector_embeddings USING vec0(
+        embedding float[3] distance_metric=cosine
+      );
+      INSERT INTO vector_index_meta(id, schema_version, model, dimensions)
+        VALUES (1, 1, 'test/three-dimensional', 3);
+    `);
+    legacy.close();
+
+    const index = openIndex(databasePath);
+    try {
+      assert.equal(index.rebuilt, true);
+      assert.equal(index.count(), 0);
+      index.upsert({
+        key: "east",
+        kind: "node",
+        sourcePath: "nodes/east.md",
+        contentHash: "hash-east",
+        embedding: new Float32Array([1, 0, 0]),
+        modifiedAt: "2026-11-08T00:00:00.000Z",
+        tags: [],
+      });
+      assert.deepEqual(
+        index
+          .search(new Float32Array([1, 0, 0]), 5, {
+            since: "2026-11-01T00:00:00.000Z",
+          })
+          .map((hit) => hit.key),
+        ["east"],
       );
     } finally {
       index.close();
