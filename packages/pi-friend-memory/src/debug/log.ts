@@ -32,6 +32,15 @@ export interface ErrorLogOptions {
   dedupeMs?: number;
   /** Clock override for deterministic tests. */
   now?: number;
+  /**
+   * Extra diagnostic payload written under the error text.
+   *
+   * Exists for the case where the interesting evidence is not the exception
+   * but what the program was holding when it threw — a model's raw response,
+   * for one. It is inspected into the same private log entry, so it never
+   * reaches a UI warning.
+   */
+  detail?: unknown;
 }
 
 /** One formatted entry in an error's cause chain. */
@@ -165,7 +174,18 @@ export function logError(
   }
   recentErrorLogs.set(key, now);
 
-  writeDebugLog(`error ${label}`, details, {
+  const entry =
+    options.detail === undefined
+      ? details
+      : `${details}\n\n${inspect(options.detail, {
+          colors: false,
+          compact: 3,
+          breakLength: 120,
+          depth: 8,
+          maxArrayLength: 100,
+          maxStringLength: 12_000,
+        })}`;
+  writeDebugLog(`error ${label}`, entry, {
     enabled: true,
     ...(options.logPath === undefined ? {} : { logPath: options.logPath }),
     ...(options.env === undefined ? {} : { env: options.env }),

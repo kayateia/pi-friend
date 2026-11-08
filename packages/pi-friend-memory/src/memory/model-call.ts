@@ -29,6 +29,16 @@ export interface NestedCallOptions {
   label?: string;
   /** Where a retry is announced; the file log gets it either way. */
   reportWarning?: (message: string) => void;
+  /**
+   * Called with the final assistant message before its text is extracted.
+   *
+   * The text alone cannot explain a bad reply: `stopReason`, the model that
+   * actually answered (`responseModel`), and the token usage are what say
+   * whether a truncated or empty answer was a budget problem, a routing
+   * surprise, or the model simply refusing. Only passes that diagnose their
+   * own output need this, so it stays optional.
+   */
+  onResponse?: (message: AssistantMessage) => void;
 }
 
 /**
@@ -120,6 +130,7 @@ async function request(
   if (!finalMessage) {
     throw new Error("Model returned no final message.");
   }
+  options.onResponse?.(finalMessage);
   return finalMessage.content
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("\n");

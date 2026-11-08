@@ -17,6 +17,7 @@ import {
   formatErrorChain,
   isDebugEnabled,
   logError,
+  resolveDebugLogPath,
 } from "./src/debug/log.ts";
 import {
   DEFAULT_MEMORY_TOOL_PREFIX,
@@ -36,6 +37,7 @@ import {
 import {
   buildCaptureWindow,
   captureStartIndex,
+  CaptureResponseError,
 } from "./src/memory/capture.ts";
 import { compileQueryPrefixes } from "./src/memory/query-prefixes.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
@@ -216,9 +218,15 @@ export default async function registerPiFriend(
     } catch (error) {
       logError("auto-capture", error);
       debugRag("capture-failed", { error });
+      // A rejected reply is already in the log with the model's text; saying so
+      // turns an unexplained warning into a place to look.
+      const where =
+        error instanceof CaptureResponseError
+          ? ` The model's reply was written to ${resolveDebugLogPath()}.`
+          : "";
       reportCaptureWarning(
         ctx,
-        `pi-friend auto-capture failed: ${formatErrorChain(error)}`,
+        `pi-friend auto-capture failed: ${formatErrorChain(error)}${where}`,
       );
     }
   };
