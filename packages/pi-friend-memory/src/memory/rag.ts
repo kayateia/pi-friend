@@ -24,12 +24,33 @@ export interface RagContext {
   diagnostics: RagRetrievalDiagnostics;
 }
 
+/** One search result as the injection pass saw it, with its scoring factors. */
+export interface RagResultDiagnostic {
+  slug?: string;
+  relativePath: string;
+  kind: string;
+  /** Final score: the keyword value in keyword mode, the fused RRF in hybrid. */
+  score: number;
+  keywordScore?: number;
+  keywordContributions?: ReadonlyArray<{ field: string; points: number }>;
+  semanticScore?: number;
+  keywordRank?: number;
+  semanticRank?: number;
+  matchedFields: string[];
+  /** Whether this result made it into the block that was injected. */
+  injected: boolean;
+}
+
 /** Counts and fallback details for one RAG retrieval attempt. */
 export interface RagRetrievalDiagnostics {
+  /** The query after tags and configured prefixes were removed. */
+  query: string;
   mode: RagInjectionConfig["mode"];
   modeUsed: RagInjectionConfig["mode"];
   fallbackUsed: boolean;
   searchError?: string;
+  /** Every result the search returned, in ranked order. */
+  results: RagResultDiagnostic[];
   searchResultCount: number;
   eligibleNodeCount: number;
   selectedNodeCount: number;
@@ -60,9 +81,11 @@ export async function buildRagContext(
       count: 0,
       slugs: [],
       diagnostics: {
+        query: "",
         mode: config.mode,
         modeUsed: config.mode,
         fallbackUsed: false,
+        results: [],
         searchResultCount: 0,
         eligibleNodeCount: 0,
         selectedNodeCount: 0,
@@ -108,6 +131,10 @@ export async function buildRagContext(
       }
     }
   }
+
+  // What the search actually matched: tags are removed by the service, and a
+  // diagnostic that reported the message instead would not explain the ranking.
+  const searchedQuery = service.prepareQuery(query).text;
 
   const retrieved: Array<{
     node: ParsedMemoryNode;
@@ -161,15 +188,17 @@ export async function buildRagContext(
   const sections: string[] = [];
   let length = 0;
   let selectedNodeCount = 0;
+  const injectedSlugs = new Set<string>();
   if (retrieved.length > 0) {
     const selectedMemory: string[] = [];
     length += memoryHeader.length;
     if (length <= bodyLimit) {
-      for (const block of blocks) {
+      for (const [index, block] of blocks.entries()) {
         if (length + block.length + 2 > bodyLimit) {
           break;
         }
         selectedMemory.push(block);
+        injectedSlugs.add(retrieved[index]?.node.slug ?? "");
         length += block.length + 2;
       }
     }
@@ -184,10 +213,12 @@ export async function buildRagContext(
       count: 0,
       slugs: [],
       diagnostics: {
+        query: searchedQuery,
         mode: config.mode,
         modeUsed,
         fallbackUsed,
         ...(searchError === undefined ? {} : { searchError }),
+        results: describeResults(results, injectedSlugs),
         searchResultCount: results.length,
         eligibleNodeCount: retrieved.length,
         selectedNodeCount: 0,
@@ -204,15 +235,113 @@ export async function buildRagContext(
       .slice(0, selectedNodeCount)
       .map(({ node }) => node.slug),
     diagnostics: {
+      query: searchedQuery,
       mode: config.mode,
       modeUsed,
       fallbackUsed,
       ...(searchError === undefined ? {} : { searchError }),
+      results: describeResults(results, injectedSlugs),
       searchResultCount: results.length,
       eligibleNodeCount: retrieved.length,
       selectedNodeCount,
     },
   };
+}
+
+/** Reduces search results to the fields an operator needs to see why they ranked. */
+function describeResults(
+  results: MemorySearchResult[],
+  injected: ReadonlySet<string>,
+): RagResultDiagnostic[] {
+  return results.map((result) => ({
+    ...(result.slug === undefined ? {} : { slug: result.slug }),
+    relativePath: result.relativePath,
+    kind: result.kind,
+    score: result.score,
+    ...(result.keywordScore === undefined
+      ? {}
+      : { keywordScore: result.keywordScore }),
+    ...(result.keywordContributions === undefined
+      ? {}
+      : {
+          keywordContributions: result.keywordContributions.map((entry) => ({
+            field: entry.field,
+            points: entry.points,
+          })),
+        }),
+    ...(result.semanticScore === undefined
+      ? {}
+      : { semanticScore: result.semanticScore }),
+    ...(result.keywordRank === undefined
+      ? {}
+      : { keywordRank: result.keywordRank }),
+    ...(result.semanticRank === undefined
+      ? {}
+      : { semanticRank: result.semanticRank }),
+    matchedFields: [...result.matchedFields],
+    injected:
+      result.slug !== undefined && injected.has(result.slug),
+  }));
+}
+
+/**
+ * Renders one injection pass for an operator.
+ *
+ * The question this answers is "why is that in my prompt, and why did it beat
+ * the other one" — so the components that earned each score are shown beside
+ * the score, not just the total.
+ */
+export function formatRagDiagnostics(
+  diagnostics: RagRetrievalDiagnostics,
+  injectedAt?: string,
+): string {
+  const lines = [
+    "Last pi-friend-memory retrieval",
+    `query: ${diagnostics.query === "" ? "(none)" : JSON.stringify(diagnostics.query)}`,
+    `mode: ${diagnostics.modeUsed}${
+      diagnostics.fallbackUsed ? ` (fell back from ${diagnostics.mode})` : ""
+    }`,
+    `results: ${diagnostics.searchResultCount} returned, ${diagnostics.eligibleNodeCount} eligible, ${diagnostics.selectedNodeCount} injected`,
+    ...(diagnostics.searchError === undefined
+      ? []
+      : [`search error: ${diagnostics.searchError}`]),
+    ...(injectedAt === undefined ? [] : [`recorded: ${injectedAt}`]),
+  ];
+  if (diagnostics.results.length === 0) {
+    lines.push("", "No results.");
+    return lines.join("\n");
+  }
+  for (const result of diagnostics.results) {
+    const label = result.slug ?? result.relativePath;
+    lines.push(
+      "",
+      `${result.injected ? "INJECTED" : "not injected"}  ${label}`,
+    );
+    const parts: string[] = [];
+    if (result.keywordScore !== undefined) {
+      parts.push(`keyword ${result.keywordScore}`);
+    }
+    if (result.keywordRank !== undefined) {
+      parts.push(`keyword rank ${result.keywordRank}`);
+    }
+    if (result.semanticScore !== undefined) {
+      parts.push(`semantic ${result.semanticScore.toFixed(4)}`);
+    }
+    if (result.semanticRank !== undefined) {
+      parts.push(`semantic rank ${result.semanticRank}`);
+    }
+    parts.push(`final ${result.score.toFixed(4)}`);
+    lines.push(`  ${parts.join(" · ")}`);
+    if (result.keywordContributions !== undefined) {
+      lines.push(
+        `  points: ${result.keywordContributions
+          .map((entry) => `${entry.field} ${entry.points}`)
+          .join(" + ")}`,
+      );
+    }
+    lines.push(`  fields: ${result.matchedFields.join(", ") || "(none)"}`);
+  }
+  return lines.join("\n");
 }
 
 /** Formats one node and its retrieval signals according to its decay tier. */

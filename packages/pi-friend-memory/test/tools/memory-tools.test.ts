@@ -12,8 +12,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { MemoryNodeService } from "../../src/memory/service.ts";
 import {
   formatMemoryToolName,
+  registerMemoryCommands,
   registerMemoryTools,
 } from "../../src/tools/memory-tools.ts";
+import type { RagRetrievalDiagnostics } from "../../src/memory/rag.ts";
 
 test("memory tool names use a configurable prefix without duplication", () => {
   assert.equal(formatMemoryToolName("", "memory_add"), "memory_add");
@@ -240,4 +242,91 @@ test("speaker and agents are described as different kinds of participant", () =>
     assert.match(confident?.description ?? "", /first-hand|inferred/u);
     assert.match(fields(name).agents?.description ?? "", /AI agents involved in the exchange/u);
   }
+});
+
+test("memory_last_rag reports the last retrieval, or says there has been none", async () => {
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+
+  type Retrieval = ReturnType<
+    NonNullable<Parameters<typeof registerMemoryTools>[3]>
+  >;
+  let last: Retrieval = undefined;
+  registerMemoryTools(pi, () => undefined, "", () => last);
+
+  const definition = definitions.get("memory_last_rag") as {
+    execute: () => Promise<{ content: Array<{ text: string }> }>;
+  };
+  assert.ok(definition);
+  assert.match((await definition.execute()).content[0]?.text ?? "", /has run in this session yet/u);
+
+  last = {
+    at: "2026-11-08T00:00:00.000Z",
+    diagnostics: {
+      query: "kettle",
+      mode: "keyword",
+      modeUsed: "keyword",
+      fallbackUsed: false,
+      results: [
+        {
+          slug: "kettle-boils",
+          relativePath: "nodes/kettle-boils.md",
+          kind: "node",
+          score: 1150,
+          keywordScore: 1150,
+          keywordContributions: [{ field: "title", points: 900 }],
+          matchedFields: ["title", "body"],
+          injected: true,
+        },
+      ],
+      searchResultCount: 1,
+      eligibleNodeCount: 1,
+      selectedNodeCount: 1,
+    },
+  };
+  const text = (await definition.execute()).content[0]?.text ?? "";
+  assert.match(text, /query: "kettle"/u);
+  assert.match(text, /INJECTED {2}kettle-boils/u);
+  assert.match(text, /points: title 900/u);
+});
+
+test("the last-rag command reports without a model call", async () => {
+  const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
+  const pi = {
+    registerCommand(name: string, definition: { handler: (args: string, ctx: unknown) => Promise<void> }) {
+      commands.set(name, definition);
+    },
+  } as unknown as ExtensionAPI;
+
+  let last: { diagnostics: RagRetrievalDiagnostics; at: string } | undefined;
+  registerMemoryCommands(pi, () => last);
+
+  const command = commands.get("memory-last-rag");
+  assert.ok(command);
+
+  const notices: string[] = [];
+  const ctx = { ui: { notify: (message: string) => notices.push(message) } };
+
+  await command.handler("", ctx);
+  assert.match(notices[0] ?? "", /no retrieval has run in this session yet/u);
+
+  last = {
+    at: "2026-11-08T00:00:00.000Z",
+    diagnostics: {
+      query: "kettle",
+      mode: "hybrid",
+      modeUsed: "keyword",
+      fallbackUsed: true,
+      results: [],
+      searchResultCount: 0,
+      eligibleNodeCount: 0,
+      selectedNodeCount: 0,
+    },
+  };
+  await command.handler("", ctx);
+  assert.match(notices[1] ?? "", /mode: keyword \(fell back from hybrid\)/u);
 });

@@ -335,10 +335,7 @@ export class MemoryNodeService {
     // log see it. The names it carried are not thrown away: a memory attributed
     // to the person speaking is more relevant to this conversation, and that is
     // the one thing a tag is allowed to score.
-    const { text: query, tags } = stripSpeakerTag(
-      options.query,
-      this.speakerTagPatterns(),
-    );
+    const { text: query, tags } = this.prepareQuery(options.query);
     if (query.trim() === "") {
       throw new MemoryServiceError("Search query must not be empty.");
     }
@@ -1163,6 +1160,19 @@ export class MemoryNodeService {
       }
     }
     return null;
+  }
+
+  /**
+   * Splits a query into the text that will be matched and the names its tags
+   * carried. Public because the diagnostic reports the text that was searched,
+   * not the message it came from.
+   */
+  prepareQuery(query: string): {
+    text: string;
+    tags: ReturnType<typeof stripSpeakerTag>["tags"];
+  } {
+    const { text, tags } = stripSpeakerTag(query, this.speakerTagPatterns());
+    return { text, tags };
   }
 
   /** Compiled tag patterns, built once per service. */

@@ -302,6 +302,11 @@ Once per day, a model pass:
   because configured sources can rebuild it.
 - Hybrid retrieval fuses keyword and semantic candidates with reciprocal-rank fusion. Semantic and hybrid failures fall back to keyword retrieval for RAG injection.
 
+## 11a. Inspecting one retrieval
+
+- `/memory-last-rag` reports the last injection: cleaned query, mode and fallback, and per result the keyword score broken down by contributing field, the semantic similarity, both ranks, the fused score and whether the block was injected. It is a command, so it runs locally and costs nothing.
+- The same numbers are available as the `memory_last_rag` tool when a conversation needs them. Both read one record kept per session by the extension, not a re-run of the search.
+
 ## 12. Optional passes (proposals for Aisling's ruling)
 
 Neither pass is committed yet.

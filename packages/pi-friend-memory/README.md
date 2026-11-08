@@ -591,6 +591,20 @@ Not swapping models mid-pass is deliberate: a substitution makes "why did this
 merge come out differently" unanswerable, and a rate limit would double the cost
 of every retry.
 
+## Inspecting the last retrieval
+
+`/memory-last-rag` prints what the previous user turn injected and why: the
+query after tags and prefixes were removed, the mode used and any fallback, and
+per result the keyword score with the points each field contributed, the
+semantic similarity, both ranks, the final fused score, and whether it was
+injected. It runs entirely in the extension — no model call, no cost — and PI
+WEB shows its output as command output, because the handler reports through
+`ctx.ui.notify`.
+
+`memory_last_rag` returns the same report as a tool, for when a conversation
+rightly includes the numbers. The command is the cheap path; the tool exists
+for explaining an injection in context.
+
 ## Diagnostics and errors
 
 Initialization failures and recoverable background failures are always appended

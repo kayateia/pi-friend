@@ -79,6 +79,12 @@ export interface MemorySearchResult {
   snippet: string;
   score: number;
   matchedFields: SearchField[];
+  /** Raw keyword score before hybrid fusion; absent for semantic-only results. */
+  keywordScore?: number;
+  /** How that score was earned, in points per field, largest first. */
+  keywordContributions?: ReadonlyArray<{ field: SearchField; points: number }>;
+  /** Semantic similarity (1 − distance); absent for keyword-only results. */
+  semanticScore?: number;
   schemaError?: string;
   /** One-based keyword rank when the result also appeared in keyword search. */
   keywordRank?: number;
@@ -168,6 +174,8 @@ export function searchIndexedFiles(
       snippet: makeSnippet(file, query, queryTokens),
       score: score.value,
       matchedFields: score.fields,
+      keywordScore: score.value,
+      keywordContributions: score.contributions,
       ...(file.schemaError === undefined
         ? {}
         : { schemaError: file.schemaError }),
@@ -227,7 +235,11 @@ function scoreFile(
   tokens: string[],
   minTokenMatches: number | undefined,
   taggedNames: string[],
-): { value: number; fields: SearchField[] } | null {
+): {
+  value: number;
+  fields: SearchField[];
+  contributions: Array<{ field: SearchField; points: number }>;
+} | null {
   const slug = normalize(file.slug ?? "");
   const relativePath = normalize(file.relativePath);
   const title = normalize(file.title ?? "");
@@ -236,41 +248,47 @@ function scoreFile(
   const haystack = [slug, relativePath, title, tags.join(" "), body].join("\n");
 
   const fields: SearchField[] = [];
+  const contributions: Array<{ field: SearchField; points: number }> = [];
   let value = 0;
   let phraseMatch = false;
+  /** Records points against a field, both in the total and in the breakdown. */
+  const award = (field: SearchField, points: number): void => {
+    value += points;
+    contributions.push({ field, points });
+  };
 
   if (slug === query) {
-    value += 1_000;
+    award("slug", 1_000);
     fields.push("slug");
     phraseMatch = true;
   } else if (slug.includes(query)) {
-    value += 500;
+    award("slug", 500);
     fields.push("slug");
     phraseMatch = true;
   }
 
   if (relativePath.includes(query)) {
-    value += 350;
+    award("path", 350);
     if (!fields.includes("path")) fields.push("path");
     phraseMatch = true;
   }
 
   if (title === query) {
-    value += 900;
+    award("title", 900);
     fields.push("title");
     phraseMatch = true;
   } else if (title.includes(query)) {
-    value += 650;
+    award("title", 650);
     fields.push("title");
     phraseMatch = true;
   }
 
   if (tags.includes(query)) {
-    value += 600;
+    award("tags", 600);
     fields.push("tags");
     phraseMatch = true;
   } else if (tags.some((tag) => tag.includes(query))) {
-    value += 400;
+    award("tags", 400);
     fields.push("tags");
     phraseMatch = true;
   }
@@ -292,15 +310,15 @@ function scoreFile(
       // The person speaking is in this conversation. Score the memory once for
       // it, and never let it open the gate: the name was not something they
       // said, so it cannot make an unrelated memory relevant on its own.
-      value += 600;
+      award("speaker", 600);
       speakerMatched = true;
     } else if (name === query) {
-      value += 600;
+      award("speaker", 600);
       speakerMatched = true;
       // Naming only a person is a phrase match: the memory is *about* them.
       phraseMatch = true;
     } else if (tokens.includes(name)) {
-      value += 250;
+      award("speaker", 250);
       speakerMatched = true;
     }
   }
@@ -309,7 +327,7 @@ function scoreFile(
   }
 
   if (body.includes(query)) {
-    value += 200;
+    award("body", 200);
     fields.push("body");
     phraseMatch = true;
   }
@@ -327,7 +345,7 @@ function scoreFile(
     return null;
   }
   if (allTokensPresent) {
-    value += 50;
+    award("body", 50);
     const firstToken = tokens[0] ?? "";
     if (slug.includes(firstToken) && !fields.includes("slug")) {
       fields.push("slug");
@@ -348,7 +366,7 @@ function scoreFile(
     }
   }
   if (!phraseMatch && matchedTokenCount > 0) {
-    value += matchedTokenCount * 25;
+    award("body", matchedTokenCount * 25);
     if (fields.length === 0) {
       for (const token of tokens) {
         if (slug.includes(token)) {
@@ -378,7 +396,8 @@ function scoreFile(
   if (fields.length === 0) {
     return null;
   }
-  return { value, fields };
+  contributions.sort((left, right) => right.points - left.points);
+  return { value, fields, contributions };
 }
 
 /** Produces a compact snippet around the first useful query match. */
