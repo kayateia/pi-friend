@@ -370,10 +370,13 @@ a warning. Recognition cannot be switched off by emptying the list: a silent
 "no patterns" would let a name in a query pull results toward it again, which is
 the bias the tags are recognised to remove.
 
-A query is cleaned of every tag, not only the first. Capture is the one caller
-that needs a single name, and it takes the first tag in the message: a message
-leads with its author, and the tags after that belong to whatever was pasted
-into it.
+A query is cleaned of every tag, not only the first. Capture goes the other way
+and keeps them all: every tag a person wrote is handed to the model, with one
+line saying what a tag is, so attribution is a judgement made with the names in
+front of it rather than a guess at what `\>>Aria:` meant. The parser still
+replaces a generic label only when exactly one name was in the window; with
+several, the label is dropped instead, because choosing between them would be a
+coin toss.
 
 `pi-time-awareness` puts `[Mon 2026-11-02 16:31 EST] ` in front of
 person-authored messages at the provider-payload layer, so a tag behind that
