@@ -428,8 +428,8 @@ test("the names come from the messages the transcript still contains", () => {
   assert.equal(buildCaptureWindow(entries, 150).transcript.includes("Aria"), false);
 });
 
-test("a pasted conversation does not sign the message that pasted it", () => {
-  const signer = (text: string): string | undefined =>
+test("a message's signer is its first tag", () => {
+  const names = (text: string): string[] =>
     buildCaptureWindow([
       {
         type: "message",
@@ -442,19 +442,20 @@ test("a pasted conversation does not sign the message that pasted it", () => {
           timestamp: 1,
         },
       },
-    ]).names[0];
+    ]).names;
 
   // Heading the message: the ordinary case.
-  assert.equal(signer("\\>>Iri: the sweep ran"), "Iri");
+  assert.deepEqual(names("\\>>Iri: the sweep ran"), ["Iri"]);
   // A signature on its own last line.
-  assert.equal(signer("that was the day.\n\n-Aria"), "Aria");
-  // A transcript pasted into a message: its speakers are quoted, not signing.
+  assert.deepEqual(names("that was the day.\n\n-Aria"), ["Aria"]);
+  // A transcript pasted into a message: the first tag is the person who wrote
+  // the message, and the tags after it are the conversation they pasted.
   const pasted = [
-    "here is what they said:",
+    "---",
     "",
     "\\>>Aria: hello",
     "",
     "\\>>Iri: it was interesting",
   ].join("\n");
-  assert.equal(signer(pasted), undefined);
+  assert.deepEqual(names(pasted), ["Aria"]);
 });

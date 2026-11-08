@@ -371,9 +371,9 @@ a warning. Recognition cannot be switched off by emptying the list: a silent
 the bias the tags are recognised to remove.
 
 A query is cleaned of every tag, not only the first. Capture is the one caller
-that needs a single name, and it reads the tag heading the message or one
-standing alone on its last line, so a pasted transcript does not attribute the
-message to whoever it quotes.
+that needs a single name, and it takes the first tag in the message: a message
+leads with its author, and the tags after that belong to whatever was pasted
+into it.
 
 `pi-time-awareness` puts `[Mon 2026-11-02 16:31 EST] ` in front of
 person-authored messages at the provider-payload layer, so a tag behind that
