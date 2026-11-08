@@ -12,6 +12,10 @@ import * as path from "node:path";
 import test from "node:test";
 import { parseMemoryConfig } from "../../src/memory/config.ts";
 import {
+  DEFAULT_SPEAKER_TAG_PATTERNS,
+  findSpeakerTag,
+} from "../../src/memory/speaker-tags.ts";
+import {
   CAPTURE_SYSTEM_PROMPT,
   MERGE_SYSTEM_PROMPT,
   DREAM_SYSTEM_PROMPT,
@@ -46,4 +50,10 @@ test("the example configuration matches supported defaults", async () => {
     config.embeddings.model,
     "openrouter/openai/text-embedding-3-small",
   );
+  // The patterns are carried in full so a house can edit them in place, which
+  // only helps if what is carried is what the code actually uses. The YAML
+  // quoting is part of the risk: a literal apostrophe is doubled there.
+  assert.deepEqual(config.speakerTags.patterns, [...DEFAULT_SPEAKER_TAG_PATTERNS]);
+  assert.equal(findSpeakerTag("\\>>Aria: hello")?.name, "Aria");
+  assert.equal(findSpeakerTag("[O'Brien] hello")?.name, "O'Brien");
 });

@@ -24,6 +24,26 @@ memory:
   search:
     default_mode: hybrid
 
+  # Forms that mark who is speaking, recognised so a name tag can be removed
+  # from a search query (a tag is not part of what was said) and so `speaker`
+  # can be indexed deliberately. Each entry is a regular expression whose first
+  # capture group — or a group named `name` — is the person's name. Supplying
+  # any replaces the defaults below rather than adding to them; a pattern that
+  # does not compile, has no capture group, or is longer than 200 characters is
+  # a configuration error.
+  speaker_tags:
+    patterns:
+      # \>>Sam: — a name followed by a colon, the form PI WEB messages use.
+      - '^\s*\\>>\s*([A-Za-z][A-Za-z''’]*(?:-[A-Za-z][A-Za-z''’]*)*)\s*:'
+      # <Sam>
+      - '^\s*<([A-Za-z][A-Za-z''’]*(?:-[A-Za-z][A-Za-z''’]*)*)>(?=\s|$)'
+      # Sam>
+      - '^\s*([A-Za-z][A-Za-z''’]*(?:-[A-Za-z][A-Za-z''’]*)*)>(?=\s|$)'
+      # [Sam]
+      - '^\s*\[([A-Za-z][A-Za-z''’]*(?:-[A-Za-z][A-Za-z''’]*)*)\](?=\s|$)'
+      # A signature at the end: -Sam or ~Sam
+      - '(?:^|\s)[-~]([A-Za-z][A-Za-z''’]*(?:-[A-Za-z][A-Za-z''’]*)*)\s*$'
+
   vector:
     chunk_size: 4000
 

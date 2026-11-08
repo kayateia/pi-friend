@@ -343,6 +343,37 @@ Pi reads the extension entry point from the `pi.extensions` field in
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.
 
+## Speaker tags
+
+A name tag marks who is speaking and is not part of what was said. One
+recogniser handles every caller that needs that distinction, so the search
+query cleaner, the capture hint, and the `speaker` index cannot disagree about
+what counts as a tag.
+
+The default forms are `\>>Sam:`, `<Sam>`, `Sam>`, `[Sam]` at the start of a
+message, and `-Sam` or `~Sam` at the end. Prefix forms must be followed by
+whitespace or the end; suffix forms must be preceded by whitespace or the
+start. A name is one word — letters in either case, apostrophes, hyphens — with
+no digits or periods, so `Note:`, `TODO:`, a Markdown link's `[text]`, a
+bracketed timestamp, and a full name are not tags. One word is deliberate:
+plural systems generally sign with a first name, a nickname or another
+contraction, and admitting spaces lets a prefix tag swallow the start of a
+message and a suffix tag reach back over a phrase.
+
+`memory.speaker_tags.patterns` replaces the defaults. Each entry is a regular
+expression whose first capture group, or a group named `name`, is the name.
+An empty list, a pattern that does not compile, has no capture group, or exceeds
+200 characters is a configuration error; one that matches the empty string earns
+a warning. Recognition cannot be switched off by emptying the list: a silent
+"no patterns" would let a name in a query pull results toward it again, which is
+the bias the tags are recognised to remove.
+
+`pi-time-awareness` puts `[Mon 2026-11-02 16:31 EST] ` in front of
+person-authored messages at the provider-payload layer, so a tag behind that
+prefix is no longer at the start of the text. A caller working from `context`
+messages has to remove the timestamp before asking for a tag. Capture does not:
+it reads the transcript, which the extension never edits.
+
 ## Auto-capture
 
 After every configured number of completed agent runs, a separate no-tools

@@ -19,6 +19,21 @@ import {
 } from "./chunker.ts";
 import { DEFAULT_EMBEDDING_MODEL } from "./embedding.ts";
 import type { MemorySearchMode } from "./search.ts";
+import {
+  DEFAULT_SPEAKER_TAG_PATTERNS,
+  SpeakerTagPatternError,
+  compileSpeakerTagPatterns,
+} from "./speaker-tags.ts";
+
+/** Configuration for recognising the forms a person signs or heads a message with. */
+export interface SpeakerTagConfig {
+  /**
+   * Regular-expression sources, applied in order, each with a capture group for
+   * the name. Supplying any replaces the defaults rather than adding to them,
+   * because a house with its own form wants recognition to follow it exactly.
+   */
+  patterns: string[];
+}
 
 /** Configuration for automatic memory retrieval and prompt injection. */
 export interface RagInjectionConfig {
@@ -170,6 +185,11 @@ export function defaultSearchConfig(): SearchConfig {
   return { defaultMode: "hybrid" };
 }
 
+/** Default tag patterns: the forms this house actually uses. */
+export function defaultSpeakerTagConfig(): SpeakerTagConfig {
+  return { patterns: [...DEFAULT_SPEAKER_TAG_PATTERNS] };
+}
+
 /** Configuration for the derived vector index. */
 export interface VectorConfig {
   /** Maximum characters supplied for one embedding chunk. */
@@ -210,6 +230,7 @@ export interface MemoryConfig {
   history: HistoryConfig;
   dreaming: DreamingConfig;
   search: SearchConfig;
+  speakerTags: SpeakerTagConfig;
   vector: VectorConfig;
   embeddings: EmbeddingsConfig;
   /**
@@ -399,6 +420,7 @@ export function parseMemoryConfig(
       dreaming: defaultDreamingConfig(),
       vector: defaultVectorConfig(),
       embeddings: defaultEmbeddingsConfig(),
+      speakerTags: defaultSpeakerTagConfig(),
       warnings: [],
     };
   }
@@ -449,6 +471,11 @@ export function parseMemoryConfig(
       homeDir,
     ),
     search: parseSearch(memoryConfig.search, configPath, warnings),
+    speakerTags: parseSpeakerTags(
+      memoryConfig.speaker_tags,
+      configPath,
+      warnings,
+    ),
     injection: parseRagInjection(memoryConfig.injection, configPath, warnings),
     autoCapture: parseAutoCapture(
       memoryConfig.auto_capture,
@@ -497,6 +524,7 @@ export async function loadMemoryConfig(
         dreaming: defaultDreamingConfig(),
         vector: defaultVectorConfig(),
         embeddings: defaultEmbeddingsConfig(),
+        speakerTags: defaultSpeakerTagConfig(),
         warnings: [],
       };
     }
@@ -741,6 +769,60 @@ function parseRagInjection(
     config.maxChars = value.max_chars;
   }
 
+  return config;
+}
+
+/** Parses optional speaker-tag settings. */
+function parseSpeakerTags(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): SpeakerTagConfig {
+  const config = defaultSpeakerTagConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.speaker_tags must be a YAML object.`,
+    );
+  }
+  collectUnknownKeys(value, "speaker_tags",
+    `${configPath}: memory.speaker_tags`,
+    warnings,
+  );
+
+  if (value.patterns !== undefined) {
+    if (!Array.isArray(value.patterns) || value.patterns.length === 0) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.speaker_tags.patterns must be a non-empty list of regular expressions.`,
+      );
+    }
+    const patterns = value.patterns.map((entry, index) => {
+      if (typeof entry !== "string" || entry.trim() === "") {
+        throw new MemoryConfigError(
+          `${configPath}: memory.speaker_tags.patterns[${index}] must be a non-empty string.`,
+        );
+      }
+      return entry;
+    });
+
+    try {
+      compileSpeakerTagPatterns(patterns, {
+        reportWarning: (message) => {
+          warnings.push(`${configPath}: memory.speaker_tags: ${message}`);
+        },
+      });
+    } catch (error) {
+      if (error instanceof SpeakerTagPatternError) {
+        throw new MemoryConfigError(
+          `${configPath}: memory.speaker_tags: ${error.message}`,
+        );
+      }
+      throw error;
+    }
+    config.patterns = patterns;
+  }
   return config;
 }
 
@@ -1140,8 +1222,10 @@ const KNOWN_KEYS = {
     "history",
     "dreaming",
     "embeddings",
+    "speaker_tags",
   ],
   search: ["default_mode"],
+  speaker_tags: ["patterns"],
   injection: ["enabled", "position", "mode", "limit", "max_chars"],
   vector: ["chunk_size"],
   auto_capture: [
