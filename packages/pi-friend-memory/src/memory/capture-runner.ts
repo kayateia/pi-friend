@@ -6,11 +6,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutoCaptureConfig } from "./config.ts";
-import { debugLog } from "../debug/log.ts";
+import { debugLog, logError } from "../debug/log.ts";
 import {
   buildCapturePrompt,
+  CaptureResponseError,
   parseCaptureResponse,
   type CaptureCandidateDraft,
   type CaptureSpeakerHint,
@@ -47,6 +49,9 @@ export async function runCaptureModel(
   }
 
   const signal = AbortSignal.timeout(CAPTURE_TIMEOUT_MS);
+  // Kept for the failure path: the text alone cannot say whether a bad reply
+  // was truncated, filtered, or came from a different model than configured.
+  let finalMessage: AssistantMessage | undefined;
   const response = await runNestedModel(ctx, model, {
     systemPrompt: resolveSystemPrompt(CAPTURE_SYSTEM_PROMPT, config),
     userContent: buildCapturePrompt(
@@ -59,15 +64,43 @@ export async function runCaptureModel(
     label: "auto-capture",
     reportWarning,
     signal,
+    onResponse: (message) => {
+      finalMessage = message;
+    },
     ...(config.thinkingLevel === undefined
       ? {}
       : { thinkingLevel: config.thinkingLevel }),
   });
   debugLog("capture response", response);
-  return parseCaptureResponse(
-    response,
-    config.maxCandidates,
-    speakerHint,
-    reportWarning,
-  );
+  try {
+    return parseCaptureResponse(
+      response,
+      config.maxCandidates,
+      speakerHint,
+      reportWarning,
+    );
+  } catch (error) {
+    if (error instanceof CaptureResponseError) {
+      // Unconditional, and not deduped: each rejected reply is its own
+      // evidence, and the whole point is to see the one that just failed.
+      // The text is written to the private log rather than into the thrown
+      // message, because that message is shown in a toast.
+      logError("capture response rejected", error, {
+        dedupeMs: 0,
+        detail: {
+          model: `${model.provider}/${model.id}`,
+          responseModel: finalMessage?.responseModel,
+          stopReason: finalMessage?.stopReason,
+          rawStopReason: finalMessage?.rawStopReason,
+          thinkingLevel:
+            finalMessage?.thinkingLevel ??
+            finalMessage?.providerThinkingLevel,
+          usage: finalMessage?.usage,
+          textLength: response.length,
+          response,
+        },
+      });
+    }
+    throw error;
+  }
 }

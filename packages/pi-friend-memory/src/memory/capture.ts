@@ -35,6 +35,27 @@ export interface CaptureCandidateDraft {
   source?: string;
 }
 
+/**
+ * Thrown when a model's capture reply cannot be parsed at all.
+ *
+ * The reply is carried on the error because the person reading the warning
+ * otherwise has nothing to act on: "must contain a candidates array" says
+ * what the parser wanted, not what arrived, and what arrived is the only
+ * evidence of whether the prompt, the model or the token budget was at fault.
+ * The text is deliberately not folded into `message` — the message is shown in
+ * a toast — and is logged by the caller instead.
+ */
+export class CaptureResponseError extends Error {
+  /** Exactly what the model returned, verbatim. */
+  readonly response: string;
+
+  constructor(message: string, response: string) {
+    super(message);
+    this.name = "CaptureResponseError";
+    this.response = response;
+  }
+}
+
 /** What the window's own messages say about who was speaking. */
 export interface CaptureSpeakerHint {
   /**
@@ -272,7 +293,10 @@ export function parseCaptureResponse(
 ): CaptureCandidateDraft[] {
   const object = extractJsonObject(response);
   if (!object || !Array.isArray(object.candidates)) {
-    throw new Error("Capture response must contain a candidates array.");
+    throw new CaptureResponseError(
+      "Capture response must contain a candidates array.",
+      response,
+    );
   }
 
   // A generic label is replaced only when exactly one person signed the window:
