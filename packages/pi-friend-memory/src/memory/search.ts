@@ -241,11 +241,15 @@ function scoreFile(
   contributions: Array<{ field: SearchField; points: number }>;
 } | null {
   const slug = normalize(file.slug ?? "");
-  const relativePath = normalize(file.relativePath);
+  // A document's path is the only signal its location carries. A memory's path
+  // is `nodes/<slug>.md`, so it repeats the slug and would pay twice for the
+  // same word — measured on this store, every node hit for a single-word query
+  // collected both 500 and 350.
+  const path = file.kind === "document" ? normalize(file.relativePath) : "";
   const title = normalize(file.title ?? "");
   const tags = file.tags.map(normalize);
   const body = normalize(file.body);
-  const haystack = [slug, relativePath, title, tags.join(" "), body].join("\n");
+  const haystack = [slug, path, title, tags.join(" "), body].join("\n");
 
   const fields: SearchField[] = [];
   const contributions: Array<{ field: SearchField; points: number }> = [];
@@ -267,7 +271,7 @@ function scoreFile(
     phraseMatch = true;
   }
 
-  if (relativePath.includes(query)) {
+  if (path !== "" && path.includes(query)) {
     award("path", 350);
     if (!fields.includes("path")) fields.push("path");
     phraseMatch = true;
@@ -350,7 +354,7 @@ function scoreFile(
     if (slug.includes(firstToken) && !fields.includes("slug")) {
       fields.push("slug");
     } else if (
-      relativePath.includes(firstToken) &&
+      path.includes(firstToken) &&
       !fields.includes("path")
     ) {
       fields.push("path");
@@ -373,7 +377,7 @@ function scoreFile(
           fields.push("slug");
           break;
         }
-        if (relativePath.includes(token)) {
+        if (path.includes(token)) {
           fields.push("path");
           break;
         }

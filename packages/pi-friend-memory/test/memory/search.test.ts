@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
+import { searchIndexedFiles } from "../../src/memory/search.ts";
 import { withTempDir } from "../helpers.ts";
 
 /** Creates a service backed by an isolated memory tree. */
@@ -67,7 +68,7 @@ test("keyword search ranks exact slug, title, tag, and body matches", async () =
       results.map((result) => result.slug),
       ["lantern", "title-match", "tag-match", "body-match"],
     );
-    assert.deepEqual(results[0]?.matchedFields, ["slug", "path"]);
+    assert.deepEqual(results[0]?.matchedFields, ["slug"]);
     assert.deepEqual(results[1]?.matchedFields, ["title"]);
     assert.deepEqual(results[2]?.matchedFields, ["tags"]);
     assert.deepEqual(results[3]?.matchedFields, ["body"]);
@@ -415,4 +416,34 @@ test("a query that is only a speaker tag is empty", async () => {
       /must not be empty/u,
     );
   });
+});
+
+test("a document's path still scores; a memory's path does not", () => {
+  const file = (kind: "node" | "document", relativePath: string) => ({
+    relativePath,
+    absolutePath: `/tmp/${relativePath}`,
+    storageKind: kind,
+    kind,
+    ...(kind === "node" ? { slug: "kettle" } : {}),
+    title: "Something else",
+    type: "fact" as const,
+    status: "active" as const,
+    decayWeight: 1,
+    tags: [],
+    body: "Nothing relevant here.",
+  });
+
+  const results = searchIndexedFiles(
+    [
+      file("document", "notes/2026-11-02.md"),
+      file("node", "nodes/kettle.md"),
+    ],
+    { query: "2026", minTokenMatches: 1 },
+  );
+  // Only the document earns path points: for a node the path repeats the slug,
+  // so scoring it would pay twice for the same word.
+  assert.deepEqual(
+    results.map((result) => [result.relativePath, result.matchedFields]),
+    [["notes/2026-11-02.md", ["path"]]],
+  );
 });
