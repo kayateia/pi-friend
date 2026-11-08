@@ -461,3 +461,62 @@ test("every tag a message carries is handed to the model", () => {
   ].join("\n");
   assert.deepEqual(names(pasted), ["Aria", "Iri"]);
 });
+
+test("an invented link costs the link, not the candidate", () => {
+  const warnings: string[] = [];
+  const candidates = parseCaptureResponse(
+    JSON.stringify({
+      candidates: [
+        {
+          title: "Sweep interval",
+          type: "fact",
+          body: "The sweep interval is seconds.",
+          speaker: [{ name: "Aria", confident: true }],
+          links: [
+            "decision-sweep-interval-derived-from-existing-iso-timestamp",
+            "Sweep Interval Decision",
+            "nodes/another-memory.md",
+          ],
+        },
+      ],
+    }),
+    3,
+    undefined,
+    (message) => warnings.push(message),
+  );
+
+  // The link field is a model's guess, and a guess that is not a slug cannot be
+  // stored. Rejecting it used to abort the whole capture pass, losing the memory
+  // and leaving the cursor behind so the same window was read again.
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(candidates[0]?.links, [
+    "decision-sweep-interval-derived-from-existing-iso-timestamp",
+  ]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /dropped 2 links/u);
+  assert.match(warnings[0] ?? "", /"Sweep Interval Decision"/u);
+  assert.match(warnings[0] ?? "", /"nodes\/another-memory\.md"/u);
+});
+
+test("candidate links that are all valid are kept silently", () => {
+  const warnings: string[] = [];
+  const candidates = parseCaptureResponse(
+    JSON.stringify({
+      candidates: [
+        {
+          title: "Linked",
+          type: "fact",
+          body: "x",
+          speaker: [],
+          links: ["first-memory", "second-memory"],
+        },
+      ],
+    }),
+    3,
+    undefined,
+    (message) => warnings.push(message),
+  );
+
+  assert.deepEqual(candidates[0]?.links, ["first-memory", "second-memory"]);
+  assert.deepEqual(warnings, []);
+});

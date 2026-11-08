@@ -7,6 +7,7 @@
  */
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { validateSlug } from "./paths.ts";
 import {
   MEMORY_TYPES,
   isQuarantinedMemoryType,
@@ -54,6 +55,7 @@ export function buildCapturePrompt(
     `Extract at most ${maxCandidates} durable memory candidates from the transcript below.`,
     ...speakerAttributionLines(speakerHint),
     'Use this JSON shape: {"candidates":[{"title":"string","type":"fact|preference|event|person-note","body":"concise Markdown","speaker":[{"name":"string","confident":true,"note":"optional"}],"agents":["string"],"emotional_flavor":"neutral","tags":[],"links":[]}]}',
+    'Links are slugs of existing memories this one relates to, written as a slug (lowercase letters, digits and single hyphens); use an empty list when unsure rather than a title or a path.',
     'Return {"candidates":[]} when nothing durable was learned.',
     "",
     "<transcript>",
@@ -266,6 +268,7 @@ export function parseCaptureResponse(
   response: string,
   maxCandidates: number,
   speakerHint?: CaptureSpeakerHint,
+  reportWarning?: (message: string) => void,
 ): CaptureCandidateDraft[] {
   const object = extractJsonObject(response);
   if (!object || !Array.isArray(object.candidates)) {
@@ -281,7 +284,7 @@ export function parseCaptureResponse(
 
   return object.candidates
     .slice(0, maxCandidates)
-    .map((candidate) => parseCandidate(candidate, soleSpeaker))
+    .map((candidate) => parseCandidate(candidate, soleSpeaker, reportWarning))
     .map((candidate) => ({
       ...candidate,
       speaker: attributeSpeakers(candidate.speaker),
@@ -397,6 +400,7 @@ function extractJsonObject(
 function parseCandidate(
   value: unknown,
   speakerHint: string | undefined,
+  reportWarning?: (message: string) => void,
 ): CaptureCandidateDraft {
   if (!isRecord(value)) {
     throw new Error("Capture candidate must be an object.");
@@ -411,8 +415,16 @@ function parseCandidate(
   }
   const agents = optionalStringArray(value.agents, "agents");
   const tags = optionalStringArray(value.tags, "tags");
-  const links = optionalStringArray(value.links, "links");
-
+  const suppliedLinks = optionalStringArray(value.links, "links");
+  // A link is the model's guess at what relates to a memory, and a guess that
+  // is not a slug cannot be written: the node schema rejects it, which used to
+  // abort the whole capture pass and lose every candidate in it, and to leave
+  // the cursor behind so the same window was read again. Dropping the link
+  // costs nothing that was ever real.
+  const links =
+    suppliedLinks === undefined
+      ? undefined
+      : retainValidLinks(suppliedLinks, title, reportWarning);
   return {
     title,
     type: value.type,
@@ -452,6 +464,51 @@ function parseCandidate(
       ? {}
       : { source: requireString(value.source, "source") }),
   };
+}
+
+/** Links reported one warning each, so a long list cannot flood the log. */
+const MAX_REPORTED_LINKS = 3;
+
+/**
+ * Keeps the links that name a real slug, reporting the rest once.
+ *
+ * A capture candidate's links are invented by a model that is told the shape
+ * of the field but not its vocabulary; one it made up must not cost the memory
+ * it belongs to.
+ */
+function retainValidLinks(
+  values: string[],
+  title: string,
+  reportWarning?: (message: string) => void,
+): string[] {
+  const valid: string[] = [];
+  const rejected: string[] = [];
+  for (const value of values) {
+    try {
+      validateSlug(value);
+      valid.push(value);
+    } catch {
+      rejected.push(value);
+    }
+  }
+
+  if (rejected.length > 0) {
+    const shown = rejected
+      .slice(0, MAX_REPORTED_LINKS)
+      .map((value) => JSON.stringify(value))
+      .join(", ");
+    const rest =
+      rejected.length > MAX_REPORTED_LINKS
+        ? ` and ${rejected.length - MAX_REPORTED_LINKS} more`
+        : "";
+    reportWarning?.(
+      `pi-friend auto-capture: dropped ${rejected.length} link${
+        rejected.length === 1 ? "" : "s"
+      } that ${rejected.length === 1 ? "is" : "are"} not a slug from "${title}": ${shown}${rest}`,
+    );
+  }
+
+  return valid;
 }
 
 /** Requires a non-empty string. */

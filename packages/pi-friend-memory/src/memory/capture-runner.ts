@@ -64,5 +64,10 @@ export async function runCaptureModel(
       : { thinkingLevel: config.thinkingLevel }),
   });
   debugLog("capture response", response);
-  return parseCaptureResponse(response, config.maxCandidates, speakerHint);
+  return parseCaptureResponse(
+    response,
+    config.maxCandidates,
+    speakerHint,
+    reportWarning,
+  );
 }
