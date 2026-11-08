@@ -224,7 +224,9 @@ test("slug lists reject invalid values, duplicates, and self-reference", () => {
         ).concat("\nbody\n"),
         "warm-memory",
       ),
-    /Invalid slug/,
+    // The message names the value and the node, so a failure reported from a
+    // live capture can be traced without searching the store for it.
+    /Invalid slug "Invalid Slug" in links for warm-memory/u,
   );
   assert.throws(
     () =>

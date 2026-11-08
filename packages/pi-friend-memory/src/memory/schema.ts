@@ -612,7 +612,7 @@ function parseSlugList(
   slug: string,
 ): string[] {
   const items = parseStringList(value, field, slug).map((item) =>
-    validateSlugForSchema(item, field),
+    validateSlugForSchema(item, field, slug),
   );
   rejectDuplicates(items, field, slug);
   return items;
@@ -636,16 +636,28 @@ function rejectDuplicates(
   }
 }
 
-/** Validates a slug reference using the shared path-safety rules. */
-function validateSlugForSchema(value: string, field: string): string {
+/**
+ * Validates a slug reference using the shared path-safety rules.
+ *
+ * The message names the offending value and the node it was found in: without
+ * them a failure reports that *a* link was wrong, which costs a search through
+ * the store to find out which one.
+ */
+function validateSlugForSchema(
+  value: string,
+  field: string,
+  contextSlug?: string,
+): string {
   try {
     return validateSlug(value);
   } catch (error) {
     if (error instanceof MemoryPathError) {
-      throw new MemorySchemaError(`Invalid slug in ${field}: ${error.message}`, {
-        field,
-        cause: error,
-      });
+      const where =
+        contextSlug === undefined ? "" : ` for ${contextSlug}`;
+      throw new MemorySchemaError(
+        `Invalid slug "${value}" in ${field}${where}: ${error.message}`,
+        { field, cause: error },
+      );
     }
     throw error;
   }
@@ -662,7 +674,9 @@ function requireSlugOrEmpty(
   }
 
   const normalized = value.trim();
-  return normalized === "" ? "" : validateSlugForSchema(normalized, field);
+  return normalized === ""
+    ? ""
+    : validateSlugForSchema(normalized, field, slug);
 }
 
 /** Requires a non-empty trimmed string. */
