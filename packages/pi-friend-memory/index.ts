@@ -37,6 +37,7 @@ import {
   buildCaptureWindow,
   captureStartIndex,
 } from "./src/memory/capture.ts";
+import { compileQueryPrefixes } from "./src/memory/query-prefixes.ts";
 import { runCaptureModel } from "./src/memory/capture-runner.ts";
 import { createMergeWriter } from "./src/memory/merge-writer.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
@@ -57,6 +58,7 @@ import {
   containsRagContext,
   injectRagContext,
   ragBlockForDelivery,
+  type QueryPrefix,
 } from "./src/memory/rag-injection.ts";
 import { runDailySweep } from "./src/memory/sweep.ts";
 import type { SemanticSearchDependencies } from "./src/memory/service.ts";
@@ -88,6 +90,7 @@ export default async function registerPiFriend(
   let externalIndexManager: ExternalIndexManager | undefined;
   const ragSessions = new Map<string, RagSessionState>();
   let injectionConfig = defaultRagInjectionConfig();
+  let queryPrefixes: readonly QueryPrefix[] = [];
   let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
   let captureScheduler: AutoCaptureScheduler | undefined;
   let sweepConfig: SweepConfig = defaultSweepConfig();
@@ -318,6 +321,9 @@ export default async function registerPiFriend(
 
       const repository = await MemoryNodeRepository.open();
       injectionConfig = repository.store.config.injection;
+      queryPrefixes = compileQueryPrefixes(
+        repository.store.config.queryPrefixes.patterns,
+      );
       autoCaptureConfig = repository.store.config.autoCapture;
       sweepConfig = repository.store.config.sweep;
       mergeConfig = repository.store.config.merge;
@@ -412,7 +418,7 @@ export default async function registerPiFriend(
       return;
     }
 
-    const ragQuery = buildRagQuery(event.messages);
+    const ragQuery = buildRagQuery(event.messages, queryPrefixes);
     if (!ragQuery) {
       return;
     }

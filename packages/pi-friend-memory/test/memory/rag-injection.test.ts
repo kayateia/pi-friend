@@ -18,6 +18,7 @@ import {
   ragBlockForDelivery,
   type RagAgentMessage,
 } from "../../src/memory/rag-injection.ts";
+import { compileQueryPrefixes } from "../../src/memory/query-prefixes.ts";
 
 const BLOCK = "## Recalled memories\nMemory block";
 
@@ -163,3 +164,34 @@ function userContent(
   }
   return message.content;
 }
+
+test("configured prefixes are dropped from the RAG query", () => {
+  // What a deployment injects is its own: this test uses the timestamp
+  // pi-time-awareness adds, but the shapes come from configuration rather than
+  // from a pattern this extension knows.
+  const prefixes = compileQueryPrefixes([
+    "^\\[[A-Z][a-z]{2} \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} [^\\]\\n]{1,40}\\] ",
+  ]);
+  const stamped: UserMessage[] = [
+    {
+      role: "user",
+      content: "[Mon 2026-11-02 16:31 EST] Tell me about the kettle.",
+      timestamp: 1,
+    },
+  ];
+  assert.equal(
+    buildRagQuery(stamped, prefixes)?.query,
+    "Tell me about the kettle.",
+  );
+  // The prompt itself is left as it arrived; only the query is cleaned.
+  assert.equal(
+    buildRagQuery(stamped, prefixes)?.userPrompt,
+    "[Mon 2026-11-02 16:31 EST] Tell me about the kettle.",
+  );
+
+  // With no prefixes configured, nothing is stripped.
+  assert.equal(
+    buildRagQuery(stamped)?.query,
+    "[Mon 2026-11-02 16:31 EST] Tell me about the kettle.",
+  );
+});

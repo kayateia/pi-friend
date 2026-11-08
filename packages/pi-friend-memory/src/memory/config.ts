@@ -24,6 +24,19 @@ import {
   SpeakerTagPatternError,
   compileSpeakerTagPatterns,
 } from "./speaker-tags.ts";
+import {
+  QueryPrefixPatternError,
+  compileQueryPrefixes,
+} from "./query-prefixes.ts";
+
+/**
+ * Markup a deployment puts in front of a person's words — a timestamp, a
+ * channel name — which is removed from queries rather than searched for.
+ */
+export interface QueryPrefixConfig {
+  /** Regular-expression sources, applied to the start of every line. */
+  patterns: string[];
+}
 
 /** Configuration for recognising the forms a person signs or heads a message with. */
 export interface SpeakerTagConfig {
@@ -190,6 +203,11 @@ export function defaultSpeakerTagConfig(): SpeakerTagConfig {
   return { patterns: [...DEFAULT_SPEAKER_TAG_PATTERNS] };
 }
 
+/** Default query prefixes: none, because what a deployment injects is its own. */
+export function defaultQueryPrefixConfig(): QueryPrefixConfig {
+  return { patterns: [] };
+}
+
 /** Configuration for the derived vector index. */
 export interface VectorConfig {
   /** Maximum characters supplied for one embedding chunk. */
@@ -231,6 +249,7 @@ export interface MemoryConfig {
   dreaming: DreamingConfig;
   search: SearchConfig;
   speakerTags: SpeakerTagConfig;
+  queryPrefixes: QueryPrefixConfig;
   vector: VectorConfig;
   embeddings: EmbeddingsConfig;
   /**
@@ -421,6 +440,7 @@ export function parseMemoryConfig(
       vector: defaultVectorConfig(),
       embeddings: defaultEmbeddingsConfig(),
       speakerTags: defaultSpeakerTagConfig(),
+      queryPrefixes: defaultQueryPrefixConfig(),
       warnings: [],
     };
   }
@@ -476,6 +496,11 @@ export function parseMemoryConfig(
       configPath,
       warnings,
     ),
+    queryPrefixes: parseQueryPrefixes(
+      memoryConfig.query_prefixes,
+      configPath,
+      warnings,
+    ),
     injection: parseRagInjection(memoryConfig.injection, configPath, warnings),
     autoCapture: parseAutoCapture(
       memoryConfig.auto_capture,
@@ -525,6 +550,7 @@ export async function loadMemoryConfig(
         vector: defaultVectorConfig(),
         embeddings: defaultEmbeddingsConfig(),
         speakerTags: defaultSpeakerTagConfig(),
+        queryPrefixes: defaultQueryPrefixConfig(),
         warnings: [],
       };
     }
@@ -769,6 +795,55 @@ function parseRagInjection(
     config.maxChars = value.max_chars;
   }
 
+  return config;
+}
+
+/** Parses the patterns a deployment prefixes to people's words. */
+function parseQueryPrefixes(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): QueryPrefixConfig {
+  const config = defaultQueryPrefixConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.query_prefixes must be a YAML object.`,
+    );
+  }
+  collectUnknownKeys(value, "query_prefixes",
+    `${configPath}: memory.query_prefixes`,
+    warnings,
+  );
+  if (value.patterns === undefined) {
+    return config;
+  }
+  if (!Array.isArray(value.patterns)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.query_prefixes.patterns must be a list of regular expressions.`,
+    );
+  }
+  const patterns = value.patterns.map((entry, index) => {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.query_prefixes.patterns[${index}] must be a non-empty string.`,
+      );
+    }
+    return entry;
+  });
+  try {
+    compileQueryPrefixes(patterns);
+  } catch (error) {
+    if (error instanceof QueryPrefixPatternError) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.query_prefixes: ${error.message}`,
+      );
+    }
+    throw error;
+  }
+  config.patterns = patterns;
   return config;
 }
 
@@ -1223,9 +1298,11 @@ const KNOWN_KEYS = {
     "dreaming",
     "embeddings",
     "speaker_tags",
+    "query_prefixes",
   ],
   search: ["default_mode"],
   speaker_tags: ["patterns"],
+  query_prefixes: ["patterns"],
   injection: ["enabled", "position", "mode", "limit", "max_chars"],
   vector: ["chunk_size"],
   auto_capture: [

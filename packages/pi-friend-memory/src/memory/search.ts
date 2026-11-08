@@ -55,6 +55,12 @@ export interface MemorySearchOptions {
   limit?: number;
   /** Minimum meaningful token overlap when no phrase match occurs. */
   minTokenMatches?: number;
+  /**
+   * Names that arrived in a speaker tag. They are not part of the query text —
+   * a tag is not something that was said — but a memory attributed to one of
+   * them is more relevant to the person speaking, so it scores once for each.
+   */
+  speakerNames?: readonly string[];
 }
 
 /** One ranked search result with a match-centered snippet. */
@@ -86,6 +92,7 @@ export type SearchField =
   | "path"
   | "title"
   | "tags"
+  | "speaker"
   | "body"
   | "semantic";
 
@@ -135,6 +142,7 @@ export function searchIndexedFiles(
       query,
       queryTokens,
       options.minTokenMatches,
+      (options.speakerNames ?? []).map(normalize),
     );
     if (score === null) {
       continue;
@@ -218,6 +226,7 @@ function scoreFile(
   query: string,
   tokens: string[],
   minTokenMatches: number | undefined,
+  taggedNames: string[],
 ): { value: number; fields: SearchField[] } | null {
   const slug = normalize(file.slug ?? "");
   const relativePath = normalize(file.relativePath);
@@ -264,6 +273,39 @@ function scoreFile(
     value += 400;
     fields.push("tags");
     phraseMatch = true;
+  }
+
+  // Attribution is content in a plural system, so a name a person asked about
+  // may match a memory that never says it in prose. Each distinct speaker
+  // contributes once, however many times that name is recorded, so a node with
+  // three `Aria` records scores exactly like one with a single record.
+  const speakers = [
+    ...new Set(
+      (file.speaker ?? [])
+        .map((speaker) => normalize(speaker.name))
+        .filter((name) => name !== ""),
+    ),
+  ];
+  let speakerMatched = false;
+  for (const name of speakers) {
+    if (taggedNames.includes(name)) {
+      // The person speaking is in this conversation. Score the memory once for
+      // it, and never let it open the gate: the name was not something they
+      // said, so it cannot make an unrelated memory relevant on its own.
+      value += 600;
+      speakerMatched = true;
+    } else if (name === query) {
+      value += 600;
+      speakerMatched = true;
+      // Naming only a person is a phrase match: the memory is *about* them.
+      phraseMatch = true;
+    } else if (tokens.includes(name)) {
+      value += 250;
+      speakerMatched = true;
+    }
+  }
+  if (speakerMatched) {
+    fields.push("speaker");
   }
 
   if (body.includes(query)) {

@@ -339,6 +339,15 @@ Pi reads the extension entry point from the `pi.extensions` field in
   and is configured separately from retrieval's `injection.mode`. If that
   default needs embeddings and none are available, the tool searches with
   keyword and says so; an explicit `mode` that cannot run still fails.
+- A speaker tag is never searchable: every query is cleaned of tags before it is
+  matched or embedded, so `\>>Aria: kettle` searches for `kettle` and nothing
+  else, and the name never reaches the embedding. The name is not discarded,
+  though — a memory attributed to the person speaking is more relevant to the
+  conversation, so each tagged name scores memories whose `speaker` contains it,
+  once per name however many records carry it. The same name typed as text is
+  ordinary query text: it matches prose and embeddings like any other word, and
+  a memory named in a search still scores, because the memory is about them. A
+  name that is both tagged and typed earns both, each once.
 
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.
@@ -369,6 +378,13 @@ An empty list, a pattern that does not compile, has no capture group, or exceeds
 a warning. Recognition cannot be switched off by emptying the list: a silent
 "no patterns" would let a name in a query pull results toward it again, which is
 the bias the tags are recognised to remove.
+
+Markup that a deployment puts in front of a person's words is a deployment's
+business, not this extension's: `memory.query_prefixes.patterns` lists regular
+expressions anchored at the start of a line, and each is removed from the RAG
+query before matching. There is no default, because there is nothing universally
+right to strip; a house running an extension that timestamps messages adds that
+extension's prefix here.
 
 A query is cleaned of every tag, not only the first. Capture goes the other way
 and keeps them all: every tag a person wrote is handed to the model, with one
