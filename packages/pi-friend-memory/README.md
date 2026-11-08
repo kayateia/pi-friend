@@ -382,7 +382,9 @@ successful capture. What it reads is the conversation: user messages, and
 assistant prose — commentary before a tool call and the reply after it. Tool
 calls and their output are excluded: the output is the bulk of a working
 transcript and says what the agent read rather than what anyone meant, and a
-fact learned from a tool reaches capture through the reply that states it. The
+fact learned from a tool reaches capture through the reply that states it.
+Custom messages are included only when a person wrote them — pi-web's structured
+answers, not harness notices. The
 prompt treats conversation content as observed data, requires concrete speaker
 attribution, and allows only active memory types.
 

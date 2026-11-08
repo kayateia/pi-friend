@@ -86,6 +86,24 @@ function speakerAttributionLines(hint?: CaptureSpeakerHint): string[] {
   ];
 }
 
+/**
+ * Custom message types whose text a person wrote.
+ *
+ * A custom message is either a person speaking through the harness — a
+ * structured answer to a question the assistant asked — or the harness speaking
+ * on its own behalf: notices, status lines, injected context. Only the first is
+ * conversation, and capture reads conversation.
+ *
+ * The list mirrors `pi-time-awareness`, which keeps the same set to decide what
+ * deserves a timestamp. It is not imported: that extension is a separate
+ * package, and a memory extension should not fail to load because a sibling is
+ * absent. The type names are pi-web's rather than pi's, so this list needs
+ * revising whenever pi-web changes its custom message vocabulary.
+ */
+const PERSON_AUTHORED_CUSTOM_TYPES: ReadonlySet<string> = new Set([
+  "pi-web.ask.answers",
+]);
+
 /** What one capture window sends, and what it can say about who was speaking. */
 export interface CaptureWindow {
   /** The transcript, bounded by `maxChars`. */
@@ -123,7 +141,10 @@ export function buildCaptureWindow(
           ? findSpeakerTag(formatContent(entry.message.content), patterns)?.name
           : undefined;
       lines.push(name === undefined ? { text } : { text, name });
-    } else if (entry.type === "custom_message") {
+    } else if (
+      entry.type === "custom_message" &&
+      PERSON_AUTHORED_CUSTOM_TYPES.has(entry.customType)
+    ) {
       const text = formatContent(entry.content);
       if (text) {
         lines.push({ text: `CUSTOM: ${text}` });

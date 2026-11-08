@@ -20,7 +20,7 @@ import {
 import { CAPTURE_SYSTEM_PROMPT } from "../../src/memory/prompts.ts";
 import { MEMORY_TYPES, isQuarantinedMemoryType } from "../../src/memory/schema.ts";
 
-test("capture transcript includes user and custom text but omits binary data", () => {
+test("capture transcript includes user and person-authored custom text, and omits binary data", () => {
   const entries: SessionEntry[] = [
     {
       type: "message",
@@ -41,15 +41,25 @@ test("capture transcript includes user and custom text but omits binary data", (
       id: "2",
       parentId: "1",
       timestamp: "2026-10-20T00:00:01Z",
-      customType: "note",
-      content: "A custom note.",
+      customType: "pi-web.ask.answers",
+      content: "A structured answer a person gave.",
+      display: false,
+    },
+    {
+      type: "custom_message",
+      id: "3",
+      parentId: "2",
+      timestamp: "2026-10-20T00:00:02Z",
+      customType: "harness.notice",
+      content: "A status line nobody wrote.",
       display: false,
     },
   ];
 
   const transcript = serializeCaptureTranscript(entries);
   assert.match(transcript, /USER: Remember the blue cup\./);
-  assert.match(transcript, /CUSTOM: A custom note\./);
+  assert.match(transcript, /CUSTOM: A structured answer a person gave\./);
+  assert.doesNotMatch(transcript, /status line nobody wrote/);
   assert.doesNotMatch(transcript, /binary/);
 });
 
