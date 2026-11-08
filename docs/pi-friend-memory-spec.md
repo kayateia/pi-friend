@@ -110,11 +110,11 @@ in `pi-friend-memory.example.yml`.
 ---
 title: string                       # human-readable
 type: fact                          # dream | fact | preference | event | person-note
-speaker:                            # who said it. Array; ordered by attribution confidence
-  - name: Aisling                   #   system member, user name, or agent name
-    confident: true                 #   false = inferred/uncertain attribution
+speaker:                            # the non-AI participants, ordered by attribution confidence
+  - name: Aisling                   #   a human, plural-system member, or other non-AI entity
+    confident: true                 #   false = inferred, uncertain, or relayed second-hand
     note: ""                        #   optional, e.g. "fronting at the time"
-agents: []                          # any AI involved in creating/relaying it
+agents: []                          # every AI involved in the exchange, including the one writing it
 created: 2026-10-18T09:00:00Z
 last_used: 2026-10-18T09:00:00Z     # maintained at sweep time, NOT on every hit
 use_count: 0
@@ -133,8 +133,10 @@ edited: 2026-10-18T09:00:00Z        # optional timestamp for when the memory was
 Body: concise, single-topic prose. May include short verbatim quotes (with speaker attributed). Ends with a `see also:` section listing links plus their one-line keywords, for the "very bottom of RAG" tier.
 
 **Attribution rules** (plural- and room-aware):
-- In multi-user contexts, speaker = the actual human who typed it, never "the user".
-- If the agent inferred rather than heard something, `speaker.confident: false`.
+- `speaker` names people: a human, a member of the plural system, or another non-AI entity. An AI agent is never a speaker — it belongs in `agents`, which lists every AI involved in the exchange, including the one writing the memory.
+- In multi-user contexts, speaker = the actual person who typed it, never "the user".
+- When an AI's words are what prompted the memory and no person spoke, `speaker` may be empty and `agents` carries the AIs. `speaker: []` with `agents: [<the writer>, <the other agent>]` is the correct record for that exchange.
+- If the agent inferred rather than heard something, `speaker.confident: false`, and `note` says what was relayed.
 - Corrections must record the original speaker too; overriding someone's claim is not the same as them being wrong.
 
 ## 5. Basic tools
