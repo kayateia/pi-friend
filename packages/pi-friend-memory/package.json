@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/**/*.test.ts"
+    "test": "node --import ./test/setup.mjs --test test/**/*.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^1.3.0",
