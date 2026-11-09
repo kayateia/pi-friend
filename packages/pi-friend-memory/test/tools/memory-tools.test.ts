@@ -330,3 +330,101 @@ test("the last-rag command reports without a model call", async () => {
   await command.handler("", ctx);
   assert.match(notices[1] ?? "", /mode: keyword \(fell back from hybrid\)/u);
 });
+
+test("a query is required, and a date window filters the search", async () => {
+  const searched: Array<Record<string, unknown>> = [];
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  const stubService = {
+    store: { config: { search: { defaultMode: "keyword" } } },
+    canSearchSemantically: true,
+    async search(options: Record<string, unknown>) {
+      searched.push(options);
+      return [];
+    },
+  };
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
+  const definition = definitions.get("memory_search") as {
+    parameters: {
+      properties: Record<string, unknown>;
+      required?: readonly string[];
+    };
+    execute: (
+      id: string,
+      params: Record<string, unknown>,
+    ) => Promise<{ content: Array<{ text: string }> }>;
+  };
+
+  // Searching is the only thing this tool does, so it always needs something
+  // to search for; listing is a separate tool with its own parameters.
+  assert.deepEqual(definition.parameters.required, ["query"]);
+  assert.ok("since" in definition.parameters.properties);
+  assert.ok("until" in definition.parameters.properties);
+
+  // A date filter implies the memory corpus, and says so in the output.
+  const dated = await definition.execute("call", {
+    query: "kettle",
+    since: "2026-11-01",
+  });
+  assert.equal(searched.at(-1)?.query, "kettle");
+  assert.equal(searched.at(-1)?.corpus, "memory");
+  assert.match(String(searched.at(-1)?.since), /^2026-11-01T/u);
+  assert.match(dated.content[0]?.text ?? "", /corpus is memory/u);
+
+  // Documents are dated by file modification time, so a date filter cannot
+  // silently narrow a corpus the caller asked for by name.
+  await assert.rejects(
+    async () =>
+      definition.execute("call", {
+        query: "kettle",
+        since: "2026-11-01",
+        corpus: "documents",
+      }),
+    /apply to memories only/u,
+  );
+  await assert.rejects(
+    async () =>
+      definition.execute("call", {
+        query: "kettle",
+        since: "2026-11-08",
+        until: "2026-11-01",
+      }),
+    /later than until/u,
+  );
+});
+
+test("a request above the result cap says how many were returned", async () => {
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  const stubService = {
+    store: { config: { search: { defaultMode: "keyword" } } },
+    canSearchSemantically: true,
+    async search() {
+      return [];
+    },
+  };
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
+  const definition = definitions.get("memory_search") as {
+    execute: (
+      id: string,
+      params: Record<string, unknown>,
+    ) => Promise<{ content: Array<{ text: string }> }>;
+  };
+
+  const response = await definition.execute("call", {
+    query: "kettle",
+    limit: 40,
+  });
+  assert.match(response.content[0]?.text ?? "", /Showing 25 of the 40 requested/u);
+
+  const quiet = await definition.execute("call", { query: "kettle", limit: 5 });
+  assert.doesNotMatch(quiet.content[0]?.text ?? "", /Showing/u);
+});

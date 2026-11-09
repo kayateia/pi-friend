@@ -35,7 +35,11 @@ import type {
   MemorySearchResult,
   MemorySearchMode,
 } from "../memory/search.ts";
-import { formatRetrievalExplanation } from "../memory/search.ts";
+import {
+  MAX_LIMIT as MAX_RESULT_LIMIT,
+  formatRetrievalExplanation,
+} from "../memory/search.ts";
+import { resolveDateWindow } from "../memory/date-filter.ts";
 import { DEFAULT_MEMORY_TOOL_PREFIX } from "../memory/config.ts";
 
 const MEMORY_AREAS = [
@@ -115,6 +119,8 @@ interface MemorySearchDetails {
   mode: MemorySearchMode;
   count: number;
   results: MemorySearchResult[];
+  since?: string;
+  until?: string;
 }
 
 /** Prepends the configured namespace to one complete memory tool name. */
@@ -735,11 +741,25 @@ export function registerMemoryTools(
       "corpus all (default): both, ranked together.",
       "Exact slug and title matches rank above tag and body matches. Semantic mode uses embeddings; hybrid mode fuses keyword and semantic ranks.",
       "Use type to restrict results to one memory-node category; it implies the memory corpus.",
+      "since and until keep only entries modified inside that window. They apply to memories only — a document's date is its file modification time, which a backlink or a touch can move without the content changing.",
+      "A date without a time means that calendar day in the server's local timezone, inclusive at both ends.",
     ].join("\n"),
     parameters: Type.Object({
       query: Type.String({
         description: "Words, slug, title, tag, or phrase to find.",
       }),
+      since: Type.Optional(
+        Type.String({
+          description:
+            "Only entries modified on or after this date. YYYY-MM-DD means the start of that local calendar day; a timestamp such as 2026-11-08T09:00:00Z means that exact instant. Implies corpus memory.",
+        }),
+      ),
+      until: Type.Optional(
+        Type.String({
+          description:
+            "Only entries modified on or before this date, inclusive. YYYY-MM-DD covers the whole local calendar day. Implies corpus memory.",
+        }),
+      ),
       mode: Type.Optional(
         StringEnum(["keyword", "semantic", "hybrid"] as const, {
           description:
@@ -760,7 +780,7 @@ export function registerMemoryTools(
       ),
       limit: Type.Optional(
         Type.Number({
-          description: "Maximum results, from 1 to 25. Default: 5.",
+          description: `Maximum results, from 1 to ${MAX_RESULT_LIMIT}. Default: 5.`,
         }),
       ),
     }),
@@ -791,24 +811,46 @@ export function registerMemoryTools(
           "type filters memory nodes, so it cannot be combined with corpus \"documents\".",
         );
       }
+
+      const hasDateFilter =
+        params.since !== undefined || params.until !== undefined;
+      if (
+        hasDateFilter &&
+        params.corpus !== undefined &&
+        params.corpus !== "memory"
+      ) {
+        throw new Error(
+          `Date filters apply to memories only, because a document's date is its file modification time; they cannot be combined with corpus "${params.corpus}". Use corpus memory, or drop the date filter.`,
+        );
+      }
+      // Throws on an unreadable or inverted window; an empty answer would look
+      // like a fact about the store rather than a mistake in the question.
+      const window = resolveDateWindow(params.since, params.until);
+      const corpus = hasDateFilter ? "memory" : params.corpus;
+
       const searchOptions: MemorySearchOptions = {
         query: params.query,
         mode,
         type: params.type,
-        corpus: params.corpus,
+        corpus,
         limit: params.limit,
+        ...window,
       };
       const results = await service.search(searchOptions);
       const text = formatSearchResults(params.query, results);
-      const note = degradeDefault
-        ? `(memory.search.default_mode is "${configuredMode}" but no embedding provider is available; searched with keyword.)\n\n`
-        : "";
+      const notes = [
+        degradeDefault
+          ? `(memory.search.default_mode is "${configuredMode}" but no embedding provider is available; searched with keyword.)`
+          : "",
+        corpusNote(hasDateFilter, params.corpus),
+        limitNote(params.limit),
+      ].filter(Boolean);
 
       return {
         content: [
           {
             type: "text",
-            text: `${note}${text}`,
+            text: `${notes.map((note) => `${note}\n\n`).join("")}${text}`,
           },
         ],
         details: {
@@ -816,11 +858,66 @@ export function registerMemoryTools(
           mode: mode ?? configuredMode,
           count: results.length,
           results,
+          ...window,
         },
       };
     },
   });
 
+}
+
+/**
+ * Says that a date filter narrowed the corpus on its own.
+ *
+ * The default corpus is `all`, so a date-filtered call that did not name a
+ * corpus is answered from memories alone — which is the right answer, and not
+ * one the caller should have to infer from the results.
+ */
+function corpusNote(
+  hasDateFilter: boolean,
+  requestedCorpus: string | undefined,
+): string {
+  return hasDateFilter && requestedCorpus === undefined
+    ? "(Date filters apply to memories, so the corpus is memory; documents are dated by file modification time.)"
+    : "";
+}
+
+/** Says when a request asked for more results than the tool will return. */
+function limitNote(limit: number | undefined): string {
+  if (limit === undefined || limit <= MAX_RESULT_LIMIT) {
+    return "";
+  }
+  return `(Showing ${MAX_RESULT_LIMIT} of the ${Math.floor(limit)} requested; the maximum is ${MAX_RESULT_LIMIT}.)`;
+}
+
+/** Formats one result block for the model-facing tool response. */
+function formatResultBlock(
+  result: MemorySearchResult,
+  index: number,
+): string {
+  const heading = result.title ?? result.slug ?? result.relativePath;
+  const metadata = [
+    `kind: ${result.kind}`,
+    result.type === undefined ? "" : `type: ${result.type}`,
+    result.status === undefined ? "" : `status: ${result.status}`,
+    result.modifiedAt === undefined ? "" : `modified: ${result.modifiedAt}`,
+    result.provenance ?? "",
+    result.schemaError === undefined ? "" : "schema warning",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const attribution = formatAttribution(result.speaker);
+  return [
+    `### ${index + 1}. ${heading}`,
+    `Path: ${result.relativePath}`,
+    metadata,
+    attribution === undefined ? "" : `${ATTRIBUTION_LABEL}: ${attribution}`,
+    formatRetrievalExplanation(result),
+    result.snippet,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Formats ranked search results for the model-facing tool response. */
@@ -832,36 +929,7 @@ function formatSearchResults(
     return `No memories found for "${query}".`;
   }
 
-  const blocks = results.map((result, index) => {
-    const heading =
-      result.title ??
-      result.slug ??
-      result.relativePath;
-    const metadata = [
-      `kind: ${result.kind}`,
-      result.type === undefined ? "" : `type: ${result.type}`,
-      result.status === undefined ? "" : `status: ${result.status}`,
-      result.modifiedAt === undefined
-        ? ""
-        : `modified: ${result.modifiedAt}`,
-      result.provenance ?? "",
-      result.schemaError === undefined ? "" : "schema warning",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-
-    const attribution = formatAttribution(result.speaker);
-    return [
-      `### ${index + 1}. ${heading}`,
-      `Path: ${result.relativePath}`,
-      metadata,
-      attribution === undefined ? "" : `${ATTRIBUTION_LABEL}: ${attribution}`,
-      formatRetrievalExplanation(result),
-      result.snippet,
-    ]
-      .filter(Boolean)
-      .join("\n");
-  });
+  const blocks = results.map((result, index) => formatResultBlock(result, index));
 
   return `Found ${results.length} result${results.length === 1 ? "" : "s"} for "${query}".\n\n${blocks.join("\n\n---\n\n")}`;
 }

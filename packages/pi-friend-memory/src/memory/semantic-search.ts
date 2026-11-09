@@ -8,9 +8,10 @@
 
 import type { EmbeddingProvider } from "./embedding.ts";
 import type { IndexedMarkdownFile } from "./indexer.ts";
-import type {
-  MemorySearchOptions,
-  MemorySearchResult,
+import {
+  matchesSearchFilters,
+  type MemorySearchOptions,
+  type MemorySearchResult,
 } from "./search.ts";
 import {
   chunkText,
@@ -77,6 +78,8 @@ export function searchSemanticVectors(
     ...(options.kinds === undefined ? {} : { kinds: options.kinds }),
     ...(options.type === undefined ? {} : { type: options.type }),
     ...(options.status === undefined ? {} : { status: options.status }),
+    ...(options.since === undefined ? {} : { since: options.since }),
+    ...(options.until === undefined ? {} : { until: options.until }),
   });
   const fileByPath = new Map(files.map((file) => [file.relativePath, file]));
   const chunkCache = new Map<string, string[]>();
@@ -89,26 +92,7 @@ export function searchSemanticVectors(
       continue;
     }
     seenPaths.add(file.relativePath);
-    if (options.type !== undefined && file.type !== options.type) {
-      continue;
-    }
-    if (options.kind !== undefined && file.kind !== options.kind) {
-      continue;
-    }
-    if (
-      options.kinds !== undefined &&
-      !options.kinds.includes(file.kind)
-    ) {
-      continue;
-    }
-    if (options.status !== undefined && file.status !== options.status) {
-      continue;
-    }
-    if (
-      options.statuses !== undefined &&
-      (file.status === undefined ||
-        !options.statuses.includes(file.status))
-    ) {
+    if (!matchesSearchFilters(file, options)) {
       continue;
     }
 
