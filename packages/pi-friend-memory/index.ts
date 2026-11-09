@@ -126,7 +126,7 @@ export default async function registerPiFriend(
   // Temporary opt-in instrumentation for inspecting Pi's lifecycle payloads.
   registerHookLogging(pi);
   registerMemoryTools(pi, () => memoryService, toolPrefix, () => lastRetrieval);
-  registerMemoryCommands(pi, () => lastRetrieval, toolPrefix);
+  registerMemoryCommands(pi, () => lastRetrieval, toolPrefix, () => memoryService);
 
   /** Runs one transcript capture and advances the cursor on success. */
   const executeCapture = async (

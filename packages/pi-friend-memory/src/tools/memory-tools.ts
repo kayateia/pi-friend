@@ -40,6 +40,10 @@ import {
   formatRetrievalExplanation,
 } from "../memory/search.ts";
 import { resolveDateWindow } from "../memory/date-filter.ts";
+import {
+  formatValidationReport,
+  validateMemoryFiles,
+} from "../memory/validation.ts";
 import { DEFAULT_MEMORY_TOOL_PREFIX } from "../memory/config.ts";
 
 const MEMORY_AREAS = [
@@ -159,6 +163,7 @@ export function registerMemoryCommands(
     | { diagnostics: RagRetrievalDiagnostics; at: string }
     | undefined = () => undefined,
   toolPrefix: string = DEFAULT_MEMORY_TOOL_PREFIX,
+  getService: () => MemoryNodeService | undefined = () => undefined,
 ): void {
   pi.registerCommand(`${toolPrefix}memory-last-rag`, {
     description:
@@ -170,6 +175,29 @@ export function registerMemoryCommands(
           ? "pi-friend-memory: no retrieval has run in this session yet."
           : formatRagDiagnostics(last.diagnostics, last.at),
         "info",
+      );
+    },
+  });
+
+  // A command rather than a tool: checking the store is a diagnostic a person
+  // runs, and a model reciting a report it already holds is slower and billable.
+  pi.registerCommand(`${toolPrefix}memory-validate`, {
+    description:
+      "Check every stored memory and history version for schema errors, and name each one that fails",
+    handler: async (_args, ctx) => {
+      const service = getService();
+      if (!service) {
+        ctx.ui.notify(
+          "pi-friend memory: storage is unavailable, so there is nothing to check.",
+          "error",
+        );
+        return;
+      }
+
+      const report = await validateMemoryFiles(service.store);
+      ctx.ui.notify(
+        formatValidationReport(report),
+        report.failures.length === 0 ? "info" : "warning",
       );
     },
   });
