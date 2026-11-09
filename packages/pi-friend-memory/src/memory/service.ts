@@ -388,7 +388,7 @@ export class MemoryNodeService {
         source: "tool",
         ...(result.slug === undefined ? {} : { slug: result.slug }),
         path: result.relativePath,
-        tier: mode,
+        mode,
         query: options.query,
       });
     }

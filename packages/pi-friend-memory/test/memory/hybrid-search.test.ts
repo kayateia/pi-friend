@@ -121,7 +121,7 @@ test("hybrid search fuses keyword and semantic candidates", async () => {
       );
 
       const accessLog = await repository.store.readTextFile("access-log");
-      assert.match(accessLog, /"tier":"hybrid"/);
+      assert.match(accessLog, /"mode":"hybrid"/);
     } finally {
       index.close();
     }

@@ -57,7 +57,16 @@ export interface AccessLogEntry {
   source: "rag" | "tool";
   slug?: string;
   path?: string;
-  tier?: string;
+  /**
+   * Retrieval mode that produced the hit: `keyword`, `semantic` or `hybrid`.
+   *
+   * This field used to be called `tier` and carried the same values, which meant
+   * the one name in the record for "how was this found" said it was something
+   * else. A decay tier is a property of a node at retrieval time, and is not
+   * recorded here; item 7 in the pi-friend todo is where that would be added,
+   * with something that reads it.
+   */
+  mode?: string;
   query?: string;
 }
 

@@ -213,7 +213,7 @@ once-per-day consolidation schedule, not daily-log processing.
 ## 7. Decay
 
 - **Volume-relative**: each node's weight decreases by a function of *how many new memories have been stored since its last use*, not elapsed clock time. Quiet weeks don't bury things.
-- `decay_weight` is recomputed once per sweep. Search calls append access records with tier, query, path, and slug when available; RAG retrieval uses the same search path and may log candidate hits before injection filtering. Access logging never rewrites node files.
+- `decay_weight` is recomputed once per sweep. Search calls append access records with the retrieval mode, query, path, and slug when available; RAG retrieval uses the same search path and may log candidate hits before injection filtering. Access logging never rewrites node files.
 - Decay is also calculated once per sweep on candidate items in `staging`, using the same volume curve, weights, canonical-only volume count, and `0.05` floor as canonical nodes. Candidate RAG hits do not reset candidate decay; only sweep processing updates it. A candidate expires when its decay weight reaches `0.05`. Candidate expiry is volume-based; elapsed wall-clock time does not decay candidates.
 - Superseded nodes get `decay_weight: 0` and are excluded from RAG, but remain searchable with an explicit `superseded` marker (so the model can say "an earlier record says X, but it was corrected by Y").
 
