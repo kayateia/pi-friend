@@ -123,7 +123,7 @@ test("a parseable reply writes no rejection entry", async () => {
   });
 });
 
-test("a refused draft costs one candidate, and the rest of the pass completes", async () => {
+test("a refused draft is reshaped, and the rest of the pass completes", async () => {
   const { MemoryNodeRepository } = await import("../../src/memory/repository.ts");
   const { MemoryNodeService } = await import("../../src/memory/service.ts");
   const { stageCaptureDrafts } = await import("../../src/memory/capture-runner.ts");
@@ -137,18 +137,8 @@ test("a refused draft costs one candidate, and the rest of the pass completes", 
     const service = new MemoryNodeService(repository);
     const warnings: string[] = [];
 
-    // The second draft's body is empty, which the service refuses; that refusal
-    // is deterministic, so skipping it lets the pass finish and the cursor
-    // advance — the alternative is re-reading the window and re-staging the
-    // first draft as a near-duplicate.
-    const repaired = [
-      {
-        title: "Empty",
-        type: "fact" as const,
-        body: "A corrected body.",
-        speaker: [],
-      },
-    ];
+    // A repeated link is refused by the schema, and the draft is otherwise
+    // intact: exactly the shape a rewrite can fix without inventing anything.
     const result = await stageCaptureDrafts(
       service,
       [
@@ -159,37 +149,73 @@ test("a refused draft costs one candidate, and the rest of the pass completes", 
           speaker: [{ name: "Aisling", confident: true }],
         },
         {
-          title: "Empty",
-          type: "fact",
-          body: "   ",
-          speaker: [],
-        },
-        {
           title: "Lantern",
           type: "fact",
           body: "The lantern hangs by the door.",
           speaker: [],
+          links: ["kettle", "kettle"],
         },
       ],
       "session-test",
       async (rejected) => {
-        // The refusal message is what the rewrite is given: it names the field
-        // and the value, so a corrected draft is possible without guessing.
-        assert.deepEqual(rejected.map((entry) => entry.draft.title), ["Empty"]);
-        assert.match(rejected[0]?.error ?? "", /body must not be empty/u);
-        return repaired;
+        assert.deepEqual(
+          rejected.map((entry) => entry.draft.title),
+          ["Lantern"],
+        );
+        assert.match(rejected[0]?.error ?? "", /Duplicate value/u);
+        return [
+          {
+            title: "Lantern",
+            type: "fact" as const,
+            body: "The lantern hangs by the door.",
+            speaker: [],
+            links: ["kettle"],
+          },
+        ];
       },
     );
 
-    assert.equal(result.stored, 3);
+    assert.equal(result.stored, 2);
     assert.deepEqual(result.rejected, []);
     assert.deepEqual(warnings, []);
 
     const staged = (await repository.list("staging")).map(
       (node) => node.frontMatter.title,
     );
-    assert.deepEqual(staged.sort(), ["Empty", "Kettle", "Lantern"]);
+    assert.deepEqual(staged.sort(), ["Kettle", "Lantern"]);
   });
+});
+
+test("a draft with no content is never sent to the model to invent", async () => {
+  const { stageCaptureDrafts } = await import("../../src/memory/capture-runner.ts");
+
+  // "Body must not be empty" leaves a rewrite nothing to work from but
+  // invention, so the draft is refused and reported instead.
+  let repairCalls = 0;
+  const service = {
+    async stageCandidate() {
+      throw new (await import("../../src/memory/service.ts")).MemoryServiceError(
+        "Memory body must not be empty.",
+      );
+    },
+  } as unknown as Parameters<typeof stageCaptureDrafts>[0];
+
+  const result = await stageCaptureDrafts(
+    service,
+    [{ title: "Empty", type: "fact", body: "   ", speaker: [] }],
+    "session-test",
+    async () => {
+      repairCalls += 1;
+      return [];
+    },
+  );
+
+  assert.equal(repairCalls, 0);
+  assert.equal(result.stored, 0);
+  assert.deepEqual(
+    result.rejected.map((entry) => entry.draft.title),
+    ["Empty"],
+  );
 });
 
 test("an environmental failure still aborts the pass", async () => {

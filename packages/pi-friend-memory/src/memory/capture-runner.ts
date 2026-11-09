@@ -158,12 +158,35 @@ export async function stageCaptureDrafts(
     return first;
   }
 
-  const repaired = await repair(first.rejected);
+  // Only a draft that still has its content can be repaired. Asking a model to
+  // rewrite a candidate whose body is missing would leave it nothing to work
+  // from but invention, and a memory that was never said is worse than a memory
+  // that was not kept. Capture's parser refuses an empty body before staging, so
+  // this is a guard against the class rather than a case anyone has seen.
+  const repairable = first.rejected.filter((entry) =>
+    hasContentToRepair(entry.draft),
+  );
+  const unrepairable = first.rejected.filter(
+    (entry) => !hasContentToRepair(entry.draft),
+  );
+  if (repairable.length === 0) {
+    return first;
+  }
+
+  const repaired = await repair(repairable);
   if (repaired.length === 0) {
     return first;
   }
   const second = await stageOneByOne(service, repaired, sessionId);
-  return { stored: first.stored + second.stored, rejected: second.rejected };
+  return {
+    stored: first.stored + second.stored,
+    rejected: [...second.rejected, ...unrepairable],
+  };
+}
+
+/** Returns whether a refused draft has content a rewrite can reshape. */
+function hasContentToRepair(draft: CaptureCandidateDraft): boolean {
+  return draft.body.trim() !== "";
 }
 
 /** Stages drafts one at a time, collecting refusals rather than stopping. */
