@@ -270,7 +270,7 @@ Once per day, a model pass:
 **Abort-don't-partial:** if any step fails, abort immediately; do not write partial results.
 
 **State file rule:** the sweep maintains a state file (last-run timestamp, cursor). It MUST be updated in every outcome, including failure. A pass that does not advance the timestamp is a failed pass — otherwise the next run re-reads the same window forever.
-- **Bounded loss**: for batches at or above `min_guarded_batch_size`, a sweep that would remove or compact more than 25% of prior entries (per file or per sweep, whichever is tighter) is rejected. Volume-expired staging candidates count toward the 25% removal total. Smaller batches bypass the ratio guard. This caps silent history erasure while avoiding a guard deadlock when only a few candidates exist.
+- **Loss is reported, not vetoed**: for batches at or above `min_guarded_batch_size`, a sweep that removes more than 25% of prior entries (expired candidates and model drops counted together) reports it and proceeds. Removing a candidate is recoverable — drops are archived under `history/dropped/` and restorable — while refusing a run would discard that run's promotions and merges and leave a larger queue for the next attempt. Smaller batches never report the ratio.
 - **Every sweep writes a dated log** in `sweeps/`: what moved, what merged, what was dropped, why. Record-is-load-bearing applies to the janitor.
 - **History instead of snapshots**: every operation that replaces or removes content stores the previous version under `history/` first, so undo works per memory rather than per sweep. A whole-sweep snapshot was tried and removed: it copied the entire store to protect operations that already keep their own copies, and nothing ever read it.
 

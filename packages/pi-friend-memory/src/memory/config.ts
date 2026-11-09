@@ -105,7 +105,7 @@ export interface SweepConfig {
    * configurable rather than the default changed on someone else's behalf.
    */
   allowDrop: boolean;
-  /** Batches smaller than this bypass the 25% removal guard. */
+  /** Batches smaller than this never report a removal ratio above a quarter. */
   minGuardedBatchSize: number;
 }
 

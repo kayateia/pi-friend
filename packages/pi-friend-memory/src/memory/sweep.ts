@@ -167,22 +167,30 @@ async function runDailySweepLocked(
       options.signal?.throwIfAborted();
     }
 
-    // Model-requested drops are destructive too, so they count against the same
-    // guard. Otherwise enabling `allow_drop` would quietly turn a rate limit on
-    // deletion into no limit at all.
+    // Model-requested drops are destructive too, so they count toward the same
+    // total. Otherwise enabling `allow_drop` would report a rate limit on
+    // deletion while actually applying none.
     const modelDrops = decisions.filter(
       (decision) => decision.action === "drop",
     ).length;
     const destructiveActions =
       candidateDecay.expiredSlugs.length + modelDrops;
-    const ratioGuardApplies =
+    const ratioWorthReporting =
       allCandidates.length >= config.minGuardedBatchSize;
+    // Reported, never enforced. Removing a candidate is recoverable — a drop is
+    // archived under `history/dropped/` and can be restored — while refusing a
+    // run is not: it discards the run's promotions and merges as well, and makes
+    // the next run larger, so a refusal that keeps failing is the one outcome
+    // nobody can undo. The model saw the candidates; the guard saw a count.
     if (
-      ratioGuardApplies &&
+      ratioWorthReporting &&
       destructiveActions > Math.floor(allCandidates.length * 0.25)
     ) {
-      throw new Error(
-        `Sweep would remove more than 25% of ${allCandidates.length} staged candidates; the guard applies at ${config.minGuardedBatchSize} or more.`,
+      const percent = Math.round(
+        (destructiveActions / allCandidates.length) * 100,
+      );
+      options.reportWarning?.(
+        `pi-friend memory sweep removed ${destructiveActions} of ${allCandidates.length} staged candidates (${percent}%), more than a quarter. Dropped candidates are archived under history/dropped/ and can be restored from there.`,
       );
     }
 
