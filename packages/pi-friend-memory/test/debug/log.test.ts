@@ -14,6 +14,7 @@ import {
   formatErrorChain,
   formatErrorDetails,
   logError,
+  logNotice,
   resolveDebugLogPath,
   writeDebugLog,
 } from "../../src/debug/log.ts";
@@ -109,5 +110,23 @@ test("error logging deduplicates identical failures for a short interval", async
 
     const content = await readFile(logPath, "utf8");
     assert.equal(content.match(/\[error watcher\]/gu)?.length, 2);
+  });
+});
+
+test("a warning reaches the log even when debug logging is off", async () => {
+  await withTempDir(async (directory) => {
+    const logPath = path.join(directory, "debug.log");
+
+    // Warnings are shown as toasts, and a toast is gone in seconds — on some
+    // front ends before it has been read. The log line is what is left.
+    logNotice("warning", "pi-friend memory sweep removed 39 of 90 staged candidates", {
+      logPath,
+      env: {},
+    });
+
+    const content = await readFile(logPath, "utf8");
+    assert.match(content, /\[warning\]/u);
+    assert.match(content, /39 of 90/u);
+    assert.equal((await lstat(logPath)).mode & 0o777, 0o600);
   });
 });

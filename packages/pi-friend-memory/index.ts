@@ -17,6 +17,7 @@ import {
   formatErrorChain,
   isDebugEnabled,
   logError,
+  logNotice,
   resolveDebugLogPath,
 } from "./src/debug/log.ts";
 import {
@@ -353,6 +354,9 @@ export default async function registerPiFriend(
       mergeConfig = repository.store.config.merge;
       dreamingConfig = repository.store.config.dreaming;
       const reportWarning = (message: string): void => {
+        // A toast is gone in seconds and, on some front ends, before it can be
+        // read; the log line is what a warning leaves behind.
+        logNotice("warning", message);
         if (ctx.hasUI) {
           ctx.ui.notify(message, "warning");
         } else {
@@ -631,6 +635,9 @@ async function reportMigrations(
   ctx: ExtensionContext,
 ): Promise<void> {
   const notify = (message: string, level: "info" | "warning" | "error") => {
+    if (level !== "error") {
+      logNotice(level, message);
+    }
     if (ctx.hasUI) {
       ctx.ui.notify(message, level);
     } else {
@@ -700,6 +707,7 @@ function reportCaptureWarning(
   ctx: ExtensionContext,
   message: string,
 ): void {
+  logNotice("warning", message);
   if (ctx.hasUI) {
     ctx.ui.notify(message, "warning");
   } else {

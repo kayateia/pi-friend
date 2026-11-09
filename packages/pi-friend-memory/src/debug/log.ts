@@ -103,18 +103,38 @@ export function writeDebugLog(
           maxStringLength: 12_000,
         });
 
+  appendToLog(logPath, `[${timestamp}] [${label}]\n${formatted}\n\n`);
+}
+
+/**
+ * Appends one notice to the diagnostic log, whether or not debug is enabled.
+ *
+ * Warnings reach a person as a toast, and a toast is gone in seconds — on some
+ * front ends before it can be read. A warning that matters has to survive
+ * somewhere, so the same text goes here: one line, no stack, always.
+ */
+export function logNotice(
+  label: string,
+  message: string,
+  options: { logPath?: string; env?: NodeJS.ProcessEnv } = {},
+): void {
+  const logPath = options.logPath ?? resolveDebugLogPath(options.env);
+  appendToLog(
+    logPath,
+    `[${new Date().toISOString()}] [${label}]\n${message}\n\n`,
+  );
+}
+
+/** Appends text to the private log, creating its directory when needed. */
+function appendToLog(logPath: string, text: string): void {
   try {
     mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
-    appendFileSync(
-      logPath,
-      `[${timestamp}] [${label}]\n${formatted}\n\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
+    appendFileSync(logPath, text, { encoding: "utf8", mode: 0o600 });
     if (existsSync(logPath)) {
       chmodSync(logPath, 0o600);
     }
   } catch {
-    // Debug logging must never interrupt Pi.
+    // Logging must never interrupt Pi.
   }
 }
 
