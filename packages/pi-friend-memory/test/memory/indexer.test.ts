@@ -42,7 +42,7 @@ last_used: 2026-10-19T20:00:00Z
 use_count: 0
 decay_weight: 1
 status: candidate
-emotional_flavor: neutral
+emotional_flavour: neutral
 tags: []
 supersedes: []
 superseded_by: ""
@@ -146,7 +146,7 @@ edited: 2026-11-08T00:00:00-05:00
 use_count: 0
 decay_weight: 1
 status: active
-emotional_flavor: neutral
+emotional_flavour: neutral
 tags: []
 supersedes: []
 superseded_by: ""
@@ -169,7 +169,7 @@ last_used: 2026-10-02T00:00:00Z
 use_count: 0
 decay_weight: 1
 status: active
-emotional_flavor: neutral
+emotional_flavour: neutral
 tags: []
 supersedes: []
 superseded_by: ""

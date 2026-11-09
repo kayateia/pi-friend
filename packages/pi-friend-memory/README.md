@@ -528,7 +528,7 @@ adjacency-weighted shortlist and is asked to choose what it wants to sit with
 before writing one short first-person narrative.
 
 Dreams are stored as canonical nodes with `type: dream`, explicit source-node
-links, and `emotional_flavor: dreamlike`. They are permanently excluded from
+links, and `emotional_flavour: dreamlike`. They are permanently excluded from
 default RAG and can never be promoted as factual memories by automated
 processes.
 

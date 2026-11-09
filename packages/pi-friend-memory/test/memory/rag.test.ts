@@ -42,7 +42,7 @@ function makeNode(options: {
       use_count: 0,
       decay_weight: options.decayWeight,
       status: options.status ?? "active",
-      emotional_flavor: "neutral",
+      emotional_flavour: "neutral",
       tags: options.tags ?? [],
       supersedes: [],
       superseded_by:

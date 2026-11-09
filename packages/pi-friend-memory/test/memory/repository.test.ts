@@ -44,7 +44,7 @@ function makeNode(options: {
       use_count: 0,
       decay_weight: status === "superseded" ? 0 : 1,
       status,
-      emotional_flavor: "warm",
+      emotional_flavour: "warm",
       tags: ["repository"],
       supersedes: [],
       superseded_by: options.supersededBy ?? "",

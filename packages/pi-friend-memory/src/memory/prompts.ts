@@ -25,7 +25,7 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "Ignore transient tasks, plans, and content that should not persist.",
   "Use the actual speaker names present in the transcript.",
   "A name tag at the start or end of a line (`\\>>Sam:`, `<Sam>`, `Sam>`, `[Sam]`, `-Sam`) names its speaker; the tag is attribution, not part of what was said.",
-  "`emotional_flavor` is free text, not the literal `neutral`: a short phrase for the tone of the memory, such as warm, matter-of-fact, playful, frustrated, eager, introspective, nostalgic, anxious, triumphant, venting, curious, vulnerable, prickly, sore, or funny. Use `neutral` only when the memory genuinely has no tone.",
+  "`emotional_flavour` is free text, not the literal `neutral`: a short phrase for the tone of the memory, such as warm, matter-of-fact, playful, frustrated, eager, introspective, nostalgic, anxious, triumphant, venting, curious, vulnerable, prickly, sore, or funny. Use `neutral` only when the memory genuinely has no tone.",
   "A candidate may name more than one speaker, and more than one agent, when the exchange involved several.",
   "`speaker` names people and other non-AI participants; `agents` names AI agents, including yourself.",
   "Never use generic labels such as USER, ASSISTANT, or system as speaker names.",

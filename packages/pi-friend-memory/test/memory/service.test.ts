@@ -56,7 +56,7 @@ test("add creates an active node with schema defaults", async () => {
     assert.equal(node.frontMatter.last_used, FIXED_TIME.toISOString());
     assert.equal(node.frontMatter.status, "active");
     assert.equal(node.frontMatter.decay_weight, 1);
-    assert.equal(node.frontMatter.emotional_flavor, "neutral");
+    assert.equal(node.frontMatter.emotional_flavour, "neutral");
     assert.deepEqual(await service.read(node.slug), node);
   });
 });

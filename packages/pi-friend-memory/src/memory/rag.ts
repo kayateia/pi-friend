@@ -371,7 +371,7 @@ function formatMemoryNode(
     const keywords =
       node.frontMatter.tags.length > 0
         ? node.frontMatter.tags.slice(0, 5).join(", ")
-        : node.frontMatter.emotional_flavor || "no keywords";
+        : node.frontMatter.emotional_flavour || "no keywords";
     return [
       `- see also: ${node.frontMatter.title} — ${keywords} (${link})${
         attribution === undefined ? "" : ` · ${ATTRIBUTION_LABEL.toLowerCase()} ${attribution}`

@@ -53,6 +53,8 @@ import {
   resolveOpenRouterApiKey,
 } from "./src/memory/embedding.ts";
 import { ExternalIndexManager } from "./src/memory/external-index-manager.ts";
+import { runPendingMigrations } from "./src/memory/migrations.ts";
+import type { MemoryStore } from "./src/memory/store.ts";
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
 import type { RagRetrievalDiagnostics } from "./src/memory/rag.ts";
@@ -189,7 +191,7 @@ export default async function registerPiFriend(
           body: draft.body,
           speaker: draft.speaker,
           agents: draft.agents,
-          emotionalFlavor: draft.emotionalFlavor,
+          emotionalFlavour: draft.emotionalFlavour,
           tags: draft.tags,
           links: draft.links,
           source:
@@ -337,6 +339,11 @@ export default async function registerPiFriend(
       externalIndexManager = undefined;
 
       const repository = await MemoryNodeRepository.open();
+      // Before anything parses a node. The spelling change is a hard failure on
+      // either side of the rename, and this is the one moment where nothing has
+      // read the store yet; a migration that ran later would be competing with
+      // the error it exists to prevent.
+      await reportMigrations(repository.store, ctx);
       injectionConfig = repository.store.config.injection;
       queryPrefixes = compileQueryPrefixes(
         repository.store.config.queryPrefixes.patterns,
@@ -612,8 +619,79 @@ function createSemanticSearch(
   }
 }
 
-/** Emits opt-in diagnostics for the retrieval and injection pipeline. */
-function debugRag(label: string, value: Record<string, unknown>): void {
+/**
+ * Runs pending store migrations and says what happened.
+ *
+ * Rewriting the memory store is not something to do quietly: the message names
+ * how many files changed and where the pre-migration copy is. A migration that
+ * nobody notices is only slightly better than one that fails.
+ */
+async function reportMigrations(
+  store: MemoryStore,
+  ctx: ExtensionContext,
+): Promise<void> {
+  const notify = (message: string, level: "info" | "warning" | "error") => {
+    if (ctx.hasUI) {
+      ctx.ui.notify(message, level);
+    } else {
+      console.error(message);
+    }
+  };
+
+  let outcome;
+  try {
+    outcome = await runPendingMigrations(store);
+  } catch (error) {
+    logError("memory migration", error);
+    notify(
+      `pi-friend memory migration failed: ${formatErrorChain(error)}`,
+      "error",
+    );
+    return;
+  }
+  if (outcome === null) {
+    return;
+  }
+
+  const skipped = outcome.skipped.length;
+  const skippedNote =
+    skipped === 0
+      ? ""
+      : ` ${skipped} file${skipped === 1 ? "" : "s"} could not be parsed and ${
+          skipped === 1 ? "was" : "were"
+        } left untouched (${outcome.skipped
+          .slice(0, 3)
+          .map((entry) => entry.path)
+          .join(", ")}${skipped > 3 ? ", …" : ""}).`;
+
+  if (outcome.status === "applied") {
+    if (outcome.changed.length === 0 && skipped === 0) {
+      return;
+    }
+    notify(
+      `pi-friend memory: renamed emotional_flavor to emotional_flavour in ${outcome.changed.length} of ${outcome.scanned} files. A copy from before the migration is at ${outcome.backupPath ?? "(unknown)"}.${skippedNote}`,
+      skipped === 0 ? "info" : "warning",
+    );
+    return;
+  }
+
+  if (outcome.status === "retired-backup") {
+    notify(
+      "pi-friend memory: the pre-migration copy was removed after a clean check of the store.",
+      "info",
+    );
+    return;
+  }
+
+  if (outcome.status === "already-applied" && skipped > 0) {
+    notify(
+      `pi-friend memory: ${skipped} stored file${skipped === 1 ? "" : "s"} could not be parsed, so the pre-migration copy at ${outcome.backupPath ?? "(unknown)"} has been kept.${skippedNote}`,
+      "warning",
+    );
+  }
+}
+
+/** Emits opt-in diagnostics for the retrieval and injection pipeline. */function debugRag(label: string, value: Record<string, unknown>): void {
   debugLog(`rag ${label}`, value);
 }
 

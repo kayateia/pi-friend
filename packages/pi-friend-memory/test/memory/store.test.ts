@@ -123,7 +123,7 @@ test("a preimage of a node never appears in the search index", async () => {
         "use_count: 0",
         "decay_weight: 1",
         "status: active",
-        "emotional_flavor: neutral",
+        "emotional_flavour: neutral",
         "tags: []",
         "supersedes: []",
         "superseded_by: \"\"",

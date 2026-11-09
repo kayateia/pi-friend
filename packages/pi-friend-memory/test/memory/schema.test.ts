@@ -32,7 +32,7 @@ last_used: 2026-10-18T10:00:00Z
 use_count: 2
 decay_weight: 0.75
 status: active
-emotional_flavor: warm
+emotional_flavour: warm
 tags:
   - friendship
 supersedes: []
@@ -392,4 +392,18 @@ test("serializer rejects invalid programmatic nodes", () => {
   node.frontMatter.title = "";
 
   assert.throws(() => serializeMemoryNode(node), MemorySchemaError);
+});
+
+test("the pre-rename flavour key is refused with a signpost, not silently accepted", () => {
+  assert.throws(
+    () =>
+      parseMemoryNode(
+        VALID_FRONT_MATTER.replace(
+          "emotional_flavour: warm",
+          "emotional_flavor: warm",
+        ).concat("\nbody\n"),
+        "warm-memory",
+      ),
+    /Unknown front-matter field "emotional_flavor".*re-run scripts\/migrate-flavour\.ts/u,
+  );
 });

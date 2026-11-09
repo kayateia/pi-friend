@@ -429,7 +429,7 @@ test("a request above the result cap says how many were returned", async () => {
   assert.doesNotMatch(quiet.content[0]?.text ?? "", /Showing/u);
 });
 
-test("the tools that can set emotional_flavor offer examples of it", () => {
+test("the tools that can set emotional_flavour offer examples of it", () => {
   const definitions = new Map<string, unknown>();
   const pi = {
     registerTool(definition: { name: string }) {
@@ -446,7 +446,7 @@ test("the tools that can set emotional_flavor offer examples of it", () => {
       parameters: { properties: Record<string, unknown> };
     };
     const schema = JSON.stringify(
-      definition.parameters.properties.emotional_flavor ?? {},
+      definition.parameters.properties.emotional_flavour ?? {},
     );
     assert.match(schema, /Free-form/u);
     for (const example of [
