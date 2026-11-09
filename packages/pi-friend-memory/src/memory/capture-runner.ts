@@ -22,6 +22,11 @@ import {
   resolveSystemPrompt,
 } from "./prompts.ts";
 import { resolveConfiguredModel, runNestedModel } from "./model-call.ts";
+import { MemorySchemaError } from "./schema.ts";
+import {
+  MemoryServiceError,
+  type MemoryNodeService,
+} from "./service.ts";
 
 const CAPTURE_TIMEOUT_MS = 30_000;
 
@@ -103,4 +108,76 @@ export async function runCaptureModel(
     }
     throw error;
   }
+}
+
+/** What became of one capture pass's drafts. */
+export interface StageCaptureResult {
+  /** Drafts written to staging, including ones already present verbatim. */
+  stored: number;
+  /** Drafts the store refused, and why. */
+  rejected: Array<{ title: string; error: string }>;
+}
+
+/**
+ * Stages a capture pass's drafts, letting one rejection cost one candidate.
+ *
+ * A pass that stops at the first refusal leaves the earlier drafts staged and the
+ * cursor where it was, so the next pass reads the same window again and stages
+ * near-duplicates of the ones that worked. Two kinds of failure, two answers:
+ *
+ * - A draft the schema or the service refuses is refused identically next time.
+ *   Skipping it and finishing the pass lets the cursor advance, which is what
+ *   stops the window being re-read; the candidate is reported instead of stored.
+ * - Anything else — a write failure, an abort, a full disk — might succeed on a
+ *   retry, so it propagates and leaves the cursor alone. Advancing past a draft
+ *   that was never really rejected would lose it.
+ */
+export async function stageCaptureDrafts(
+  service: MemoryNodeService,
+  drafts: readonly CaptureCandidateDraft[],
+  sessionId: string,
+  reportWarning: (message: string) => void,
+): Promise<StageCaptureResult> {
+  let stored = 0;
+  const rejected: Array<{ title: string; error: string }> = [];
+
+  for (const draft of drafts) {
+    try {
+      await service.stageCandidate({
+        title: draft.title,
+        type: draft.type,
+        body: draft.body,
+        speaker: draft.speaker,
+        agents: draft.agents,
+        emotionalFlavour: draft.emotionalFlavour,
+        tags: draft.tags,
+        links: draft.links,
+        source: draft.source ?? `session:${sessionId}`,
+      });
+      stored += 1;
+    } catch (error) {
+      if (!isRejectedDraft(error)) {
+        throw error;
+      }
+      rejected.push({
+        title: draft.title,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (rejected.length > 0) {
+    reportWarning(
+      `pi-friend auto-capture: could not store ${rejected.length} of ${drafts.length} candidates, and skipped them so the same window is not read again: ${rejected
+        .map((entry) => `${entry.title} (${entry.error})`)
+        .join("; ")}.`,
+    );
+  }
+
+  return { stored, rejected };
+}
+
+/** Returns whether the same draft would be refused again on a retry. */
+function isRejectedDraft(error: unknown): boolean {
+  return error instanceof MemorySchemaError || error instanceof MemoryServiceError;
 }

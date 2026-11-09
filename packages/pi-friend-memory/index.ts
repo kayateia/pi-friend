@@ -41,7 +41,10 @@ import {
   CaptureResponseError,
 } from "./src/memory/capture.ts";
 import { compileQueryPrefixes } from "./src/memory/query-prefixes.ts";
-import { runCaptureModel } from "./src/memory/capture-runner.ts";
+import {
+  runCaptureModel,
+  stageCaptureDrafts,
+} from "./src/memory/capture-runner.ts";
 import { createMergeWriter } from "./src/memory/merge-writer.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
 import {
@@ -185,21 +188,12 @@ export default async function registerPiFriend(
         { names },
         (message) => reportCaptureWarning(ctx, message),
       );
-      for (const draft of drafts) {
-        await service.stageCandidate({
-          title: draft.title,
-          type: draft.type,
-          body: draft.body,
-          speaker: draft.speaker,
-          agents: draft.agents,
-          emotionalFlavour: draft.emotionalFlavour,
-          tags: draft.tags,
-          links: draft.links,
-          source:
-            draft.source ??
-            `session:${ctx.sessionManager.getSessionId()}`,
-        });
-      }
+      await stageCaptureDrafts(
+        service,
+        drafts,
+        ctx.sessionManager.getSessionId(),
+        (message) => reportCaptureWarning(ctx, message),
+      );
 
       const finalEntry = branch[branch.length - 1];
       if (finalEntry) {

@@ -122,3 +122,89 @@ test("a parseable reply writes no rejection entry", async () => {
     await assert.rejects(() => readFile(logPath, "utf8"), /ENOENT/u);
   });
 });
+
+test("a refused draft costs one candidate, and the rest of the pass completes", async () => {
+  const { MemoryNodeRepository } = await import("../../src/memory/repository.ts");
+  const { MemoryNodeService } = await import("../../src/memory/service.ts");
+  const { stageCaptureDrafts } = await import("../../src/memory/capture-runner.ts");
+  const { withTempDir } = await import("../helpers.ts");
+
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    const warnings: string[] = [];
+
+    // The second draft's body is empty, which the service refuses; that refusal
+    // is deterministic, so skipping it lets the pass finish and the cursor
+    // advance — the alternative is re-reading the window and re-staging the
+    // first draft as a near-duplicate.
+    const result = await stageCaptureDrafts(
+      service,
+      [
+        {
+          title: "Kettle",
+          type: "fact",
+          body: "The kettle lives on the second shelf.",
+          speaker: [{ name: "Aisling", confident: true }],
+        },
+        {
+          title: "Empty",
+          type: "fact",
+          body: "   ",
+          speaker: [],
+        },
+        {
+          title: "Lantern",
+          type: "fact",
+          body: "The lantern hangs by the door.",
+          speaker: [],
+        },
+      ],
+      "session-test",
+      (message) => warnings.push(message),
+    );
+
+    assert.equal(result.stored, 2);
+    assert.deepEqual(result.rejected.map((entry) => entry.title), ["Empty"]);
+    assert.match(warnings[0] ?? "", /could not store 1 of 3 candidates/u);
+    assert.match(warnings[0] ?? "", /Empty/u);
+
+    const staged = (await repository.list("staging")).map(
+      (node) => node.frontMatter.title,
+    );
+    assert.deepEqual(staged.sort(), ["Kettle", "Lantern"]);
+  });
+});
+
+test("an environmental failure still aborts the pass", async () => {
+  const { stageCaptureDrafts } = await import("../../src/memory/capture-runner.ts");
+
+  // A write failure is not a rejection: the draft was never judged, and
+  // advancing past it would lose it silently.
+  const service = {
+    async stageCandidate() {
+      throw new TypeError("disk went away");
+    },
+  } as unknown as Parameters<typeof stageCaptureDrafts>[0];
+
+  await assert.rejects(
+    () =>
+      stageCaptureDrafts(
+        service,
+        [
+          {
+            title: "Kettle",
+            type: "fact",
+            body: "Body.",
+            speaker: [],
+          },
+        ],
+        "session-test",
+        () => undefined,
+      ),
+    /disk went away/u,
+  );
+});
