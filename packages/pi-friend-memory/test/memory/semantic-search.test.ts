@@ -35,7 +35,7 @@ class SemanticTestProvider implements EmbeddingProvider {
   }
 }
 
-test("semantic search embeds documents and reports access-log tier", async () => {
+test("semantic search embeds documents and records the retrieval mode", async () => {
   await withTempDir(async (agentDir) => {
     const repository = await MemoryNodeRepository.open({
       agentDir,
@@ -78,7 +78,7 @@ test("semantic search embeds documents and reports access-log tier", async () =>
       assert.ok((results[0]?.score ?? 0) > (results[1]?.score ?? 0));
 
       const accessLog = await repository.store.readTextFile("access-log");
-      assert.match(accessLog, /"tier":"semantic"/);
+      assert.match(accessLog, /"mode":"semantic"/);
     } finally {
       index.close();
     }

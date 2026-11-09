@@ -160,11 +160,11 @@ test("search applies limits and records one access-log entry per result", async 
     for (const line of lines) {
       const entry = JSON.parse(line) as {
         source: string;
-        tier: string;
+        mode: string;
         query: string;
       };
       assert.equal(entry.source, "tool");
-      assert.equal(entry.tier, "keyword");
+      assert.equal(entry.mode, "keyword");
       assert.equal(entry.query, "comet");
     }
   });

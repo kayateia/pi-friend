@@ -46,7 +46,7 @@ test("the access log remains append-only", async () => {
       timestamp: "2026-10-19T20:00:00.000Z",
       source: "rag",
       slug: "topic",
-      tier: "fresh",
+      mode: "hybrid",
     });
 
     const accessLines = (await store.readTextFile("access-log"))
@@ -57,7 +57,7 @@ test("the access log remains append-only", async () => {
       timestamp: "2026-10-19T20:00:00.000Z",
       source: "rag",
       slug: "topic",
-      tier: "fresh",
+      mode: "hybrid",
     });
 
     await assert.rejects(
