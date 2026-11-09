@@ -428,3 +428,37 @@ test("a request above the result cap says how many were returned", async () => {
   const quiet = await definition.execute("call", { query: "kettle", limit: 5 });
   assert.doesNotMatch(quiet.content[0]?.text ?? "", /Showing/u);
 });
+
+test("the tools that can set emotional_flavor offer examples of it", () => {
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  registerMemoryTools(pi, () => undefined);
+
+  // The field is free text, so the only thing that steers it is the vocabulary
+  // a caller is shown. A description without examples is how the store ended up
+  // almost entirely `neutral`.
+  for (const name of ["memory_add", "memory_edit"]) {
+    const definition = definitions.get(name) as {
+      parameters: { properties: Record<string, unknown> };
+    };
+    const schema = JSON.stringify(
+      definition.parameters.properties.emotional_flavor ?? {},
+    );
+    assert.match(schema, /Free-form/u);
+    for (const example of [
+      "warm",
+      "matter-of-fact",
+      "playful",
+      "introspective",
+      "prickly",
+      "sore",
+      "funny",
+    ]) {
+      assert.match(schema, new RegExp(example, "u"), `${name} lists ${example}`);
+    }
+  }
+});
