@@ -41,10 +41,13 @@ export function kindsForCorpus(
   }
 }
 
-/** Input for a keyword search over indexed Markdown files. */
-export interface MemorySearchOptions {
-  query: string;
-  mode?: MemorySearchMode;
+/**
+ * Restrictions on which files a search or a listing may consider.
+ *
+ * They are metadata conditions, evaluated before any text is compared, so the
+ * query only ever ranks what the caller asked to look at.
+ */
+export interface MemoryFilterOptions {
   type?: MemoryType;
   kind?: IndexedMarkdownFile["kind"];
   kinds?: readonly MemoryFileKind[];
@@ -52,6 +55,21 @@ export interface MemorySearchOptions {
   corpus?: MemorySearchCorpus;
   status?: MemoryStatus;
   statuses?: readonly MemoryStatus[];
+  /**
+   * Inclusive lower bound on the file's modification date.
+   *
+   * A UTC ISO instant, resolved from whatever the caller supplied: a memory is
+   * dated by `edited ?? created`, a document by its file modification time.
+   */
+  since?: string;
+  /** Inclusive upper bound, in the same form. */
+  until?: string;
+}
+
+/** Input for a keyword search over indexed Markdown files. */
+export interface MemorySearchOptions extends MemoryFilterOptions {
+  query: string;
+  mode?: MemorySearchMode;
   limit?: number;
   /** Minimum meaningful token overlap when no phrase match occurs. */
   minTokenMatches?: number;
@@ -103,7 +121,13 @@ export type SearchField =
   | "semantic";
 
 const DEFAULT_LIMIT = 5;
-const MAX_LIMIT = 25;
+/**
+ * The most results a search or listing returns.
+ *
+ * Exported because callers that clamp a request owe the caller a line saying
+ * so: an answer that is silently shorter than the question reads as complete.
+ */
+export const MAX_LIMIT = 25;
 
 /** Searches one in-memory index using deterministic keyword ranking. */
 export function searchIndexedFiles(
@@ -120,26 +144,7 @@ export function searchIndexedFiles(
   const results: MemorySearchResult[] = [];
 
   for (const file of files) {
-    if (options.type !== undefined && file.type !== options.type) {
-      continue;
-    }
-    if (options.kind !== undefined && file.kind !== options.kind) {
-      continue;
-    }
-    if (
-      options.kinds !== undefined &&
-      !options.kinds.includes(file.kind)
-    ) {
-      continue;
-    }
-    if (options.status !== undefined && file.status !== options.status) {
-      continue;
-    }
-    if (
-      options.statuses !== undefined &&
-      (file.status === undefined ||
-        !options.statuses.includes(file.status))
-    ) {
+    if (!matchesSearchFilters(file, options)) {
       continue;
     }
 
@@ -155,30 +160,11 @@ export function searchIndexedFiles(
     }
 
     results.push({
-      relativePath: file.relativePath,
-      kind: file.kind,
-      ...(file.slug === undefined ? {} : { slug: file.slug }),
-      ...(file.title === undefined ? {} : { title: file.title }),
-      ...(file.type === undefined ? {} : { type: file.type }),
-      ...(file.status === undefined ? {} : { status: file.status }),
-      ...(file.decayWeight === undefined
-        ? {}
-        : { decayWeight: file.decayWeight }),
-      ...(file.speaker === undefined ? {} : { speaker: file.speaker }),
-      ...(file.modifiedAt === undefined
-        ? {}
-        : { modifiedAt: file.modifiedAt }),
-      ...(file.provenance === undefined
-        ? {}
-        : { provenance: file.provenance }),
-      snippet: makeSnippet(file, query, queryTokens),
+      ...baseResult(file, makeSnippet(file, query, queryTokens)),
       score: score.value,
       matchedFields: score.fields,
       keywordScore: score.value,
       keywordContributions: score.contributions,
-      ...(file.schemaError === undefined
-        ? {}
-        : { schemaError: file.schemaError }),
     });
   }
 
@@ -201,6 +187,89 @@ export function searchIndexedFiles(
 }
 
 /** Explains the retrieval signals behind one model-facing search result. */
+/**
+ * Returns whether an indexed file satisfies the metadata filters.
+ *
+ * One predicate, used by keyword search, by semantic search as a guard, and by
+ * the listing path, so the three cannot disagree about what is eligible.
+ */
+export function matchesSearchFilters(
+  file: IndexedMarkdownFile,
+  options: MemoryFilterOptions,
+): boolean {
+  if (options.type !== undefined && file.type !== options.type) {
+    return false;
+  }
+  if (options.kind !== undefined && file.kind !== options.kind) {
+    return false;
+  }
+  if (options.kinds !== undefined && !options.kinds.includes(file.kind)) {
+    return false;
+  }
+  if (options.status !== undefined && file.status !== options.status) {
+    return false;
+  }
+  if (
+    options.statuses !== undefined &&
+    (file.status === undefined || !options.statuses.includes(file.status))
+  ) {
+    return false;
+  }
+  return isWithinDateWindow(file, options.since, options.until);
+}
+
+/**
+ * Returns whether a file's date falls inside an inclusive window.
+ *
+ * A file with no date cannot satisfy a bound: a filter is a requirement, and
+ * answering "nothing is known about when this changed" with a result would
+ * misrepresent what was asked. With no bound at all, it is only ever excluded
+ * from ordering, not from the results.
+ */
+export function isWithinDateWindow(
+  file: IndexedMarkdownFile,
+  since: string | undefined,
+  until: string | undefined,
+): boolean {
+  if (since === undefined && until === undefined) {
+    return true;
+  }
+  const modified = file.modifiedAt;
+  if (modified === undefined) {
+    return false;
+  }
+  if (since !== undefined && modified < since) {
+    return false;
+  }
+  if (until !== undefined && modified > until) {
+    return false;
+  }
+  return true;
+}
+
+/** Builds the fields every result shares, independent of how it was found. */
+function baseResult(
+  file: IndexedMarkdownFile,
+  snippet: string,
+): Omit<MemorySearchResult, "score" | "matchedFields"> {
+  return {
+    relativePath: file.relativePath,
+    kind: file.kind,
+    ...(file.slug === undefined ? {} : { slug: file.slug }),
+    ...(file.title === undefined ? {} : { title: file.title }),
+    ...(file.type === undefined ? {} : { type: file.type }),
+    ...(file.status === undefined ? {} : { status: file.status }),
+    ...(file.decayWeight === undefined
+      ? {}
+      : { decayWeight: file.decayWeight }),
+    ...(file.speaker === undefined ? {} : { speaker: file.speaker }),
+    ...(file.modifiedAt === undefined ? {} : { modifiedAt: file.modifiedAt }),
+    ...(file.provenance === undefined ? {} : { provenance: file.provenance }),
+    snippet,
+    ...(file.schemaError === undefined ? {} : { schemaError: file.schemaError }),
+  };
+}
+
 export function formatRetrievalExplanation(
   result: MemorySearchResult,
 ): string {
@@ -223,6 +292,7 @@ export function formatRetrievalExplanation(
   ) {
     details.push("semantic match");
   }
+
   details.push(`score ${result.score.toFixed(4)}`);
 
   return `Why recalled: ${details.join(" · ")}`;

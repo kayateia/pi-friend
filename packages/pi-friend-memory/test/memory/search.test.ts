@@ -447,3 +447,67 @@ test("a document's path still scores; a memory's path does not", () => {
     [["notes/2026-11-02.md", ["path"]]],
   );
 });
+
+/** Builds an indexed file with the fields these tests care about. */
+function datedFile(
+  relativePath: string,
+  modifiedAt: string | undefined,
+  extra: Partial<{
+    kind: "node" | "document";
+    type: "fact" | "event";
+    status: "active" | "candidate";
+    title: string;
+    body: string;
+  }> = {},
+) {
+  const kind = extra.kind ?? "node";
+  return {
+    relativePath,
+    absolutePath: `/tmp/${relativePath}`,
+    storageKind: kind,
+    kind,
+    ...(kind === "node"
+      ? { slug: relativePath.replace(/^nodes\//u, "").replace(/\.md$/u, "") }
+      : {}),
+    title: extra.title ?? "Kettle",
+    ...(kind === "node" ? { type: extra.type ?? "fact" } : {}),
+    ...(kind === "node" ? { status: extra.status ?? "active" } : {}),
+    decayWeight: 1,
+    tags: [],
+    body: extra.body ?? "The kettle lives on the second shelf.",
+    ...(modifiedAt === undefined ? {} : { modifiedAt }),
+  };
+}
+
+test("a keyword search honours an inclusive modification window", () => {
+  const files = [
+    datedFile("nodes/old.md", "2026-01-01T00:00:00.000Z"),
+    datedFile("nodes/edge.md", "2026-11-01T00:00:00.000Z"),
+    datedFile("nodes/new.md", "2026-11-08T00:00:00.000Z"),
+    datedFile("nodes/undated.md", undefined),
+  ];
+
+  const window = searchIndexedFiles(files, {
+    query: "kettle",
+    since: "2026-11-01T00:00:00.000Z",
+    until: "2026-11-08T00:00:00.000Z",
+  });
+  // Both bounds are inclusive, and an entry with no date cannot satisfy either.
+  assert.deepEqual(
+    window.map((result) => result.relativePath),
+    ["nodes/edge.md", "nodes/new.md"],
+  );
+
+  const openEnded = searchIndexedFiles(files, {
+    query: "kettle",
+    since: "2026-11-01T00:00:00.000Z",
+  });
+  assert.deepEqual(
+    openEnded.map((result) => result.relativePath),
+    ["nodes/edge.md", "nodes/new.md"],
+  );
+
+  // Without a window, the undated entry is a result like any other.
+  const unfiltered = searchIndexedFiles(files, { query: "kettle" });
+  assert.equal(unfiltered.length, 4);
+});
