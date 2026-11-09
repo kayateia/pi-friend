@@ -10,7 +10,13 @@ import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { logError } from "../debug/log.ts";
-import { parseMemoryNode } from "./schema.ts";
+import {
+  listStoredMemoryFiles,
+  parseStoredMemoryFile,
+  slugForStoredPath,
+  STORED_MEMORY_DIRECTORIES,
+  validateMemoryFiles,
+} from "./validation.ts";
 import type { MemoryStore } from "./store.ts";
 
 /** Bookkeeping file recording which migrations this store has had. */
@@ -26,9 +32,6 @@ export const FLAVOUR_MIGRATION_ID = "emotional-flavour-rename";
 const LEGACY_FLAVOUR_KEY = "emotional_flavor";
 /** Current front-matter spelling. */
 const CURRENT_FLAVOUR_KEY = "emotional_flavour";
-
-/** Areas a migration rewrites: live memories, and the versions kept of them. */
-const MIGRATED_DIRECTORIES = ["nodes", "staging", "history"] as const;
 
 /** What the on-disk migration record holds. */
 interface MigrationState {
@@ -112,13 +115,13 @@ async function retireFlavourBackupIfClean(
     return null;
   }
 
-  const { scanned, skipped } = await scanStore(store, false);
-  if (skipped.length > 0) {
+  const report = await validateMemoryFiles(store);
+  if (report.failures.length > 0) {
     return {
       status: "already-applied",
-      scanned,
+      scanned: report.scanned,
       changed: [],
-      skipped,
+      skipped: report.failures,
       backupPath,
     };
   }
@@ -126,7 +129,13 @@ async function retireFlavourBackupIfClean(
   await rm(backupPath, { recursive: true, force: true });
   delete state.backups[FLAVOUR_MIGRATION_ID];
   await writeMigrationState(statePath, state);
-  return { status: "retired-backup", scanned, changed: [], skipped: [], backupPath };
+  return {
+    status: "retired-backup",
+    scanned: report.scanned,
+    changed: [],
+    skipped: [],
+    backupPath,
+  };
 }
 
 /** Rewrites the legacy flavour spelling across the store, once. */
@@ -205,8 +214,8 @@ async function scanStore(
   const pending: PendingRewrite[] = [];
   const skipped: Array<{ path: string; error: string }> = [];
 
-  for (const directory of MIGRATED_DIRECTORIES) {
-    for (const relativePath of await listMarkdownFiles(store, directory)) {
+  for (const directory of STORED_MEMORY_DIRECTORIES) {
+    for (const relativePath of await listStoredMemoryFiles(store, directory)) {
       scanned += 1;
       let text: string;
       try {
@@ -221,7 +230,7 @@ async function scanStore(
         // still have something to rename. Skipping the rest would make this
         // check vacuous, which is how it was written the first time.
         try {
-          parseMigratedFile(text, relativePath, directory);
+          parseStoredMemoryFile(text, relativePath, directory);
         } catch (error) {
           skipped.push({ path: relativePath, error: formatError(error) });
         }
@@ -234,7 +243,7 @@ async function scanStore(
       }
 
       try {
-        parseMigratedFile(rewritten, relativePath, directory);
+        parseStoredMemoryFile(rewritten, relativePath, directory);
       } catch (error) {
         skipped.push({ path: relativePath, error: formatError(error) });
         continue;
@@ -276,50 +285,6 @@ export function renameFlavourKey(text: string): string | undefined {
     }
   }
   return changed ? lines.join("\n") : undefined;
-}
-
-/** Parses a rewritten file the way its area is normally parsed. */
-function parseMigratedFile(
-  text: string,
-  relativePath: string,
-  directory: (typeof MIGRATED_DIRECTORIES)[number],
-): void {
-  const slug = slugForPath(relativePath);
-  if (directory === "history") {
-    // History holds a node in whatever state it was in, including `candidate`,
-    // so it is parsed without the live areas' status rules.
-    parseMemoryNode(text, slug, undefined, { allowHistoryFields: true });
-    return;
-  }
-  parseMemoryNode(text, slug);
-}
-
-/** Lists every Markdown file under one store directory, recursively. */
-async function listMarkdownFiles(
-  store: MemoryStore,
-  directory: string,
-): Promise<string[]> {
-  const files = await store.listDirectoryMarkdown(directory);
-  const nested = await store.listDirectories(directory);
-  for (const child of nested) {
-    files.push(...(await listMarkdownFiles(store, child)));
-  }
-  return files;
-}
-
-/**
- * Derives the slug a stored file belongs to.
- *
- * History versions are named after the moment they stopped being current, so the
- * slug comes from the directory above them; a deleted or dropped entry keeps the
- * slug as its file name.
- */
-function slugForPath(relativePath: string): string {
-  const segments = relativePath.split("/");
-  const fileName = segments.at(-1) ?? "";
-  const stem = fileName.endsWith(".md") ? fileName.slice(0, -3) : fileName;
-  const versioned = segments.length >= 4 && segments[0] === "history";
-  return versioned ? (segments.at(-2) ?? stem) : stem;
 }
 
 /** Reads the migration record, treating absence or damage as "nothing applied". */

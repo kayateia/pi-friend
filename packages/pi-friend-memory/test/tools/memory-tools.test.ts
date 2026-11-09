@@ -462,3 +462,73 @@ test("the tools that can set emotional_flavour offer examples of it", () => {
     }
   }
 });
+
+test("the validate command names the files that do not parse", async () => {
+  const { MemoryNodeRepository } = await import("../../src/memory/repository.ts");
+  const { withTempDir } = await import("../helpers.ts");
+
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    await repository.store.writeTextFile(
+      "nodes/broken.md",
+      `---
+title: broken
+type: recollection
+speaker: []
+agents: []
+created: 2026-10-01T00:00:00Z
+last_used: 2026-10-01T00:00:00Z
+use_count: 0
+decay_weight: 1
+status: active
+emotional_flavour: warm
+tags: []
+supersedes: []
+superseded_by: ""
+links: []
+source: ""
+---
+
+Body.
+`,
+    );
+
+    const commands = new Map<
+      string,
+      { handler: (args: string, ctx: unknown) => Promise<void> }
+    >();
+    const pi = {
+      registerCommand(
+        name: string,
+        definition: { handler: (args: string, ctx: unknown) => Promise<void> },
+      ) {
+        commands.set(name, definition);
+      },
+    } as unknown as ExtensionAPI;
+
+    // Only the store is needed; the command reads files, not memory operations.
+    registerMemoryCommands(pi, () => undefined, "", () => ({
+      store: repository.store,
+    }) as unknown as MemoryNodeService);
+
+    const command = commands.get("memory-validate");
+    assert.ok(command);
+
+    const notices: Array<{ message: string; level: string }> = [];
+    const ctx = {
+      ui: {
+        notify: (message: string, level: string) =>
+          notices.push({ message, level }),
+      },
+    };
+
+    await command.handler("", ctx);
+    assert.equal(notices[0]?.level, "warning");
+    assert.match(notices[0]?.message ?? "", /1 file checked, 1 could not be parsed/u);
+    assert.match(notices[0]?.message ?? "", /nodes\/broken\.md/u);
+    assert.match(notices[0]?.message ?? "", /type/u);
+  });
+});
