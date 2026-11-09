@@ -42,6 +42,7 @@ import {
 } from "./src/memory/capture.ts";
 import { compileQueryPrefixes } from "./src/memory/query-prefixes.ts";
 import {
+  createCaptureRepairer,
   runCaptureModel,
   stageCaptureDrafts,
 } from "./src/memory/capture-runner.ts";
@@ -188,12 +189,22 @@ export default async function registerPiFriend(
         { names },
         (message) => reportCaptureWarning(ctx, message),
       );
-      await stageCaptureDrafts(
+      const staged = await stageCaptureDrafts(
         service,
         drafts,
         ctx.sessionManager.getSessionId(),
-        (message) => reportCaptureWarning(ctx, message),
+        createCaptureRepairer(ctx, config, (message) =>
+          reportCaptureWarning(ctx, message),
+        ),
       );
+      if (staged.rejected.length > 0) {
+        reportCaptureWarning(
+          ctx,
+          `pi-friend auto-capture: could not store ${staged.rejected.length} of ${drafts.length} candidates, even after asking for a rewrite, and skipped them so the same window is not read again: ${staged.rejected
+            .map((entry) => `${entry.draft.title} (${entry.error})`)
+            .join("; ")}.`,
+        );
+      }
 
       const finalEntry = branch[branch.length - 1];
       if (finalEntry) {

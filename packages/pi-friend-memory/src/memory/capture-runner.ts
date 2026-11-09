@@ -18,6 +18,7 @@ import {
   type CaptureSpeakerHint,
 } from "./capture.ts";
 import {
+  CAPTURE_REPAIR_SYSTEM_PROMPT,
   CAPTURE_SYSTEM_PROMPT,
   resolveSystemPrompt,
 } from "./prompts.ts";
@@ -110,36 +111,69 @@ export async function runCaptureModel(
   }
 }
 
+/** One draft the store refused, and the message that says why. */
+export interface RejectedDraft {
+  draft: CaptureCandidateDraft;
+  error: string;
+}
+
+/** Rewrites drafts the store refused, given what was wrong with them. */
+export type RepairCaptureDrafts = (
+  rejected: readonly RejectedDraft[],
+) => Promise<readonly CaptureCandidateDraft[]>;
+
 /** What became of one capture pass's drafts. */
 export interface StageCaptureResult {
   /** Drafts written to staging, including ones already present verbatim. */
   stored: number;
-  /** Drafts the store refused, and why. */
-  rejected: Array<{ title: string; error: string }>;
+  /** Drafts still refused after any repair round. */
+  rejected: RejectedDraft[];
 }
 
 /**
- * Stages a capture pass's drafts, letting one rejection cost one candidate.
+ * Stages a capture pass's drafts, letting one refusal cost one candidate.
  *
  * A pass that stops at the first refusal leaves the earlier drafts staged and the
  * cursor where it was, so the next pass reads the same window again and stages
- * near-duplicates of the ones that worked. Two kinds of failure, two answers:
+ * near-duplicates of the ones that worked.
  *
- * - A draft the schema or the service refuses is refused identically next time.
- *   Skipping it and finishing the pass lets the cursor advance, which is what
- *   stops the window being re-read; the candidate is reported instead of stored.
- * - Anything else — a write failure, an abort, a full disk — might succeed on a
- *   retry, so it propagates and leaves the cursor alone. Advancing past a draft
- *   that was never really rejected would lose it.
+ * Two kinds of failure, two answers. A draft the schema or the service refuses is
+ * refused identically on a retry — but its message names the field and the value,
+ * which is exactly the feedback a rewrite needs, so `repair` gets one round to try
+ * again. Anything else (a write failure, an abort, a full disk) might succeed on a
+ * retry, so it propagates and leaves the cursor alone: advancing past a draft that
+ * was never judged would lose it silently.
+ *
+ * One repair round, not a loop. A draft refused twice is a draft that cannot be
+ * saved, and the caller reports it while the cursor moves on.
  */
 export async function stageCaptureDrafts(
   service: MemoryNodeService,
   drafts: readonly CaptureCandidateDraft[],
   sessionId: string,
-  reportWarning: (message: string) => void,
+  repair?: RepairCaptureDrafts,
+): Promise<StageCaptureResult> {
+  const first = await stageOneByOne(service, drafts, sessionId);
+  if (first.rejected.length === 0 || repair === undefined) {
+    return first;
+  }
+
+  const repaired = await repair(first.rejected);
+  if (repaired.length === 0) {
+    return first;
+  }
+  const second = await stageOneByOne(service, repaired, sessionId);
+  return { stored: first.stored + second.stored, rejected: second.rejected };
+}
+
+/** Stages drafts one at a time, collecting refusals rather than stopping. */
+async function stageOneByOne(
+  service: MemoryNodeService,
+  drafts: readonly CaptureCandidateDraft[],
+  sessionId: string,
 ): Promise<StageCaptureResult> {
   let stored = 0;
-  const rejected: Array<{ title: string; error: string }> = [];
+  const rejected: RejectedDraft[] = [];
 
   for (const draft of drafts) {
     try {
@@ -160,18 +194,10 @@ export async function stageCaptureDrafts(
         throw error;
       }
       rejected.push({
-        title: draft.title,
+        draft,
         error: error instanceof Error ? error.message : String(error),
       });
     }
-  }
-
-  if (rejected.length > 0) {
-    reportWarning(
-      `pi-friend auto-capture: could not store ${rejected.length} of ${drafts.length} candidates, and skipped them so the same window is not read again: ${rejected
-        .map((entry) => `${entry.title} (${entry.error})`)
-        .join("; ")}.`,
-    );
   }
 
   return { stored, rejected };
@@ -179,5 +205,69 @@ export async function stageCaptureDrafts(
 
 /** Returns whether the same draft would be refused again on a retry. */
 function isRejectedDraft(error: unknown): boolean {
-  return error instanceof MemorySchemaError || error instanceof MemoryServiceError;
+  return (
+    error instanceof MemorySchemaError || error instanceof MemoryServiceError
+  );
+}
+
+/** Builds the one-round rewrite of drafts the store refused. */
+export function createCaptureRepairer(
+  ctx: ExtensionContext,
+  config: AutoCaptureConfig,
+  reportWarning: (message: string) => void,
+): RepairCaptureDrafts {
+  return async (rejected) => {
+    const model = resolveConfiguredModel(
+      ctx,
+      config.model,
+      "auto_capture.model",
+      reportWarning,
+    );
+    if (!model) {
+      return [];
+    }
+
+    const response = await runNestedModel(ctx, model, {
+      systemPrompt: CAPTURE_REPAIR_SYSTEM_PROMPT,
+      userContent: buildRepairPrompt(rejected),
+      maxTokens: 2_000,
+      timeoutMs: CAPTURE_TIMEOUT_MS,
+      label: "capture repair",
+      reportWarning,
+      ...(config.thinkingLevel === undefined
+        ? {}
+        : { thinkingLevel: config.thinkingLevel }),
+    });
+
+    return parseCaptureResponse(
+      response,
+      rejected.length,
+      undefined,
+      reportWarning,
+    );
+  };
+}
+
+/**
+ * Builds the repair request.
+ *
+ * The drafts and their rejection messages only: the model is fixing a shape, not
+ * reconsidering what was worth remembering, and giving it the transcript again
+ * would invite a second, different set of candidates.
+ */
+export function buildRepairPrompt(rejected: readonly RejectedDraft[]): string {
+  return [
+    "These memory candidates were rejected by the store. Correct each one.",
+    'Use this JSON shape: {"candidates":[{"title":"string","type":"fact|preference|event|person-note","body":"concise Markdown","speaker":[{"name":"string","confident":true,"note":"optional"}],"agents":["string"],"emotional_flavour":"neutral","tags":[],"links":[]}]}',
+    'Return {"candidates":[]} for a candidate you cannot correct.',
+    "",
+    JSON.stringify(
+      rejected.map((entry) => ({
+        rejection: entry.error,
+        candidate: entry.draft,
+      })),
+      null,
+      2,
+    ),
+  ].join("\n");
 }

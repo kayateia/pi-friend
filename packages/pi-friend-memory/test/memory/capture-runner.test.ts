@@ -141,6 +141,14 @@ test("a refused draft costs one candidate, and the rest of the pass completes", 
     // is deterministic, so skipping it lets the pass finish and the cursor
     // advance — the alternative is re-reading the window and re-staging the
     // first draft as a near-duplicate.
+    const repaired = [
+      {
+        title: "Empty",
+        type: "fact" as const,
+        body: "A corrected body.",
+        speaker: [],
+      },
+    ];
     const result = await stageCaptureDrafts(
       service,
       [
@@ -164,18 +172,23 @@ test("a refused draft costs one candidate, and the rest of the pass completes", 
         },
       ],
       "session-test",
-      (message) => warnings.push(message),
+      async (rejected) => {
+        // The refusal message is what the rewrite is given: it names the field
+        // and the value, so a corrected draft is possible without guessing.
+        assert.deepEqual(rejected.map((entry) => entry.draft.title), ["Empty"]);
+        assert.match(rejected[0]?.error ?? "", /body must not be empty/u);
+        return repaired;
+      },
     );
 
-    assert.equal(result.stored, 2);
-    assert.deepEqual(result.rejected.map((entry) => entry.title), ["Empty"]);
-    assert.match(warnings[0] ?? "", /could not store 1 of 3 candidates/u);
-    assert.match(warnings[0] ?? "", /Empty/u);
+    assert.equal(result.stored, 3);
+    assert.deepEqual(result.rejected, []);
+    assert.deepEqual(warnings, []);
 
     const staged = (await repository.list("staging")).map(
       (node) => node.frontMatter.title,
     );
-    assert.deepEqual(staged.sort(), ["Kettle", "Lantern"]);
+    assert.deepEqual(staged.sort(), ["Empty", "Kettle", "Lantern"]);
   });
 });
 
@@ -203,8 +216,47 @@ test("an environmental failure still aborts the pass", async () => {
           },
         ],
         "session-test",
-        () => undefined,
       ),
     /disk went away/u,
   );
+});
+
+test("a refused draft is sent back to the model with the reason, once", async () => {
+  const { buildRepairPrompt, createCaptureRepairer } = await import(
+    "../../src/memory/capture-runner.ts"
+  );
+
+  const draft = {
+    title: "Empty",
+    type: "fact" as const,
+    body: "   ",
+    speaker: [],
+  };
+  const prompt = buildRepairPrompt([
+    { draft, error: "Memory body must not be empty." },
+  ]);
+  // The draft travels whole: a model cannot correct a body it cannot see.
+  assert.match(prompt, /Memory body must not be empty/u);
+  assert.match(prompt, /"title": "Empty"/u);
+
+  const ctx = captureContext(
+    JSON.stringify({
+      candidates: [
+        {
+          title: "Empty",
+          type: "fact",
+          body: "The kettle was empty.",
+          speaker: [],
+        },
+      ],
+    }),
+    "end",
+  );
+  const repair = createCaptureRepairer(ctx, CONFIG, () => {});
+  const repaired = await repair([
+    { draft, error: "Memory body must not be empty." },
+  ]);
+
+  assert.equal(repaired.length, 1);
+  assert.equal(repaired[0]?.body, "The kettle was empty.");
 });

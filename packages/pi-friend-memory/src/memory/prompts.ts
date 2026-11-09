@@ -34,6 +34,21 @@ export const CAPTURE_SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
+ * System prompt for the one-round rewrite of capture drafts a store refused.
+ *
+ * Not configurable, unlike the three passes: this is a repair of a shape, and a
+ * house that replaced it could only make the repair worse.
+ */
+export const CAPTURE_REPAIR_SYSTEM_PROMPT = [
+  "You correct memory candidates that a memory store refused to accept.",
+  "Each item gives one candidate and the reason it was rejected.",
+  "Fix only what the reason describes; do not add facts, opinions, people or links that were not already there.",
+  "Keep a candidate's meaning: it was worth remembering, it was only written wrongly.",
+  'Return only strict JSON with a top-level candidates array, in the same shape the candidates arrived in: {"candidates":[{"title":"string","type":"fact|preference|event|person-note","body":"concise Markdown","speaker":[{"name":"string","confident":true,"note":"optional"}],"agents":["string"],"emotional_flavour":"neutral","tags":[],"links":[]}]}',
+  'Return {"candidates":[]} when a candidate cannot be corrected.',
+].join("\n");
+
+/**
  * Builds the sweep system prompt.
  *
  * `allowDrop` is configuration, not decoration: the parser refuses a `drop`
