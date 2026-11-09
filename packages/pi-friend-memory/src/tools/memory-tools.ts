@@ -66,6 +66,15 @@ const SPEAKER_ARRAY_DESCRIPTION =
   "Speaker attribution records, ordered by confidence. May be empty when only AI agents were involved, or when no speaker could be identified.";
 const AGENTS_DESCRIPTION =
   "Names of the AI agents involved in the exchange, usually including yourself. When an AI's words prompted this memory and no person spoke, leave speaker empty and list the agents here.";
+/**
+ * Examples shown wherever a tool can set `emotional_flavor`.
+ *
+ * The field is free text, not an enum, so nothing validates it and the only
+ * thing steering it is the vocabulary a caller is shown. Examples rather than a
+ * list of permitted values: a word that fits better than these is still allowed.
+ */
+const EMOTIONAL_FLAVOR_DESCRIPTION =
+  "Free-form emotional tone of the memory, not a closed list. Examples: warm, matter-of-fact, playful, frustrated, eager, introspective, nostalgic, anxious, triumphant, venting, curious, vulnerable, prickly, sore, funny. Prefer the specific word when the memory has a tone — 'neutral' is what gets written when nothing is specified.";
 
 /** Structured details returned by a successful memory addition. */
 interface MemoryAddDetails {
@@ -267,7 +276,7 @@ export function registerMemoryTools(
       ),
       emotional_flavor: Type.Optional(
         Type.String({
-          description: "Free-form emotional tone, such as warm or sore.",
+          description: EMOTIONAL_FLAVOR_DESCRIPTION,
         }),
       ),
       tags: Type.Optional(
@@ -612,7 +621,9 @@ export function registerMemoryTools(
       agents: Type.Optional(
         Type.Array(Type.String(), { description: AGENTS_DESCRIPTION }),
       ),
-      emotional_flavor: Type.Optional(Type.String()),
+      emotional_flavor: Type.Optional(
+        Type.String({ description: EMOTIONAL_FLAVOR_DESCRIPTION }),
+      ),
       tags: Type.Optional(Type.Array(Type.String())),
       links: Type.Optional(Type.Array(Type.String())),
       source: Type.Optional(Type.String()),
