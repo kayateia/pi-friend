@@ -216,6 +216,18 @@ async function scanStore(
         continue;
       }
 
+      if (!collectRewrites) {
+        // Verification pass: every file has to parse, not only the ones that
+        // still have something to rename. Skipping the rest would make this
+        // check vacuous, which is how it was written the first time.
+        try {
+          parseMigratedFile(text, relativePath, directory);
+        } catch (error) {
+          skipped.push({ path: relativePath, error: formatError(error) });
+        }
+        continue;
+      }
+
       const rewritten = renameFlavourKey(text);
       if (rewritten === undefined) {
         continue;
@@ -228,9 +240,7 @@ async function scanStore(
         continue;
       }
 
-      if (collectRewrites) {
-        pending.push({ path: relativePath, rewritten });
-      }
+      pending.push({ path: relativePath, rewritten });
     }
   }
 

@@ -165,3 +165,31 @@ test("a store with nothing to migrate is marked without a message", async () => 
     assert.deepEqual(outcome?.skipped, []);
   });
 });
+
+test("a store that stops parsing keeps the backup instead of retiring it", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await makeRepository(agentDir);
+    const store = repository.store;
+    await store.writeTextFile("nodes/kitchen.md", legacyNode("kitchen"));
+    await runPendingMigrations(store, agentDir);
+
+    const state = JSON.parse(await readFile(migrationsPath(agentDir), "utf8"));
+    const backup = state.backups[FLAVOUR_MIGRATION_ID] as string;
+
+    // Something damages a node after the migration, before the retirement pass.
+    await store.writeTextFile(
+      "nodes/damaged.md",
+      (await store.readTextFile("nodes/kitchen.md")).replace(
+        "status: active",
+        "status: nonsense",
+      ),
+    );
+
+    const second = await runPendingMigrations(store, agentDir);
+    assert.equal(second?.status, "already-applied");
+    assert.equal(second?.skipped.length, 1);
+    assert.equal(second?.backupPath, backup);
+    // The copy is still there, because the store has not proved itself.
+    assert.ok((await readdir(path.join(backup, "files", "nodes"))).length > 0);
+  });
+});
