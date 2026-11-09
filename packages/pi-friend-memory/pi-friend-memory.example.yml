@@ -104,8 +104,9 @@ memory:
     # Offer the sweep model a `drop` action, which archives a candidate under
     # history/dropped/ instead of promoting or merging it. Off by default:
     # the consolidation pass only ever adds to canonical memory unless you ask
-    # for the ability to discard. Dropped candidates count against the same 25%
-    # removal guard as decay, so a model cannot empty staging in one pass.
+    # for the ability to discard. Dropped candidates count toward the same
+    # removal ratio as decay, which is reported when a run removes more than a
+    # quarter of a queue this size or larger — reported, not blocked.
     # allow_drop: false
     min_guarded_batch_size: 10
     # model: openrouter/google/gemini-2.5-flash

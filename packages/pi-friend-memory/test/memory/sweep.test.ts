@@ -312,7 +312,7 @@ test("small batches may expire more than 25% below the guard threshold", async (
   });
 });
 
-test("the 25% guard still applies at the configured batch threshold", async () => {
+test("a removal over a quarter is reported, and still applied", async () => {
   await withTempDir(async (agentDir) => {
     const repository = await MemoryNodeRepository.open({
       agentDir,
@@ -336,6 +336,7 @@ test("the 25% guard still applies at the configured batch threshold", async () =
     await repository.write(first.node, "staging");
     await repository.write(second.node, "staging");
 
+    const warnings: string[] = [];
     const result = await runDailySweep(
       undefined,
       service,
@@ -347,12 +348,17 @@ test("the 25% guard still applies at the configured batch threshold", async () =
       },
       {
         now: new Date("2026-10-23T05:00:00.000Z"),
+        reportWarning: (message) => warnings.push(message),
       },
     );
 
-    assert.match(result.error ?? "", /guard applies at 2 or more/);
-    assert.ok(await service.read(first.node.slug, "staging"));
-    assert.ok(await service.read(second.node.slug, "staging"));
+    // Reported, not refused: the expiry is the correct outcome, and a refusal
+    // would leave the queue larger than it found it.
+    assert.equal(result.error, undefined);
+    assert.equal(result.dropped, 2);
+    assert.match(warnings.join("\n"), /removed 2 of 2 staged candidates \(100%\)/u);
+    assert.equal(await service.read(first.node.slug, "staging"), null);
+    assert.equal(await service.read(second.node.slug, "staging"), null);
   });
 });
 
@@ -456,7 +462,7 @@ test("an allowed drop archives the candidate instead of promoting it", async () 
   });
 });
 
-test("model drops count against the 25% removal guard", async () => {
+test("model drops count toward the reported removal ratio", async () => {
   await withTempDir(async (agentDir) => {
     const repository = await MemoryNodeRepository.open({
       agentDir,
@@ -474,6 +480,7 @@ test("model drops count against the 25% removal guard", async () => {
       candidates.push(staged.node.slug);
     }
 
+    const warnings: string[] = [];
     const result = await runDailySweep(
       undefined,
       service,
@@ -485,6 +492,7 @@ test("model drops count against the 25% removal guard", async () => {
       },
       {
         now: new Date("2026-10-24T05:00:00.000Z"),
+        reportWarning: (message) => warnings.push(message),
         decide: async () =>
           candidates.slice(0, 2).map((slug) => ({
             slug,
@@ -494,9 +502,14 @@ test("model drops count against the 25% removal guard", async () => {
       },
     );
 
-    assert.match(result.error ?? "", /more than 25%/);
-    // Nothing was applied: a refused batch must leave staging exactly as it was.
-    for (const slug of candidates) {
+    // Half the queue dropped is worth saying out loud, and is still the model's
+    // call: the drops applied, and the archive can give them back.
+    assert.equal(result.error, undefined);
+    assert.match(warnings.join("\n"), /removed 2 of 4 staged candidates \(50%\)/u);
+    for (const slug of candidates.slice(0, 2)) {
+      assert.equal(await service.read(slug, "staging"), null);
+    }
+    for (const slug of candidates.slice(2)) {
       assert.ok(await service.read(slug, "staging"));
     }
   });
