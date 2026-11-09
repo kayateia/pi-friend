@@ -29,7 +29,7 @@ export interface CaptureCandidateDraft {
   body: string;
   speaker: MemorySpeaker[];
   agents?: string[];
-  emotionalFlavor?: string;
+  emotionalFlavour?: string;
   tags?: string[];
   links?: string[];
   source?: string;
@@ -75,7 +75,7 @@ export function buildCapturePrompt(
   return [
     `Extract at most ${maxCandidates} durable memory candidates from the transcript below.`,
     ...speakerAttributionLines(speakerHint),
-    'Use this JSON shape: {"candidates":[{"title":"string","type":"fact|preference|event|person-note","body":"concise Markdown","speaker":[{"name":"string","confident":true,"note":"optional"}],"agents":["string"],"emotional_flavor":"neutral","tags":[],"links":[]}]}',
+    'Use this JSON shape: {"candidates":[{"title":"string","type":"fact|preference|event|person-note","body":"concise Markdown","speaker":[{"name":"string","confident":true,"note":"optional"}],"agents":["string"],"emotional_flavour":"neutral","tags":[],"links":[]}]}',
     'Links are slugs of existing memories this one relates to, written as a slug (lowercase letters, digits and single hyphens); use an empty list when unsure rather than a title or a path.',
     'Return {"candidates":[]} when nothing durable was learned.',
     "",
@@ -474,12 +474,12 @@ function parseCandidate(
       };
     }),
     ...(agents === undefined ? {} : { agents }),
-    ...(value.emotional_flavor === undefined
+    ...(value.emotional_flavour === undefined
       ? {}
       : {
-          emotionalFlavor: requireString(
-            value.emotional_flavor,
-            "emotional_flavor",
+          emotionalFlavour: requireString(
+            value.emotional_flavour,
+            "emotional_flavour",
           ),
         }),
     ...(tags === undefined ? {} : { tags }),

@@ -64,7 +64,7 @@ export interface MemoryNodeFrontMatter {
   use_count: number;
   decay_weight: number;
   status: MemoryStatus;
-  emotional_flavor: string;
+  emotional_flavour: string;
   tags: string[];
   supersedes: string[];
   superseded_by: string;
@@ -111,6 +111,17 @@ export class MemorySchemaError extends Error {
 const TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
+/** Front-matter key holding the memory's tone. British spelling, since 2026-11. */
+export const EMOTIONAL_FLAVOUR_KEY = "emotional_flavour";
+
+/**
+ * The spelling before the rename.
+ *
+ * Nothing writes it. It is named here so the unknown-field error can recognise a
+ * file that predates the migration and say so, instead of reporting a typo.
+ */
+export const LEGACY_EMOTIONAL_FLAVOR_KEY = "emotional_flavor";
+
 const FRONT_MATTER_KEYS = new Set([
   "title",
   "type",
@@ -121,7 +132,7 @@ const FRONT_MATTER_KEYS = new Set([
   "use_count",
   "decay_weight",
   "status",
-  "emotional_flavor",
+  "emotional_flavour",
   "tags",
   "supersedes",
   "superseded_by",
@@ -154,7 +165,7 @@ const REQUIRED_FRONT_MATTER_KEYS = [
   "use_count",
   "decay_weight",
   "status",
-  "emotional_flavor",
+  "emotional_flavour",
   "tags",
   "supersedes",
   "superseded_by",
@@ -240,8 +251,16 @@ export function validateMemoryNodeFrontMatter(
     : FRONT_MATTER_KEYS;
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
+      // A store migrated from before the spelling change has been rewritten in
+      // place, so this is not a supported alias — it is a file that predates the
+      // rename (a restore from an old snapshot, or a copy from another
+      // instance). Say what to do rather than accept a key nobody writes again.
+      const hint =
+        key === LEGACY_EMOTIONAL_FLAVOR_KEY
+          ? ` This file predates the ${LEGACY_EMOTIONAL_FLAVOR_KEY} → ${EMOTIONAL_FLAVOUR_KEY} rename; re-run scripts/migrate-flavour.ts to convert it.`
+          : "";
       throw new MemorySchemaError(
-        `Unknown front-matter field "${key}" in ${slug}.`,
+        `Unknown front-matter field "${key}" in ${slug}.${hint}`,
         { field: key },
       );
     }
@@ -265,9 +284,9 @@ export function validateMemoryNodeFrontMatter(
   const useCount = requireNonNegativeInteger(value.use_count, "use_count", slug);
   const decayWeight = requireDecayWeight(value.decay_weight, slug);
   const status = requireEnum(value.status, MEMORY_STATUSES, "status", slug);
-  const emotionalFlavor = requireString(
-    value.emotional_flavor,
-    "emotional_flavor",
+  const emotionalFlavour = requireString(
+    value.emotional_flavour,
+    "emotional_flavour",
     slug,
   ).trim();
   const tags = parseStringList(value.tags, "tags", slug);
@@ -349,7 +368,7 @@ export function validateMemoryNodeFrontMatter(
     use_count: useCount,
     decay_weight: decayWeight,
     status,
-    emotional_flavor: emotionalFlavor,
+    emotional_flavour: emotionalFlavour,
     tags,
     supersedes,
     superseded_by: supersededBy,
@@ -475,7 +494,7 @@ export function serializeMemoryNode(node: ParsedMemoryNode): string {
     use_count: frontMatter.use_count,
     decay_weight: frontMatter.decay_weight,
     status: frontMatter.status,
-    emotional_flavor: frontMatter.emotional_flavor,
+    emotional_flavour: frontMatter.emotional_flavour,
     tags: frontMatter.tags,
     supersedes: frontMatter.supersedes,
     superseded_by: frontMatter.superseded_by,

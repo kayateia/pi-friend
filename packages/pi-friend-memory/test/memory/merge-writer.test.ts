@@ -203,7 +203,7 @@ test("a source's date is edited when present, created otherwise", () => {
       use_count: 0,
       decay_weight: 1,
       status: "active" as const,
-      emotional_flavor: "neutral",
+      emotional_flavour: "neutral",
       tags: [],
       supersedes: [],
       superseded_by: "",

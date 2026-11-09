@@ -67,7 +67,7 @@ const SPEAKER_ARRAY_DESCRIPTION =
 const AGENTS_DESCRIPTION =
   "Names of the AI agents involved in the exchange, usually including yourself. When an AI's words prompted this memory and no person spoke, leave speaker empty and list the agents here.";
 /**
- * Examples shown wherever a tool can set `emotional_flavor`.
+ * Examples shown wherever a tool can set `emotional_flavour`.
  *
  * The field is free text, not an enum, so nothing validates it and the only
  * thing steering it is the vocabulary a caller is shown. Examples rather than a
@@ -274,7 +274,7 @@ export function registerMemoryTools(
           description: AGENTS_DESCRIPTION,
         }),
       ),
-      emotional_flavor: Type.Optional(
+      emotional_flavour: Type.Optional(
         Type.String({
           description: EMOTIONAL_FLAVOR_DESCRIPTION,
         }),
@@ -313,7 +313,7 @@ export function registerMemoryTools(
         speaker: params.speaker,
         slug: params.slug,
         agents: params.agents,
-        emotionalFlavor: params.emotional_flavor,
+        emotionalFlavour: params.emotional_flavour,
         tags: params.tags,
         links: params.links,
         source: params.source,
@@ -621,7 +621,7 @@ export function registerMemoryTools(
       agents: Type.Optional(
         Type.Array(Type.String(), { description: AGENTS_DESCRIPTION }),
       ),
-      emotional_flavor: Type.Optional(
+      emotional_flavour: Type.Optional(
         Type.String({ description: EMOTIONAL_FLAVOR_DESCRIPTION }),
       ),
       tags: Type.Optional(Type.Array(Type.String())),
@@ -650,7 +650,7 @@ export function registerMemoryTools(
         body: params.body,
         speaker: params.speaker,
         agents: params.agents,
-        emotionalFlavor: params.emotional_flavor,
+        emotionalFlavour: params.emotional_flavour,
         tags: params.tags,
         links: params.links,
         source: params.source,

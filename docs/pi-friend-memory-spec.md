@@ -120,7 +120,7 @@ last_used: 2026-10-18T09:00:00Z     # maintained at sweep time, NOT on every hit
 use_count: 0
 decay_weight: 1.0                   # recomputed at sweep; see §7
 status: active                      # active | candidate | superseded | archived
-emotional_flavor: warm              # free tag, not an enum: warm | matter-of-fact | playful | frustrated |
+emotional_flavour: warm              # free tag, not an enum: warm | matter-of-fact | playful | frustrated |
                                     #   eager | introspective | nostalgic | anxious | triumphant | venting |
                                     #   curious | vulnerable | prickly | sore | funny | ..., or your own
 tags: []                            # searchable keywords

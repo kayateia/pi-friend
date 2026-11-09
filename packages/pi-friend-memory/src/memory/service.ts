@@ -67,7 +67,7 @@ export interface MemoryAddInput {
   speaker: MemorySpeaker[];
   slug?: string;
   agents?: string[];
-  emotionalFlavor?: string;
+  emotionalFlavour?: string;
   tags?: string[];
   links?: string[];
   source?: string;
@@ -80,7 +80,7 @@ export interface MemoryEditInput {
   body?: string;
   speaker?: MemorySpeaker[];
   agents?: string[];
-  emotionalFlavor?: string;
+  emotionalFlavour?: string;
   tags?: string[];
   links?: string[];
   source?: string;
@@ -275,7 +275,7 @@ export class MemoryNodeService {
       const seeAlso = sources.map((node) => {
         const keywords =
           node.frontMatter.tags.slice(0, 5).join(", ") ||
-          node.frontMatter.emotional_flavor ||
+          node.frontMatter.emotional_flavour ||
           "memory";
         return `- ${node.frontMatter.title} — ${keywords}`;
       });
@@ -307,7 +307,7 @@ export class MemoryNodeService {
           use_count: 0,
           decay_weight: 1,
           status: "active",
-          emotional_flavor: "dreamlike",
+          emotional_flavour: "dreamlike",
           tags: ["dream"],
           supersedes: [],
           superseded_by: "",
@@ -459,7 +459,7 @@ export class MemoryNodeService {
           use_count: 0,
           decay_weight: 1,
           status: "active",
-          emotional_flavor: input.emotionalFlavor ?? "neutral",
+          emotional_flavour: input.emotionalFlavour ?? "neutral",
           tags: input.tags ?? [],
           supersedes: [],
           superseded_by: "",
@@ -507,7 +507,7 @@ export class MemoryNodeService {
           use_count: 0,
           decay_weight: 1,
           status: "candidate",
-          emotional_flavor: input.emotionalFlavor ?? "neutral",
+          emotional_flavour: input.emotionalFlavour ?? "neutral",
           tags: input.tags ?? [],
           supersedes: [],
           superseded_by: "",
@@ -808,7 +808,7 @@ export class MemoryNodeService {
         input.body,
         input.speaker,
         input.agents,
-        input.emotionalFlavor,
+        input.emotionalFlavour,
         input.tags,
         input.links,
         input.source,
@@ -831,8 +831,8 @@ export class MemoryNodeService {
       if (input.type !== undefined) frontMatter.type = input.type;
       if (input.speaker !== undefined) frontMatter.speaker = input.speaker;
       if (input.agents !== undefined) frontMatter.agents = input.agents;
-      if (input.emotionalFlavor !== undefined) {
-        frontMatter.emotional_flavor = input.emotionalFlavor;
+      if (input.emotionalFlavour !== undefined) {
+        frontMatter.emotional_flavour = input.emotionalFlavour;
       }
       if (input.tags !== undefined) frontMatter.tags = input.tags;
       if (input.links !== undefined) frontMatter.links = input.links;
