@@ -63,9 +63,9 @@ interface MemoryReadDetails {
 const SPEAKER_NAME_DESCRIPTION =
   "A human, plural-system member, or other non-AI entity involved in the exchange. Never an AI agent: those belong in agents.";
 const SPEAKER_CONFIDENT_DESCRIPTION =
-  "False when you did not hear it first-hand: inferred, uncertain, or relayed in someone else's words. Name the relay in note.";
+  "False when you did not hear it first-hand: inferred, uncertain, or relayed in someone else's words. Always give a note saying why; an uncertain attribution with no note may be treated as confident.";
 const SPEAKER_NOTE_DESCRIPTION =
-  "Attribution context, such as fronting at the time, who relayed it, or what was quoted.";
+  "Attribution context, such as fronting at the time, who relayed it, what was quoted, or why the attribution is uncertain.";
 const SPEAKER_ARRAY_DESCRIPTION =
   "Speaker attribution records, ordered by confidence. May be empty when only AI agents were involved, or when no speaker could be identified.";
 const AGENTS_DESCRIPTION =

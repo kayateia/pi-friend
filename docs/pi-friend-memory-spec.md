@@ -138,7 +138,8 @@ Body: concise, single-topic prose. May include short verbatim quotes (with speak
 - `speaker` names people: a human, a member of the plural system, or another non-AI entity. An AI agent is never a speaker — it belongs in `agents`, which lists every AI involved in the exchange, including the one writing the memory.
 - In multi-user contexts, speaker = the actual person who typed it, never "the user".
 - When an AI's words are what prompted the memory and no person spoke, `speaker` may be empty and `agents` carries the AIs. `speaker: []` with `agents: [<the writer>, <the other agent>]` is the correct record for that exchange.
-- If the agent inferred rather than heard something, `speaker.confident: false`, and `note` says what was relayed.
+- If the agent inferred rather than heard something, `speaker.confident: false`, and `note` says why: an uncertain attribution with no note may be treated as confident. That is the one case where the doubt does not survive a merge, because a flag with no stated reason is the shape a hedged model produces, and treating every one as binding would let a single careless `false` erase a confident attribution.
+- `speaker` holds **one record per person**. A name that arrives twice is folded at write time — case-insensitively, keeping the first spelling, joining distinct notes — because two records for one person are the same fact written twice, and the rendered line reads as a contradiction (`Destiny (uncertain); Destiny`). When the records disagree about confidence, the result is uncertain if any of them said why it was uncertain; otherwise confident if any was confident.
 - Corrections must record the original speaker too; overriding someone's claim is not the same as them being wrong.
 
 ## 5. Basic tools

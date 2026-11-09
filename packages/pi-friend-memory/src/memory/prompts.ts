@@ -30,6 +30,7 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "`speaker` names people and other non-AI participants; `agents` names AI agents, including yourself.",
   "Never use generic labels such as USER, ASSISTANT, or system as speaker names.",
   "When no speaker can be identified, leave `speaker` empty; never omit a candidate for lack of a name.",
+  "Set `confident` to false only when a name is inferred rather than stated or reaches you second-hand, and say why in its `note`; an uncertain attribution with no note may be treated as confident.",
   "Never create dream nodes.",
 ].join("\n");
 
