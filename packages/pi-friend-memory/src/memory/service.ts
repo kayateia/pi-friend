@@ -7,7 +7,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { formatErrorChain, logError } from "../debug/log.ts";
+import { formatErrorChain, logError, logNotice } from "../debug/log.ts";
 import type { MemorySpeaker, MemoryType, ParsedMemoryNode } from "./schema.ts";
 import {
   isQuarantinedMemoryType,
@@ -58,6 +58,7 @@ import { searchSemanticVectors } from "./semantic-search.ts";
 import type { ExternalIndexSource } from "./external-index-manager.ts";
 import { computeDecayUpdates, type DecayUpdate } from "./decay.ts";
 import type { MemoryNodeArea, MemoryNodeRepository } from "./repository.ts";
+import { collapseSpeakers } from "./speakers.ts";
 
 /** Input accepted when creating a new canonical memory node. */
 export interface MemoryAddInput {
@@ -452,7 +453,7 @@ export class MemoryNodeService {
         frontMatter: {
           title: input.title.trim(),
           type: input.type,
-          speaker: input.speaker,
+          speaker: this.speakersFor(input.speaker, slug),
           agents: input.agents ?? [],
           created: timestamp,
           last_used: timestamp,
@@ -500,7 +501,7 @@ export class MemoryNodeService {
         frontMatter: {
           title: input.title.trim(),
           type: input.type,
-          speaker: input.speaker,
+          speaker: this.speakersFor(input.speaker, slug),
           agents: input.agents ?? [],
           created: timestamp,
           last_used: timestamp,
@@ -716,6 +717,16 @@ export class MemoryNodeService {
       const merged = cloneNode(target);
       merged.body = rewrite?.body ?? appendMechanically(target, sourceNodes);
       merged.frontMatter.edited = now;
+      // Attribution from every source is pooled and collapsed once, rather than
+      // unioned as-is: two memories can each name the same person, and a list
+      // that repeats them reads as a contradiction in the recall block.
+      merged.frontMatter.speaker = this.speakersFor(
+        [
+          ...merged.frontMatter.speaker,
+          ...sourceNodes.flatMap((node) => node.frontMatter.speaker),
+        ],
+        target.slug,
+      );
       for (const candidate of sourceNodes) {
         merged.frontMatter.agents = unique([
           ...merged.frontMatter.agents,
@@ -733,10 +744,6 @@ export class MemoryNodeService {
           ...merged.frontMatter.supersedes,
           ...candidate.frontMatter.supersedes,
         ]);
-        merged.frontMatter.speaker = mergeSpeakers(
-          merged.frontMatter.speaker,
-          candidate.frontMatter.speaker,
-        );
       }
 
       await this.repository.write(merged, "canonical");
@@ -829,7 +836,9 @@ export class MemoryNodeService {
 
       if (input.title !== undefined) frontMatter.title = input.title;
       if (input.type !== undefined) frontMatter.type = input.type;
-      if (input.speaker !== undefined) frontMatter.speaker = input.speaker;
+      if (input.speaker !== undefined) {
+        frontMatter.speaker = this.speakersFor(input.speaker, node.slug);
+      }
       if (input.agents !== undefined) frontMatter.agents = input.agents;
       if (input.emotionalFlavour !== undefined) {
         frontMatter.emotional_flavour = input.emotionalFlavour;
@@ -1045,6 +1054,10 @@ export class MemoryNodeService {
         }
         const restored = cloneNode(archived);
         restored.frontMatter = stripHistoryFields(restored.frontMatter);
+        restored.frontMatter.speaker = this.speakersFor(
+          restored.frontMatter.speaker,
+          validSlug,
+        );
         restored.frontMatter.status = "candidate";
         restored.frontMatter.decay_weight = 1;
         restored.frontMatter.last_used = now;
@@ -1096,6 +1109,10 @@ export class MemoryNodeService {
 
       const restored = cloneNode(archived);
       restored.frontMatter = stripHistoryFields(restored.frontMatter);
+      restored.frontMatter.speaker = this.speakersFor(
+        restored.frontMatter.speaker,
+        validSlug,
+      );
       restored.frontMatter.status = "active";
       restored.frontMatter.decay_weight = 1;
       restored.frontMatter.last_used = now;
@@ -1254,6 +1271,25 @@ export class MemoryNodeService {
   }
 
   /**
+   * Collapses attribution for one write, naming the memory if a caveat is lost.
+   *
+   * The collapse is the invariant: one record per person per memory. It is
+   * applied at write time rather than at display time, because a formatter that
+   * repaired attribution would be a second place to be right and would hide the
+   * violation instead of preventing it.
+   */
+  private speakersFor(
+    speakers: readonly MemorySpeaker[],
+    slug: string,
+  ): MemorySpeaker[] {
+    return collapseSpeakers(speakers, {
+      slug,
+      reportDiscardedCaveat: (message) =>
+        logNotice("speaker attribution", message),
+    });
+  }
+
+  /**
    * Checks the live areas for a slug.
    *
    * History is deliberately not consulted: a slug that exists only in history
@@ -1399,21 +1435,6 @@ function memorySignature(title: string, body: string): string {
 /** Deduplicates values while preserving their first-seen order. */
 function unique(values: string[]): string[] {
   return [...new Set(values)];
-}
-
-/** Merges speaker attribution records by name and confidence. */
-function mergeSpeakers(
-  left: MemorySpeaker[],
-  right: MemorySpeaker[],
-): MemorySpeaker[] {
-  const merged = new Map<string, MemorySpeaker>();
-  for (const speaker of [...left, ...right]) {
-    const key = `${speaker.name.toLowerCase()}|${speaker.confident}|${speaker.note ?? ""}`;
-    if (!merged.has(key)) {
-      merged.set(key, { ...speaker });
-    }
-  }
-  return [...merged.values()];
 }
 
 /** Converts a human title into the repository's lowercase ASCII slug format. */
