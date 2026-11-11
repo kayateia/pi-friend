@@ -159,8 +159,11 @@ export function containsRagContext(
 /**
  * Prepends one memory block to a selected user message.
  *
- * Position 0 targets the current user turn. Negative positions select earlier
- * user turns, falling back to the latest turn when the transcript is shorter.
+ * Position 0 targets the current user turn; position -1 is one prompt back,
+ * -2 two back, and so on. A position deeper than the transcript clamps to the
+ * earliest user turn that exists: the intended target is not there, and the
+ * nearest one that is sits at the start of the conversation. A position that
+ * is not zero or a negative integer is treated as 0.
  */
 export function injectRagContext(
   messages: RagAgentMessage[],
@@ -179,10 +182,11 @@ export function injectRagContext(
   }
 
   const normalizedPosition =
-    Number.isInteger(position) && position <= 0 ? position : -1;
-  const requestedIndex =
-    userIndices[userIndices.length - 1 + normalizedPosition] ??
-    userIndices[userIndices.length - 1];
+    Number.isInteger(position) && position <= 0 ? position : 0;
+  // A negative slot means the position reached past the start of the
+  // transcript, so the earliest user turn is the closest one to it.
+  const targetSlot = Math.max(0, userIndices.length - 1 + normalizedPosition);
+  const requestedIndex = userIndices[targetSlot];
   if (requestedIndex === undefined) {
     return messages;
   }

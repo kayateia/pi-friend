@@ -748,14 +748,22 @@ function parseRagInjection(
   if (value.position !== undefined) {
     if (
       typeof value.position !== "number" ||
-      !Number.isInteger(value.position) ||
-      value.position > 0
+      !Number.isInteger(value.position)
     ) {
       throw new MemoryConfigError(
         `${configPath}: memory.injection.position must be zero or a negative integer.`,
       );
     }
-    config.position = value.position;
+    if (value.position > 0) {
+      // Forward positions name no user turn that exists, so there is nothing
+      // to select: say so and inject into the current turn instead.
+      warnings.push(
+        `${configPath}: memory.injection.position must be zero or a negative integer; ${value.position} is treated as 0.`,
+      );
+      config.position = 0;
+    } else {
+      config.position = value.position;
+    }
   }
 
   if (value.mode !== undefined) {

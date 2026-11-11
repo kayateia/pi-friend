@@ -8,6 +8,8 @@ memory:
 
   injection:
     enabled: true
+    # 0 = current user turn, -1 = one turn back, and so on. A position deeper
+    # than the history uses the earliest turn that exists.
     position: -1
     mode: hybrid
     limit: 5
