@@ -188,6 +188,8 @@ once-per-day consolidation schedule, not daily-log processing.
 - Retrieval and injection run in the request-time `context` hook. The RAG result is cached by session and user-turn index so repeated provider requests in one turn do not re-run embeddings, and concurrent sessions cannot overwrite shared RAG text. Ranking is filtered to active nodes and candidate nodes before the candidate limit; documents and inactive memory files cannot crowd out injectable memories. Relevant nodes are injected into the prompt at a configurable position:
   - position `0` = inside the current user turn (most salient, invalidates cache from that point)
   - position `-1`, `-2`, … = N prompts back (less salient, preserves the hot cache prefix)
+  - a position deeper than the history injects into the earliest user turn that exists; a positive position is a configuration warning and is treated as `0`
+  - omitted entirely, the position defaults to `-1`
 - The retrieved block is prepended to the selected user message and wrapped in `<pi-friend-memory>...</pi-friend-memory>`.
 - Only two types of items are considered for injection: active, non-quarantined canonical nodes; and candidate nodes in `staging`.
 - Plain documents remain searchable through tools but are not copied into factual RAG context.

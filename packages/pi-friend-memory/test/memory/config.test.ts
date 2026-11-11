@@ -295,7 +295,6 @@ test("injection settings are parsed and validated", () => {
 test("invalid injection settings fail closed", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   for (const source of [
-    "memory:\n  injection:\n    position: 1\n",
     "memory:\n  injection:\n    mode: unknown\n",
     "memory:\n  injection:\n    limit: 0\n",
     "memory:\n  injection:\n    max_chars: 100\n",
