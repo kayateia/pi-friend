@@ -104,6 +104,15 @@ prompts hold vocabulary and speaker rules the parser enforces silently, so a
 replacement has to reproduce them. The complete built-in prompts are reproduced
 in `pi-friend-memory.example.yml`.
 
+Model replies are read by one shared reader (`src/memory/model-json.ts`): the
+object is taken from the first `{` to the last `}`, parsed strictly, and handed
+to `jsonrepair` only when strict parsing fails — an unescaped quote inside a
+string, a missing or trailing comma, and similar syntax slips are repaired
+rather than costing the whole reply. A repair is reported as a warning when the
+caller has a warning channel, and the object it produces still faces the
+caller's own validation, so a body damaged beyond use fails a schema check
+instead of arriving quietly.
+
 ## 4. Node schema (strict front matter)
 
 ```yaml

@@ -77,7 +77,7 @@ test("a reply with no candidates array is logged verbatim with its stop reason",
 
     await assert.rejects(
       () => runCaptureModel(ctx, CONFIG, "transcript", { names: [] }, () => {}),
-      /candidates array/,
+      /does not contain a JSON object/,
     );
 
     const reply = "I'm sorry, I can't help with that.";
@@ -96,7 +96,7 @@ test("an empty reply is logged even though there is no text to show", async () =
 
     await assert.rejects(
       () => runCaptureModel(ctx, CONFIG, "transcript", { names: [] }, () => {}),
-      /candidates array/,
+      /does not contain a JSON object/,
     );
 
     const content = await readFile(logPath, "utf8");

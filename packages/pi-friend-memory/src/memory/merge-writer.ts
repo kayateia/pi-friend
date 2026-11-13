@@ -9,6 +9,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MergeConfig } from "./config.ts";
 import type { MemorySpeaker, MemoryType, ParsedMemoryNode } from "./schema.ts";
+import { readModelJson } from "./model-json.ts";
 import { resolveConfiguredModel, runNestedModel } from "./model-call.ts";
 import {
   MERGE_SYSTEM_PROMPT,
@@ -81,10 +82,16 @@ export function buildMergePrompt(sources: MergeSource[]): string {
  * Throws on anything that is not a usable body; the caller falls back to a
  * mechanical append rather than writing an empty memory.
  */
-export function parseMergeResponse(response: string): MergeRewrite {
-  const object = extractJsonObject(response);
+export function parseMergeResponse(
+  response: string,
+  reportWarning?: (message: string) => void,
+): MergeRewrite {
+  const reading = readModelJson(response, reportWarning);
+  const object = reading.object;
   if (!object) {
-    throw new Error("Merge response must contain a JSON object.");
+    throw new Error(
+      `Merge response ${reading.problem ?? "must contain a JSON object"}.`,
+    );
   }
   const body = typeof object.body === "string" ? object.body.trim() : "";
   if (body === "") {
@@ -130,24 +137,7 @@ export function createMergeWriter(
         ? {}
         : { thinkingLevel: config.thinkingLevel }),
     });
-    return parseMergeResponse(response);
+    return parseMergeResponse(response, reportWarning);
   };
 }
 
-/** Extracts one JSON object from text or a fenced code block. */
-function extractJsonObject(
-  response: string,
-): Record<string, unknown> | null {
-  const first = response.indexOf("{");
-  const last = response.lastIndexOf("}");
-  if (first < 0 || last <= first) return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(response.slice(first, last + 1));
-  } catch {
-    return null;
-  }
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
