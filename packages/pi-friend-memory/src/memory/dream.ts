@@ -12,6 +12,7 @@ import type { ParsedMemoryNode } from "./schema.ts";
 import { isQuarantinedMemoryType } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { DREAM_SYSTEM_PROMPT } from "./prompts.ts";
+import { readModelJson } from "./model-json.ts";
 import { resolveConfiguredModel, runNestedModel } from "./model-call.ts";
 
 /** Model-produced dream narrative and selected source nodes. */
@@ -89,10 +90,12 @@ export function parseDreamResponse(
   response: string,
   eligibleSlugs: string[],
   maxNodes: number,
+  reportWarning?: (message: string) => void,
 ): Omit<DreamDraft, "agents"> {
-  const object = extractJsonObject(response);
+  const reading = readModelJson(response, reportWarning);
+  const object = reading.object;
   if (!object) {
-    throw new Error("Dream response must be a JSON object.");
+    throw new Error(`Dream response ${reading.problem ?? "must be a JSON object"}.`);
   }
   if (
     typeof object.title !== "string" ||
@@ -158,30 +161,10 @@ export async function runDreamModel(
     response,
     shortlist.map((node) => node.slug),
     maxNodes,
+    reportWarning,
   );
   return {
     ...parsed,
     agents: [model.id],
   };
-}
-
-/** Extracts one JSON object from text or a fenced code block. */
-function extractJsonObject(
-  response: string,
-): Record<string, unknown> | null {
-  const first = response.indexOf("{");
-  const last = response.lastIndexOf("}");
-  if (first < 0 || last <= first) return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(response.slice(first, last + 1));
-  } catch {
-    return null;
-  }
-  return isRecord(value) ? value : null;
-}
-
-/** Narrows unknown JSON values to string-keyed records. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

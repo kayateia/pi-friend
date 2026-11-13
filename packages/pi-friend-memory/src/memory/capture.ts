@@ -7,6 +7,7 @@
  */
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { readModelJson } from "./model-json.ts";
 import { validateSlug } from "./paths.ts";
 import {
   MEMORY_TYPES,
@@ -291,8 +292,15 @@ export function parseCaptureResponse(
   speakerHint?: CaptureSpeakerHint,
   reportWarning?: (message: string) => void,
 ): CaptureCandidateDraft[] {
-  const object = extractJsonObject(response);
-  if (!object || !Array.isArray(object.candidates)) {
+  const reading = readModelJson(response, reportWarning);
+  const object = reading.object;
+  if (!object) {
+    throw new CaptureResponseError(
+      `Capture response ${reading.problem}.`,
+      response,
+    );
+  }
+  if (!Array.isArray(object.candidates)) {
     throw new CaptureResponseError(
       "Capture response must contain a candidates array.",
       response,
@@ -399,25 +407,6 @@ function formatContent(content: unknown): string {
     })
     .filter(Boolean)
     .join("\n");
-}
-
-/** Extracts one JSON object from plain text or a fenced code block. */
-function extractJsonObject(
-  response: string,
-): Record<string, unknown> | null {
-  const first = response.indexOf("{");
-  const last = response.lastIndexOf("}");
-  if (first < 0 || last <= first) {
-    return null;
-  }
-
-  let value: unknown;
-  try {
-    value = JSON.parse(response.slice(first, last + 1));
-  } catch {
-    return null;
-  }
-  return isRecord(value) ? value : null;
 }
 
 /** Parses and validates one candidate object. */

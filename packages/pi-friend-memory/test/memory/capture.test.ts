@@ -295,7 +295,7 @@ test("capture response parsing accepts fenced JSON and filters quarantined types
 test("capture response parsing rejects malformed candidates", () => {
   assert.throws(
     () => parseCaptureResponse("not json", 3),
-    /candidates array/,
+    /does not contain a JSON object/,
   );
   assert.throws(
     () =>

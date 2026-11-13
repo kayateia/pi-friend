@@ -11,6 +11,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ParsedMemoryNode } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import { SWEEP_SYSTEM_PROMPT } from "./prompts.ts";
+import { readModelJson } from "./model-json.ts";
 import { resolveConfiguredModel, runNestedModel } from "./model-call.ts";
 
 /** One action a sweep decision may request. `drop` needs `allow_drop`. */
@@ -83,9 +84,16 @@ export function parseSweepResponse(
   candidateSlugs: string[],
   canonicalSlugs: string[],
   allowDrop = false,
+  reportWarning?: (message: string) => void,
 ): SweepDecision[] {
-  const object = extractJsonObject(response);
-  if (!object || !Array.isArray(object.decisions)) {
+  const reading = readModelJson(response, reportWarning);
+  const object = reading.object;
+  if (!object) {
+    throw new Error(
+      `Sweep response ${reading.problem ?? "must contain a decisions array"}.`,
+    );
+  }
+  if (!Array.isArray(object.decisions)) {
     throw new Error("Sweep response must contain a decisions array.");
   }
 
@@ -171,24 +179,10 @@ export async function runSweepModel(
     candidates.map((node) => node.slug),
     canonical.map((node) => node.slug),
     allowDrop,
+    reportWarning,
   );
 }
 
-/** Extracts one JSON object from text or a fenced code block. */
-function extractJsonObject(
-  response: string,
-): Record<string, unknown> | null {
-  const first = response.indexOf("{");
-  const last = response.lastIndexOf("}");
-  if (first < 0 || last <= first) return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(response.slice(first, last + 1));
-  } catch {
-    return null;
-  }
-  return isRecord(value) ? value : null;
-}
 
 /** Narrows unknown JSON values to string-keyed records. */
 function isRecord(value: unknown): value is Record<string, unknown> {
