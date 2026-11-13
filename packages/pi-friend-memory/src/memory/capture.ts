@@ -23,6 +23,17 @@ import {
 
 type AgentMessage = Extract<SessionEntry, { type: "message" }>["message"];
 
+/**
+ * The types a capture candidate may carry.
+ *
+ * `dream` is in the schema's vocabulary but is not generated from ordinary
+ * conversation, so it is absent here: a candidate that arrives as a dream is
+ * quarantined rather than repaired, and the retry prompt offers only these.
+ */
+export const CAPTURE_TYPES: readonly MemoryType[] = MEMORY_TYPES.filter(
+  (type) => !isQuarantinedMemoryType(type),
+);
+
 /** One candidate produced by the auto-capture model. */
 export interface CaptureCandidateDraft {
   title: string;
@@ -285,13 +296,79 @@ export function captureStartIndex(
   return { startIndex: recentTurnStart(entries, everyTurns), cursorFound: false };
 }
 
-/** Parses the capture model's JSON response into validated draft objects. */
+/**
+ * Parses the capture model's JSON response into validated draft objects.
+ *
+ * Kept as the simple shape for callers that only want drafts: each refused
+ * candidate is reported, and a reply in which nothing survives throws so the
+ * caller leaves the capture cursor alone. The capture runner uses
+ * `parseCaptureReply` instead, because it wants the refusals as data first.
+ */
 export function parseCaptureResponse(
   response: string,
   maxCandidates: number,
   speakerHint?: CaptureSpeakerHint,
   reportWarning?: (message: string) => void,
 ): CaptureCandidateDraft[] {
+  const { drafts, refusals } = parseCaptureReply(
+    response,
+    maxCandidates,
+    speakerHint,
+    undefined,
+    reportWarning,
+  );
+  for (const refusal of refusals) {
+    reportWarning?.(describeCaptureRefusal(refusal));
+  }
+  // Nothing usable means the window produced nothing at all. Failing here leaves
+  // the cursor where it was so the next pass reads the same material instead of
+  // dropping it.
+  if (refusals.length > 0 && drafts.length === 0) {
+    throw new Error(refusals[0]!.reason);
+  }
+  return drafts;
+}
+
+/** One candidate that could not be used, and why. */
+export interface CaptureRefusal {
+  /** Position in the reply's candidate array, which a type retry keys on. */
+  index: number;
+  /** The candidate exactly as the model wrote it. */
+  candidate: unknown;
+  /** The validator's message. */
+  reason: string;
+  /** Whether an unusable `type` was the reason, which is the one a model can fix alone. */
+  invalidType: boolean;
+}
+
+/** What one capture reply yielded: usable drafts, and what was refused. */
+export interface CaptureParseResult {
+  drafts: CaptureCandidateDraft[];
+  refusals: CaptureRefusal[];
+}
+
+/**
+ * Parses a reply candidate by candidate, refusing each one on its own.
+ *
+ * A model error inside one candidate is information about that candidate, not a
+ * reason to discard its neighbours: a batch used to be all-or-nothing, and one
+ * invented type cost the whole reply. Refusals come back as data rather than as
+ * warnings so the caller can decide — the capture runner hands the invalid-type
+ * ones back to the model once before saying anything about them.
+ *
+ * `typeOverrides` keys a repaired type to the candidate's position in the reply,
+ * which is what the retry returns: an array of types, one per refused candidate,
+ * in the order the candidates arrived. A candidate whose type was the only fault
+ * then parses like any other; one with a different fault is refused again, and
+ * that second refusal is the one worth reporting.
+ */
+export function parseCaptureReply(
+  response: string,
+  maxCandidates: number,
+  speakerHint?: CaptureSpeakerHint,
+  typeOverrides?: ReadonlyMap<number, string>,
+  reportWarning?: (message: string) => void,
+): CaptureParseResult {
   const reading = readModelJson(response, reportWarning);
   const object = reading.object;
   if (!object) {
@@ -314,14 +391,39 @@ export function parseCaptureResponse(
   const soleSpeaker =
     speakerHint?.names.length === 1 ? speakerHint.names[0] : undefined;
 
-  return object.candidates
+  const drafts: CaptureCandidateDraft[] = [];
+  const refusals: CaptureRefusal[] = [];
+  for (const [index, candidate] of object.candidates
     .slice(0, maxCandidates)
-    .map((candidate) => parseCandidate(candidate, soleSpeaker, reportWarning))
-    .map((candidate) => ({
-      ...candidate,
-      speaker: attributeSpeakers(candidate.speaker),
-    }))
-    .filter((candidate) => !isQuarantinedMemoryType(candidate.type));
+    .entries()) {
+    const override = typeOverrides?.get(index);
+    const prepared =
+      override !== undefined && isRecord(candidate)
+        ? { ...candidate, type: override }
+        : candidate;
+    try {
+      const draft = parseCandidate(prepared, soleSpeaker, reportWarning);
+      drafts.push({ ...draft, speaker: attributeSpeakers(draft.speaker) });
+    } catch (error) {
+      refusals.push({
+        index,
+        candidate,
+        reason: describeError(error),
+        invalidType: error instanceof CaptureCandidateTypeError,
+      });
+    }
+  }
+  // A `dream` is valid vocabulary but quarantined from capture, so it is neither
+  // a draft nor a refusal: it was never going to be staged.
+  return {
+    drafts: drafts.filter((draft) => !isQuarantinedMemoryType(draft.type)),
+    refusals,
+  };
+}
+
+/** Names one refused candidate in a sentence, using its title when it has one. */
+export function describeCaptureRefusal(refusal: CaptureRefusal): string {
+  return `skipped a capture candidate ${candidateLabel(refusal.candidate)}: ${refusal.reason}`;
 }
 
 /**
@@ -409,6 +511,36 @@ function formatContent(content: unknown): string {
     .join("\n");
 }
 
+/**
+ * A candidate whose `type` is not in the capture vocabulary.
+ *
+ * The one refusal a model can repair without rewriting anything: the content is
+ * intact and only the label is wrong, which is why it is a distinct error rather
+ * than a message the caller has to pattern-match.
+ */
+class CaptureCandidateTypeError extends Error {}
+
+/** Names one candidate in a warning, using its title when it has a usable one.
+ *
+ * The title is often the part that failed to parse, so this reads the raw value
+ * rather than a validated draft, and falls back to a marker that says the
+ * candidate could not identify itself.
+ */
+function candidateLabel(value: unknown): string {
+  if (isRecord(value) && typeof value.title === "string") {
+    const title = value.title.trim();
+    if (title !== "") {
+      return JSON.stringify(title);
+    }
+  }
+  return "(untitled)";
+}
+
+/** Renders a refusal as the one sentence a warning has room for. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Parses and validates one candidate object. */
 function parseCandidate(
   value: unknown,
@@ -421,7 +553,7 @@ function parseCandidate(
   const title = requireString(value.title, "title");
   const body = requireString(value.body, "body");
   if (!isMemoryType(value.type)) {
-    throw new Error("Capture candidate has an invalid type.");
+    throw new CaptureCandidateTypeError("Capture candidate has an invalid type.");
   }
   if (!Array.isArray(value.speaker)) {
     throw new Error("Capture candidate speaker must be an array.");

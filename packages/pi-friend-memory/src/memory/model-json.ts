@@ -50,19 +50,76 @@ export function readModelJson(
   response: string,
   reportWarning?: (message: string) => void,
 ): ModelJsonReading {
-  const first = response.indexOf("{");
-  const last = response.lastIndexOf("}");
+  const reading = readDelimited(response, "{", "}", "object", reportWarning);
+  if (reading.value === undefined) {
+    return { repaired: reading.repaired, problem: reading.problem };
+  }
+  return isRecord(reading.value)
+    ? { object: reading.value, repaired: reading.repaired }
+    : { repaired: reading.repaired, problem: "is not a JSON object" };
+}
+
+/** What a reply yielded when an array was asked for. */
+export interface ModelJsonArrayReading {
+  /** The array the reply contains, when one could be read. */
+  value?: unknown[];
+  /** One clause naming why no array could be read, phrased to follow "response". */
+  problem?: string;
+  /** Whether the text had to be repaired before it would parse. */
+  repaired: boolean;
+}
+
+/**
+ * Reads the one JSON array a model reply is supposed to contain.
+ *
+ * Same reader as `readModelJson`, delimited by brackets instead of braces, for
+ * the prompts that ask for a bare array — the capture type retry is the only
+ * one, and it wants a list of type names with no wrapper around them.
+ */
+export function readModelJsonArray(
+  response: string,
+  reportWarning?: (message: string) => void,
+): ModelJsonArrayReading {
+  const reading = readDelimited(response, "[", "]", "array", reportWarning);
+  if (reading.value === undefined) {
+    return { repaired: reading.repaired, problem: reading.problem };
+  }
+  return Array.isArray(reading.value)
+    ? { value: reading.value, repaired: reading.repaired }
+    : { repaired: reading.repaired, problem: "is not a JSON array" };
+}
+
+/** One delimited JSON value read out of a reply, before any shape check. */
+interface DelimitedReading {
+  value?: unknown;
+  problem?: string;
+  repaired: boolean;
+}
+
+/**
+ * Reads the JSON value between the first `open` and the last `close`.
+ *
+ * Prose and fences need no trimming because the delimiters bracket the value.
+ * The parse is strict first, and only a text that fails is handed to
+ * `jsonrepair`, so a well-formed reply is never rewritten.
+ */
+function readDelimited(
+  response: string,
+  open: string,
+  close: string,
+  kind: string,
+  reportWarning?: (message: string) => void,
+): DelimitedReading {
+  const first = response.indexOf(open);
+  const last = response.lastIndexOf(close);
   if (first < 0 || last <= first) {
-    return { repaired: false, problem: "does not contain a JSON object" };
+    return { repaired: false, problem: `does not contain a JSON ${kind}` };
   }
 
   const text = response.slice(first, last + 1);
   let strictProblem: string;
   try {
-    const value: unknown = JSON.parse(text);
-    return isRecord(value)
-      ? { object: value, repaired: false }
-      : { repaired: false, problem: "is not a JSON object" };
+    return { value: JSON.parse(text) as unknown, repaired: false };
   } catch (error) {
     strictProblem = describeParseError(error);
   }
@@ -71,21 +128,15 @@ export function readModelJson(
   try {
     repaired = jsonrepair(text);
   } catch {
-    return {
-      repaired: true,
-      problem: `is not valid JSON (${strictProblem})`,
-    };
+    return { repaired: true, problem: `is not valid JSON (${strictProblem})` };
   }
 
   try {
     const value: unknown = JSON.parse(repaired);
-    if (!isRecord(value)) {
-      return { repaired: true, problem: "is not a JSON object" };
-    }
     reportWarning?.(
       `the model's reply was not valid JSON (${strictProblem}) and was repaired before use`,
     );
-    return { object: value, repaired: true };
+    return { value, repaired: true };
   } catch {
     return { repaired: true, problem: `is not valid JSON (${strictProblem})` };
   }

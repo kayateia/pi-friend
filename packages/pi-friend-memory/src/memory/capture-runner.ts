@@ -12,16 +12,22 @@ import type { AutoCaptureConfig } from "./config.ts";
 import { debugLog, logError } from "../debug/log.ts";
 import {
   buildCapturePrompt,
+  CAPTURE_TYPES,
   CaptureResponseError,
+  describeCaptureRefusal,
+  parseCaptureReply,
   parseCaptureResponse,
   type CaptureCandidateDraft,
+  type CaptureRefusal,
   type CaptureSpeakerHint,
 } from "./capture.ts";
 import {
   CAPTURE_REPAIR_SYSTEM_PROMPT,
   CAPTURE_SYSTEM_PROMPT,
+  CAPTURE_TYPE_RETRY_SYSTEM_PROMPT,
   resolveSystemPrompt,
 } from "./prompts.ts";
+import { readModelJsonArray } from "./model-json.ts";
 import { resolveConfiguredModel, runNestedModel } from "./model-call.ts";
 import { MemorySchemaError } from "./schema.ts";
 import {
@@ -79,11 +85,14 @@ export async function runCaptureModel(
   });
   debugLog("capture response", response);
   try {
-    return parseCaptureResponse(
+    return await readCaptureDrafts(
+      ctx,
+      model,
+      config,
       response,
-      config.maxCandidates,
       speakerHint,
       reportWarning,
+      signal,
     );
   } catch (error) {
     if (error instanceof CaptureResponseError) {
@@ -109,6 +118,176 @@ export async function runCaptureModel(
     }
     throw error;
   }
+}
+
+/**
+ * Turns one capture reply into drafts, retrying an unusable type once.
+ *
+ * A candidate whose content is fine and whose `type` is invented is the one
+ * model error that carries its own fix: the label is wrong, everything else is
+ * worth keeping. So the offending candidates go back to the model once, as a
+ * request for a plain array of types in the same order, and the reply is used to
+ * re-parse the candidates it named. Only after that — and only for whatever is
+ * still unusable — does anyone hear about it, because a warning about a
+ * candidate that was quietly repaired is noise that teaches nothing.
+ *
+ * The retry is best-effort. A model call that fails, a reply that is not an
+ * array, or a length that does not match leaves the refusals exactly as they
+ * were, and they are reported the old way.
+ */
+async function readCaptureDrafts(
+  ctx: ExtensionContext,
+  model: NonNullable<ExtensionContext["model"]>,
+  config: AutoCaptureConfig,
+  response: string,
+  speakerHint: CaptureSpeakerHint | undefined,
+  reportWarning: (message: string) => void,
+  signal?: AbortSignal,
+): Promise<CaptureCandidateDraft[]> {
+  const first = parseCaptureReply(response, config.maxCandidates, speakerHint);
+  const retryable = first.refusals.filter((refusal) => refusal.invalidType);
+  let result = first;
+
+  if (retryable.length > 0) {
+    const types = await retryCandidateTypes(
+      ctx,
+      model,
+      config,
+      retryable,
+      reportWarning,
+      signal,
+    );
+    if (types.size > 0) {
+      result = parseCaptureReply(
+        response,
+        config.maxCandidates,
+        speakerHint,
+        types,
+        reportWarning,
+      );
+    }
+  }
+
+  for (const refusal of result.refusals) {
+    reportWarning(describeCaptureRefusal(refusal));
+  }
+  // Nothing usable means the window produced nothing at all; failing leaves the
+  // cursor where it was so the same material is read again rather than dropped.
+  if (result.refusals.length > 0 && result.drafts.length === 0) {
+    throw new Error(result.refusals[0]!.reason);
+  }
+  return result.drafts;
+}
+
+/**
+ * Asks the model for one valid type per refused candidate.
+ *
+ * The reply is a bare array keyed by position, so a length that does not match
+ * the request is refused outright: a shifted array would silently relabel the
+ * wrong memories, which is worse than leaving them unlabelled. Types outside the
+ * capture vocabulary are ignored for the same reason.
+ */
+async function retryCandidateTypes(
+  ctx: ExtensionContext,
+  model: NonNullable<ExtensionContext["model"]>,
+  config: AutoCaptureConfig,
+  refusals: readonly CaptureRefusal[],
+  reportWarning: (message: string) => void,
+  signal?: AbortSignal,
+): Promise<ReadonlyMap<number, string>> {
+  const repairs = new Map<number, string>();
+  let reply: string;
+  try {
+    reply = await runNestedModel(ctx, model, {
+      systemPrompt: CAPTURE_TYPE_RETRY_SYSTEM_PROMPT,
+      userContent: buildTypeRetryPrompt(refusals),
+      maxTokens: 300,
+      timeoutMs: CAPTURE_TIMEOUT_MS,
+      label: "capture type retry",
+      reportWarning,
+      ...(signal === undefined ? {} : { signal }),
+      ...(config.thinkingLevel === undefined
+        ? {}
+        : { thinkingLevel: config.thinkingLevel }),
+    });
+  } catch (error) {
+    debugLog("capture type retry failed", { error });
+    return repairs;
+  }
+
+  const reading = readModelJsonArray(reply);
+  const types = reading.value;
+  if (!Array.isArray(types) || types.length !== refusals.length) {
+    debugLog("capture type retry unusable", {
+      problem: reading.problem,
+      expected: refusals.length,
+      received: Array.isArray(types) ? types.length : undefined,
+    });
+    return repairs;
+  }
+
+  for (const [position, refusal] of refusals.entries()) {
+    const type = types[position];
+    if (typeof type !== "string") continue;
+    if (!(CAPTURE_TYPES as readonly string[]).includes(type)) continue;
+    repairs.set(refusal.index, type);
+  }
+  debugLog("capture type retry", {
+    refused: refusals.length,
+    repaired: repairs.size,
+  });
+  return repairs;
+}
+
+/**
+ * Builds the retry request.
+ *
+ * Title and the opening of the body: enough to classify, and no more. Sending the
+ * whole candidate would invite a rewrite, and the point is a label.
+ */
+export function buildTypeRetryPrompt(
+  refusals: readonly CaptureRefusal[],
+): string {
+  return [
+    `These memory candidates used a \`type\` outside the vocabulary. Valid types are exactly ${CAPTURE_TYPES.map((type) => `\`${type}\``).join(", ")}.`,
+    "Reply with one valid type for each candidate, as a JSON array in the same order, and nothing else.",
+    "",
+    JSON.stringify(
+      refusals.map((refusal) => ({
+        title: titleOf(refusal.candidate),
+        type: typeOf(refusal.candidate),
+        body: bodyExcerptOf(refusal.candidate),
+      })),
+      null,
+      2,
+    ),
+  ].join("\n");
+}
+
+/** Reads the raw title of a refused candidate, for the retry request. */
+function titleOf(candidate: unknown): string {
+  return isRecordValue(candidate) && typeof candidate.title === "string"
+    ? candidate.title
+    : "";
+}
+
+/** Reads the raw type of a refused candidate, so the model can see what it tried. */
+function typeOf(candidate: unknown): unknown {
+  return isRecordValue(candidate) ? candidate.type : undefined;
+}
+
+/** Returns the opening of a refused candidate's body, which is enough to classify it. */
+function bodyExcerptOf(candidate: unknown): string {
+  const body =
+    isRecordValue(candidate) && typeof candidate.body === "string"
+      ? candidate.body
+      : "";
+  return body.length > 280 ? `${body.slice(0, 280)}…` : body;
+}
+
+/** Narrows a raw JSON value to a string-keyed record. */
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** One draft the store refused, and the message that says why. */

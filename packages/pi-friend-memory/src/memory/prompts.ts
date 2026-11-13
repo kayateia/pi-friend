@@ -50,6 +50,22 @@ export const CAPTURE_REPAIR_SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
+ * System prompt for the one-round retry that repairs capture candidate types.
+ *
+ * The candidate is already good; only its label is wrong, so this asks for the
+ * label and nothing else. Types are listed in backticks for the same reason the
+ * capture prompt lists them: a model has to see a value as a value, not as prose
+ * it may paraphrase. Not configurable — a replacement could only widen the
+ * vocabulary the parser accepts, which is not a thing a prompt may do.
+ */
+export const CAPTURE_TYPE_RETRY_SYSTEM_PROMPT = [
+  "You classify memory candidates into the type vocabulary a memory store accepts.",
+  "The valid types are exactly `fact`, `preference`, `event`, and `person-note`.",
+  'Reply with only a JSON array of type strings, one per candidate, in the order they are given: ["fact","event"].',
+  "Do not explain, do not add candidates, and do not use any other type.",
+].join("\n");
+
+/**
  * Builds the sweep system prompt.
  *
  * `allowDrop` is configuration, not decoration: the parser refuses a `drop`
