@@ -541,6 +541,26 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Renders a model-supplied value for an error message.
+ *
+ * Strings are quoted so a near-miss like `facts` is visibly wrong, and anything
+ * else keeps its JSON shape rather than collapsing to "[object Object]".
+ */
+function describeCaptureValue(value: unknown): string {
+  if (typeof value === "string") {
+    return `"${value}"`;
+  }
+  if (value === undefined) {
+    return "undefined";
+  }
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
 /** Parses and validates one candidate object. */
 function parseCandidate(
   value: unknown,
@@ -553,7 +573,14 @@ function parseCandidate(
   const title = requireString(value.title, "title");
   const body = requireString(value.body, "body");
   if (!isMemoryType(value.type)) {
-    throw new CaptureCandidateTypeError("Capture candidate has an invalid type.");
+    // The value is named, and so is the vocabulary: this message is the feedback
+    // a repair round is given, and "invalid type" alone tells it nothing it can
+    // act on.
+    throw new CaptureCandidateTypeError(
+      `Capture candidate has an invalid type ${describeCaptureValue(
+        value.type,
+      )}; expected one of ${MEMORY_TYPES.join(", ")}.`,
+    );
   }
   if (!Array.isArray(value.speaker)) {
     throw new Error("Capture candidate speaker must be an array.");

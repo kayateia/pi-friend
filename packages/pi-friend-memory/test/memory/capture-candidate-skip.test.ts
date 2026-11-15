@@ -45,7 +45,8 @@ test("one unusable candidate costs one candidate, not its neighbours", () => {
   );
   assert.equal(warnings.length, 1);
   assert.match(warnings[0]!, /"Invented type"/u);
-  assert.match(warnings[0]!, /invalid type/u);
+  assert.match(warnings[0]!, /invalid type "philosophical-insight"/u);
+  assert.match(warnings[0]!, /expected one of .*\bfact\b/u);
 });
 
 test("a refused candidate that cannot name itself is still named in the warning", () => {

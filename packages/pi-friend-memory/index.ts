@@ -61,7 +61,10 @@ import {
   resolveOpenRouterApiKey,
 } from "./src/memory/embedding.ts";
 import { ExternalIndexManager } from "./src/memory/external-index-manager.ts";
-import { runPendingMigrations } from "./src/memory/migrations.ts";
+import {
+  runPendingMigrations,
+  stripCandidateEditedFields,
+} from "./src/memory/migrations.ts";
 import type { MemoryStore } from "./src/memory/store.ts";
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
@@ -705,6 +708,30 @@ async function reportMigrations(
       console.error(message);
     }
   };
+
+  // Before the rename: the strict parser refuses a staging file carrying
+  // `edited`, and the rename migration would report such a file as unparseable
+  // instead of migrating it.
+  try {
+    const candidateOutcome = await stripCandidateEditedFields(store);
+    if (candidateOutcome !== null && candidateOutcome.changed.length > 0) {
+      notify(
+        `pi-friend memory: removed an uneditable \`edited\` timestamp from ${
+          candidateOutcome.changed.length
+        } staging candidate${
+          candidateOutcome.changed.length === 1 ? "" : "s"
+        }, so a draft cannot claim to be newer than it is.`,
+        candidateOutcome.skipped.length === 0 ? "info" : "warning",
+      );
+    }
+  } catch (error) {
+    logError("memory migration", error);
+    notify(
+      `pi-friend memory migration failed: ${formatErrorChain(error)}`,
+      "error",
+    );
+    return;
+  }
 
   let outcome;
   try {

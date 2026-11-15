@@ -421,6 +421,21 @@ export function validateMemoryNodeLocation(
     );
   }
 
+  // A candidate is never edited: there is no tool that edits one, and a
+  // restored candidate is copied rather than amended. `edited` on a staging
+  // file therefore dates nothing, and it is not harmless, because
+  // `edited ?? created` is the content timestamp a sync compares — an inherited
+  // value would let a draft claim to be newer than it is.
+  if (
+    location.kind === "staging-candidate" &&
+    node.frontMatter.edited !== undefined
+  ) {
+    throw new MemorySchemaError(
+      `"edited" must be absent from front matter for staging node ${node.slug}; only canonical memories can be edited.`,
+      { field: "edited" },
+    );
+  }
+
   if (location.kind === "node" && node.frontMatter.status === "candidate") {
     throw new MemorySchemaError(
       `Canonical node ${node.slug} must not retain candidate status.`,
@@ -443,7 +458,7 @@ export function validateMemoryNodeLocation(
     isQuarantinedMemoryType(node.frontMatter.type)
   ) {
     throw new MemorySchemaError(
-      `${node.frontMatter.type} node ${node.slug} cannot be a staging candidate.`,
+      `${node.frontMatter.type} node ${node.slug} cannot be a staging candidate; a dream is synthesized from canonical memories and is never captured.`,
       { field: "type" },
     );
   }
@@ -451,13 +466,12 @@ export function validateMemoryNodeLocation(
   // History fields describe what ended a version. On a live node they are a
   // leaked record, and a restore that forgot to strip them should fail here
   // rather than store them silently.
-  const carriesHistoryFields =
-    node.frontMatter.history_reason !== undefined ||
-    node.frontMatter.history_conflict !== undefined ||
-    node.frontMatter.history_children !== undefined;
-  if (carriesHistoryFields && !normalizedPath.startsWith("history/")) {
+  const carriesHistoryFields = HISTORY_FRONT_MATTER_KEYS.filter(
+    (key) => node.frontMatter[key] !== undefined,
+  );
+  if (carriesHistoryFields.length > 0 && !normalizedPath.startsWith("history/")) {
     throw new MemorySchemaError(
-      `${node.slug} carries history-only front matter outside history/.`,
+      `${node.slug} carries history-only front matter outside history/: ${carriesHistoryFields.join(", ")}.`,
     );
   }
 

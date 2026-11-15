@@ -143,7 +143,8 @@ test("history-only front matter is refused on a live node", async () => {
             history_reason: "leaked",
           },
         }),
-      /history-only front matter/u,
+      // The message names the field, so a reader knows what to remove.
+      /history-only front matter outside history\/: history_reason/u,
     );
   });
 });
