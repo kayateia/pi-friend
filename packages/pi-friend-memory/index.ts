@@ -50,7 +50,10 @@ import { createMergeWriter } from "./src/memory/merge-writer.ts";
 import { AutoCaptureScheduler } from "./src/memory/capture-scheduler.ts";
 import {
   captureStatePath,
+  cursorBelongsToHost,
   readCaptureCursor,
+  resolveHostIdentity,
+  stampCaptureHost,
   writeCaptureCursor,
 } from "./src/memory/capture-state.ts";
 import {
@@ -110,6 +113,11 @@ export default async function registerPiFriend(
     | undefined;
   let autoCaptureConfig: AutoCaptureConfig = defaultAutoCaptureConfig();
   let captureScheduler: AutoCaptureScheduler | undefined;
+  // Whether a real user message has arrived since the last settled run. Only
+  // that explains a settlement: a run started by an extension-injected message
+  // or a queued follow-up is housekeeping, and counting it would capture a
+  // conversation on a host nobody is speaking to.
+  let sawRealUserMessage = false;
   let sweepConfig: SweepConfig = defaultSweepConfig();
   let mergeConfig: MergeConfig = defaultMergeConfig();
   let dreamingConfig: DreamingConfig = defaultDreamingConfig();
@@ -208,9 +216,12 @@ export default async function registerPiFriend(
 
       const finalEntry = branch[branch.length - 1];
       if (finalEntry) {
+        // A capture claims the session for this host, so ownership follows
+        // whoever last moved the cursor rather than only who last spoke.
+        const host = resolveHostIdentity();
         await writeCaptureCursor(statePath, sessionId, {
           lastEntryId: finalEntry.id,
-          lastCapturedAt: new Date().toISOString(),
+          ...(host === undefined ? {} : { host }),
         }).catch((error: unknown) => {
           reportCaptureWarning(
             ctx,
@@ -251,6 +262,12 @@ export default async function registerPiFriend(
    * recent turns, which may already have been captured, and arming on every
    * resume would then stage duplicates each time a session is opened — so that
    * case stays with the next settle, where it has always belonged.
+   *
+   * A session owned by another host does not count either. Syncing a transcript
+   * and a cursor to a second machine leaves it looking exactly like a session
+   * with uncaptured work, and the two would then extract the same turns into
+   * duplicate candidates. Ownership is recorded when a user message arrives, so
+   * it is the one fact that can tell the two states apart.
    */
   const hasUncapturedEntries = async (
     ctx: ExtensionContext,
@@ -264,6 +281,9 @@ export default async function registerPiFriend(
       captureStatePath(),
       ctx.sessionManager.getSessionId(),
     );
+    if (!cursorBelongsToHost(restored.cursor, resolveHostIdentity())) {
+      return false;
+    }
     const cursor = restored.cursor?.lastEntryId;
     const { startIndex, cursorFound } = captureStartIndex(
       branch,
@@ -337,6 +357,33 @@ export default async function registerPiFriend(
       backgroundSweep = tracked;
     }, 0);
   };
+
+  // A user message is the one thing that moves ownership of a session, so it is
+  // stamped when it arrives rather than inferred later from the transcript: the
+  // transcript records what was said, never which machine it was typed on. A
+  // stamp is written only when the recorded owner differs, because every write
+  // changes the file's timestamp and the sync tool compares those.
+  //
+  // Extension-injected messages are excluded. They are housekeeping, and must
+  // not claim a conversation for a host.
+  pi.on("input", async (event, ctx) => {
+    if (event.source !== "interactive" && event.source !== "rpc") {
+      return;
+    }
+    sawRealUserMessage = true;
+    if (!autoCaptureConfig.enabled) {
+      return;
+    }
+    const host = resolveHostIdentity();
+    if (host === undefined) {
+      return;
+    }
+    await stampCaptureHost(
+      captureStatePath(),
+      ctx.sessionManager.getSessionId(),
+      host,
+    ).catch((error: unknown) => logError("capture host stamp", error));
+  });
 
   pi.on("session_start", async (_event, ctx) => {
     ragSessions.delete(ctx.sessionManager.getSessionId());
@@ -541,7 +588,16 @@ export default async function registerPiFriend(
 
   pi.on("agent_settled", async (event, ctx) => {
     ragSessions.delete(ctx.sessionManager.getSessionId());
+    // A settlement only explains a capture when a person caused it. Without
+    // this, a run started by an extension-injected message would count toward
+    // `every_turns` and arm the idle timer on a host that was only mirroring
+    // the conversation. The flag is consumed here either way: an aborted run
+    // does not capture, and leaving the flag set would let the next settlement
+    // — whatever caused it — inherit this one's user message.
+    const causedByUser = sawRealUserMessage;
+    sawRealUserMessage = false;
     if (
+      !causedByUser ||
       event.aborted ||
       !memoryService ||
       !autoCaptureConfig.enabled ||
