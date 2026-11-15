@@ -442,6 +442,26 @@ longer appears in the branch does not count as pending: its fallback re-reads
 the most recent turns, and arming on that would stage duplicates on every
 resume.
 
+A settlement counts only when a real user message caused it. Runs started by an
+injected message never capture on their own and never arm the debounce, so an
+automation-driven session is not remembered. That is the cost of the rule: what
+is captured is conversation, and a conversation someone had.
+
+**Two machines, one conversation.** A host that receives a synced transcript
+and cursor cannot tell that work from a session nobody has captured yet, and
+both copies would then extract the same turns into duplicate candidates. So
+each session's record also names its **owner** — the host that most recently
+received a user message in it — and only the owner runs its own capture. The
+other copy is a mirror until someone speaks there.
+
+Ownership is stamped when a user message arrives and written only when it
+changes: every write moves the file's timestamp, and a sync tool resolves
+conflicts by comparing them. Host identity comes from `HOST_IDENTITY` in each
+machine's environment. It cannot live in `pi-friend-memory.yml`, because that
+file is synced between the machines and would carry the same name on both. When
+it is unset, or when a record predates it, every rule behaves as it did before
+ownership existed — which is what makes upgrading one host at a time safe.
+
 Candidates are written to `staging/` with `status: candidate` and may enter RAG
 with a `Candidate - unverified` marker. Exact duplicates of canonical or staged
 memories are skipped. Promotion uses the semantic index to detect
