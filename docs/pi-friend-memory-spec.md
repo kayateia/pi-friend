@@ -125,7 +125,7 @@ speaker:                            # the non-AI participants, ordered by attrib
     note: ""                        #   optional, e.g. "fronting at the time"
 agents: []                          # every AI involved in the exchange, including the one writing it
 created: 2026-10-18T09:00:00Z
-last_used: 2026-10-18T09:00:00Z     # maintained at sweep time, NOT on every hit
+last_used: 2026-10-18T09:00:00Z     # moves when the node is used: a read, a search hit, an injection, an edit
 use_count: 0
 decay_weight: 1.0                   # recomputed at sweep; see §7
 status: active                      # active | candidate | superseded | archived
@@ -157,7 +157,7 @@ The names below are the built-in tool names. A configured `tool_prefix` is prepe
 
 - `memory_add(title, body, front_matter_extras?)` → creates a canonical active node, derives a unique slug, and records links, tags, speaker attribution, and other front-matter metadata.
 - `memory_delete(match)` → copies the node to `history/deleted/<slug>.md` and removes it from `nodes/`, or, for a staging candidate, to `history/dropped/<slug>.md` and out of `staging/` (does not hard-delete). The match spans both areas; an ambiguous match is rejected with each result labelled memory or candidate.
-- `memory_edit(slug, edits)` → edits body/front matter while preserving `created`, `use_count`, and decay state; sets `edited` and stores the replaced version under `history/edited/<slug>/` with the edit's reason.
+- `memory_edit(slug, edits)` → edits body/front matter while preserving `created` and `use_count`; sets `edited` and `last_used` (an edit is a use as well as a change) and stores the replaced version under `history/edited/<slug>/` with the edit's reason.
 - `memory_restore(slug, timestamp?)` → copies a memory back out of `history/`, preferring the deletion entry and otherwise the newest stored version; replaces a live node of the same slug (archiving its text first) and removes the entry it extracted. Restoring a split source removes the children the split recorded.
 - `memory_read(slug, area?)` → reads a complete serialized node from canonical or staging storage.
 - `memory_promote(candidateSlug)` → promotes one staging candidate. Near-duplicates are merged into an existing canonical node with links and attribution preserved.
@@ -278,7 +278,7 @@ background signal and waits for cleanup before closing the semantic index.
 Once per day, a model pass:
   1. Processes volume-relative decay on `staging` nodes using the canonical volume curve and `0.05` floor, without resetting decay for RAG hits. Candidates whose decay weight reaches `0.05` are removed before model review, logged, and included in the 25% removal total. Do not expire candidates solely because wall-clock time has passed.
   2. Reviews remaining candidates in `staging/` (`promote`, `merge`; log each decision).
-  3. Recomputes `decay_weight` from the access log and volume counters.
+  3. Recomputes `decay_weight` from volume counters alone. Usage — `last_used` and `use_count` — is written where the use happens and is not projected here; the access log is no longer read by anything.
   4. Demotes nodes with low volume-relative weight: updates tier metadata, optionally compacts cold nodes (merge related cold nodes into a summary node with links back).
   5. Leaves recovery to `history/`: a deletion, drop, edit or merge already stored the old version, so the sweep has nothing to archive.
 

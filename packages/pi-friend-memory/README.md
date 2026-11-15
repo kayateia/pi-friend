@@ -530,9 +530,16 @@ semantic index. The default remains `false`.
 The sweep model chooses `promote` or `merge` for staged candidates. Candidates
 that reach the volume-decay floor of `0.05` expire before model review and are
 archived under `history/dropped/`, not hard-deleted. Decay is volume-relative:
-access resets a canonical node to fresh, while new canonical memories since a
-node's last use lower its `decay_weight`. Candidate decay uses the same curve
-and floor, counts canonical additions only, and ignores RAG-hit access resets.
+new canonical memories created after a node was last used lower its
+`decay_weight`, and a use resets it, so the node is fresh again at the next
+sweep. Usage is written where it happens rather than projected at the sweep:
+`last_used` moves on a read, a row `memory_search` returns, a recall hit that
+reached the prompt, an edit, a merge and a promotion; `use_count` moves only on
+the three reads, because it counts reads rather than authorship or adoption — an
+edit, a merge or a promotion changes a memory rather than consulting it.
+Candidates are never bumped — their decay deliberately ignores retrieval, so
+whatever a retriever happens to like still expires — and candidate decay uses
+the same curve and floor over canonical additions only.
 
 A sweep that removes more than 25% of a queue at least `min_guarded_batch_size`
 candidates large says so in its log line and then does it: dropping is

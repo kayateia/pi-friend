@@ -397,22 +397,70 @@ export class MemoryNodeService {
     return results;
   }
 
-  /** Recomputes volume-relative decay metadata for canonical nodes. */
+  /**
+   * Records that memories were used, at the point of use.
+   *
+   * `last_used` and `use_count` are written here rather than projected at the
+   * next sweep, so a read is visible immediately and the access log stops being
+   * the store of record for it. The callers are the ones that know what a use
+   * *was*: the tool surface passes every row it returned, and the recall pass
+   * passes only what reached the prompt.
+   *
+   * Candidates are not bumped. Their decay deliberately ignores retrieval, so a
+   * bumped candidate would keep whatever the retriever happens to like from ever
+   * reaching the floor. Documents have no counters. Both fall out of reading the
+   * canonical area by slug, which is also why a stale slug is a no-op rather
+   * than an error.
+   *
+   * `edited` is never touched: it dates authorship, not attention, and the
+   * record's content timestamp depends on it.
+   *
+   * A failure here is logged, never thrown. Failing to record a use is a reason
+   * for one log line, not for failing the search that found the memory.
+   */
+  async recordUse(slugs: readonly string[]): Promise<void> {
+    const unique = [...new Set(slugs.filter((slug) => slug.trim() !== ""))];
+    if (unique.length === 0) {
+      return;
+    }
+    const now = this.now().toISOString();
+    try {
+      await this.runSerialized(async () => {
+        for (const slug of unique) {
+          try {
+            const node = await this.repository.read(slug, "canonical");
+            if (node === null) {
+              continue;
+            }
+            node.frontMatter.last_used = now;
+            node.frontMatter.use_count = node.frontMatter.use_count + 1;
+            await this.repository.write(node, "canonical");
+          } catch (error) {
+            logError(`memory use bump for "${slug}"`, error);
+          }
+        }
+      });
+    } catch (error) {
+      logError("memory use bump", error);
+    }
+  }
+
+  /**
+   * Recomputes volume-relative decay metadata for canonical nodes.
+   *
+   * Weight only. `last_used` and `use_count` are written where the use happens
+   * (see {@link recordUse}), so a sweep no longer projects them from a log and
+   * a read is visible immediately rather than at the next pass.
+   */
   async recomputeDecay(): Promise<DecayUpdate[]> {
     return this.runSerialized(async () => {
       const nodes = await this.repository.list("canonical");
-      const accessLog =
-        (await this.repository.store.readTextFileIfExists("access-log")) ?? "";
-      const updates = computeDecayUpdates(nodes, accessLog, {
-        reportError: (label, error) => logError(label, error),
-      });
+      const updates = computeDecayUpdates(nodes);
       const bySlug = new Map(nodes.map((node) => [node.slug, node]));
 
       for (const update of updates) {
         const node = bySlug.get(update.slug);
         if (!node) continue;
-        node.frontMatter.use_count = update.useCount;
-        node.frontMatter.last_used = update.lastUsed;
         node.frontMatter.decay_weight = update.decayWeight;
         await this.repository.write(node, "canonical");
       }
@@ -421,7 +469,7 @@ export class MemoryNodeService {
     });
   }
 
-  /** Writes planned staging decay metadata before sweep decisions are applied. */
+  /** Writes planned staging decay weights before sweep decisions are applied. */
   async applyCandidateDecay(updates: DecayUpdate[]): Promise<void> {
     return this.runSerialized(async () => {
       for (const update of updates) {
@@ -429,8 +477,6 @@ export class MemoryNodeService {
         if (candidate === null) {
           continue;
         }
-        candidate.frontMatter.use_count = update.useCount;
-        candidate.frontMatter.last_used = update.lastUsed;
         candidate.frontMatter.decay_weight = update.decayWeight;
         await this.repository.write(candidate, "staging");
       }
@@ -717,6 +763,10 @@ export class MemoryNodeService {
       const merged = cloneNode(target);
       merged.body = rewrite?.body ?? appendMechanically(target, sourceNodes);
       merged.frontMatter.edited = now;
+      // A merge is an edit, and an edit is a use: the node was opened, reasoned
+      // about and rewritten. It does not count as a *read*, so `use_count` is
+      // left alone.
+      merged.frontMatter.last_used = now;
       // Attribution from every source is pooled and collapsed once, rather than
       // unioned as-is: two memories can each name the same person, and a list
       // that repeats them reads as a contradiction in the recall block.
@@ -799,7 +849,13 @@ export class MemoryNodeService {
     return relativePath;
   }
 
-  /** Updates editable node fields while preserving creation and usage state. */
+  /**
+   * Updates editable node fields, preserving creation state.
+   *
+   * An edit is a use as well as a change: the node was opened and reasoned
+   * about, so `last_used` moves with `edited`. `use_count` does not — it counts
+   * reads, not authorship.
+   */
   async edit(slug: string, input: MemoryEditInput): Promise<ParsedMemoryNode> {
     return this.runSerialized(async () => {
       const node = await this.repository.read(slug);
@@ -847,6 +903,7 @@ export class MemoryNodeService {
       if (input.links !== undefined) frontMatter.links = input.links;
       if (input.source !== undefined) frontMatter.source = input.source;
       frontMatter.edited = timestamp;
+      frontMatter.last_used = timestamp;
 
       let body = node.body;
       if (input.body !== undefined) {

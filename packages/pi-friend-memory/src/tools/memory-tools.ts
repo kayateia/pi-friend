@@ -753,6 +753,12 @@ export function registerMemoryTools(
         };
       }
 
+      // A read is a use: the node was fetched to be looked at. Candidates and
+      // history are not, and recordUse ignores both by reading the live area.
+      if (area === "canonical") {
+        await service.recordUse([node.slug]);
+      }
+
       return {
         content: [
           {
@@ -876,6 +882,15 @@ export function registerMemoryTools(
         ...window,
       };
       const results = await service.search(searchOptions);
+      // Every row the tool hands back counts as a use. Candidates and imported
+      // documents carry no counters, and recordUse skips both.
+      await service.recordUse(
+        results.flatMap((result) =>
+          result.kind === "node" && result.slug !== undefined
+            ? [result.slug]
+            : [],
+        ),
+      );
       const text = formatSearchResults(params.query, results);
       const notes = [
         degradeDefault

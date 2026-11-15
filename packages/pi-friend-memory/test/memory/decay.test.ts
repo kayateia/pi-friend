@@ -43,78 +43,68 @@ function makeNode(
   };
 }
 
-test("access resets decay and updates last-used metadata", () => {
-  const node = makeNode(
-    "remembered",
-    "2026-01-01T00:00:00Z",
-    "2026-01-01T00:00:00Z",
-  );
-  const updates = computeDecayUpdates(
-    [node],
-    [
-      JSON.stringify({
-        timestamp: "2026-01-05T00:00:00Z",
-        slug: "remembered",
-        path: "nodes/remembered.md",
-      }),
-    ].join("\n"),
-  );
-
-  assert.deepEqual(updates, [
-    {
-      slug: "remembered",
-      useCount: 1,
-      lastUsed: "2026-01-05T00:00:00Z",
-      decayWeight: 1,
-    },
-  ]);
-});
-
-test("decay is volume-relative rather than wall-clock based", () => {
-  const old = makeNode(
-    "old",
-    "2026-01-01T00:00:00Z",
-    "2026-01-01T00:00:00Z",
-  );
+test("decay is volume-relative: memories created since a use age it", () => {
+  const old = makeNode("old", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
   const newer = Array.from({ length: 10 }, (_, index) =>
     makeNode(
       `new-${index}`,
       `2026-01-${String(index + 2).padStart(2, "0")}T00:00:00Z`,
     ),
   );
-  const updates = computeDecayUpdates([old, ...newer], "");
+
+  const updates = computeDecayUpdates([old, ...newer]);
   const oldUpdate = updates.find((update) => update.slug === "old");
 
   assert.equal(oldUpdate?.decayWeight, 0.5);
+});
+
+test("a node used after everything else was created stays fresh", () => {
+  const used = makeNode(
+    "used",
+    "2026-01-01T00:00:00Z",
+    "2026-03-01T00:00:00Z",
+  );
+  used.frontMatter.decay_weight = 0.2;
+  const newer = Array.from({ length: 20 }, (_, index) =>
+    makeNode(
+      `new-${index}`,
+      `2026-02-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+    ),
+  );
+
+  const updates = computeDecayUpdates([used, ...newer]);
+
+  // Nothing has been written since it was last used, so nothing ages it. This
+  // is the whole point of moving `last_used` to the moment of use: the sweep no
+  // longer needs an access log to know it.
   assert.equal(
-    updates.some((update) => update.slug === "new-0"),
-    true,
+    updates.find((update) => update.slug === "used")?.decayWeight,
+    1,
   );
 });
 
-test("malformed access-log records are reported without aborting decay", () => {
-  const node = makeNode(
-    "remembered",
-    "2026-01-01T00:00:00Z",
-    "2026-01-01T00:00:00Z",
-  );
-  const reported: Array<{ label: string; error: unknown }> = [];
+test("only nodes whose weight changes are returned", () => {
+  const settled = makeNode("settled", "2026-01-01T00:00:00Z");
+  settled.frontMatter.decay_weight = 1;
 
-  computeDecayUpdates(
-    [node],
-    '{"timestamp":"not-a-date"}\nnot-json',
-    { reportError: (label, error) => reported.push({ label, error }) },
-  );
+  assert.deepEqual(computeDecayUpdates([settled]), []);
 
-  assert.deepEqual(
-    reported.map((entry) => entry.label),
-    ["access log parse", "access log parse"],
-  );
-  assert.match(String(reported[0]?.error), /line 1/u);
-  assert.match(String(reported[1]?.error), /line 2/u);
+  settled.frontMatter.decay_weight = 0.9;
+  assert.deepEqual(computeDecayUpdates([settled]), [
+    { slug: "settled", decayWeight: 1 },
+  ]);
 });
 
-test("candidate decay uses canonical volume, ignores access, and expires at floor", () => {
+test("superseded and archived nodes weigh nothing", () => {
+  const gone = makeNode("gone", "2026-01-01T00:00:00Z");
+  gone.frontMatter.status = "superseded";
+
+  assert.deepEqual(computeDecayUpdates([gone]), [
+    { slug: "gone", decayWeight: 0 },
+  ]);
+});
+
+test("candidate decay uses canonical volume and expires at the floor", () => {
   const candidate = makeNode(
     "candidate",
     "2026-01-01T00:00:00Z",
@@ -129,11 +119,7 @@ test("candidate decay uses canonical volume, ignores access, and expires at floo
         `2026-01-${String(index + 2).padStart(2, "0")}T00:00:00Z`,
       ),
     ),
-    makeNode(
-      "expired",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:00:00Z",
-    ),
+    makeNode("expired", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
   ];
   canonical.at(-1)!.frontMatter.decay_weight = 0.05;
 
@@ -143,4 +129,15 @@ test("candidate decay uses canonical volume, ignores access, and expires at floo
     0.3333,
   );
   assert.deepEqual(plan.expiredSlugs, ["expired"]);
+});
+
+test("a candidate's decay never rises, however often it is retrieved", () => {
+  const candidate = makeNode("candidate", "2026-01-01T00:00:00Z");
+  candidate.frontMatter.status = "candidate";
+  // Already lower than the volume curve would make it, because it aged before.
+  candidate.frontMatter.decay_weight = 0.2;
+
+  const plan = planCandidateDecay([candidate], [candidate]);
+  assert.deepEqual(plan.updates, []);
+  assert.deepEqual(plan.expiredSlugs, []);
 });

@@ -45,6 +45,8 @@ test("memory_search exposes corpus and passes it through", async () => {
     },
   } as unknown as ExtensionAPI;
   const stubService = {
+    // Only the methods a given test reaches are meaningful here.
+    async recordUse() {},
     store: { config: { search: { defaultMode: "keyword" } } },
     canSearchSemantically: true,
     async search(options: unknown) {
@@ -90,6 +92,8 @@ test("an unavailable configured default degrades to keyword with a note", async 
     },
   } as unknown as ExtensionAPI;
   const stubService = {
+    // Only the methods a given test reaches are meaningful here.
+    async recordUse() {},
     store: { config: { search: { defaultMode: "hybrid" } } },
     canSearchSemantically: false,
     async search(options: Record<string, unknown>) {
@@ -124,6 +128,8 @@ test("memory_search prints speaker attribution when present", async () => {
     },
   } as unknown as ExtensionAPI;
   const stubService = {
+    // Only the methods a given test reaches are meaningful here.
+    async recordUse() {},
     store: { config: { search: { defaultMode: "keyword" } } },
     canSearchSemantically: true,
     async search() {
@@ -173,6 +179,8 @@ test("memory_merge passes the target, sources and optional body through", async 
     },
   } as unknown as ExtensionAPI;
   const stubService = {
+    // Only the methods a given test reaches are meaningful here.
+    async recordUse() {},
     async mergeCandidates(target: string, sources: string[], options: unknown) {
       calls.push({ target, sources, options });
       return {
@@ -340,6 +348,8 @@ test("a query is required, and a date window filters the search", async () => {
     },
   } as unknown as ExtensionAPI;
   const stubService = {
+    // Only the methods a given test reaches are meaningful here.
+    async recordUse() {},
     store: { config: { search: { defaultMode: "keyword" } } },
     canSearchSemantically: true,
     async search(options: Record<string, unknown>) {
@@ -405,6 +415,8 @@ test("a request above the result cap says how many were returned", async () => {
     },
   } as unknown as ExtensionAPI;
   const stubService = {
+    // Only the methods a given test reaches are meaningful here.
+    async recordUse() {},
     store: { config: { search: { defaultMode: "keyword" } } },
     canSearchSemantically: true,
     async search() {
