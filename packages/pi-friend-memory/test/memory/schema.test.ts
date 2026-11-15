@@ -289,7 +289,11 @@ test("location rules enforce staging and superseded semantics", () => {
   const candidateText = VALID_FRONT_MATTER.replace(
     "status: active",
     "status: candidate",
-  ).concat("\nbody\n");
+  )
+    // A candidate is never edited, so the fixture's `edited` line would be the
+    // first thing the location rules reject and would hide the rule under test.
+    .replace("edited: 2026-10-18T10:00:00Z\n", "")
+    .concat("\nbody\n");
   const candidate = parseMemoryNode(candidateText, "warm-memory");
   const supersededText = VALID_FRONT_MATTER.replace(
     "status: active",

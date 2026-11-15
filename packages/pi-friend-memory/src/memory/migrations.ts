@@ -28,6 +28,15 @@ export const MIGRATIONS_BACKUP_DIRNAME = "backups";
 /** Identifier of the `emotional_flavor` → `emotional_flavour` rename. */
 export const FLAVOUR_MIGRATION_ID = "emotional-flavour-rename";
 
+/**
+ * Identifier of the pass that removes `edited` from staging candidates.
+ *
+ * A candidate is never edited, so the field dates nothing. It is not harmless
+ * either: `edited ?? created` is the content timestamp a sync compares, so an
+ * inherited value would let a draft claim to be newer than it is.
+ */
+export const STAGING_EDITED_MIGRATION_ID = "staging-edited-field";
+
 /** Legacy front-matter spelling, only ever read by the migration. */
 const LEGACY_FLAVOUR_KEY = "emotional_flavor";
 /** Current front-matter spelling. */
@@ -263,6 +272,24 @@ async function scanStore(
  * body line that happens to contain the word is never rewritten.
  */
 export function renameFlavourKey(text: string): string | undefined {
+  return rewriteFrontMatterLines(text, (line) =>
+    line.startsWith(`${LEGACY_FLAVOUR_KEY}:`)
+      ? `${CURRENT_FLAVOUR_KEY}:${line.slice(LEGACY_FLAVOUR_KEY.length + 1)}`
+      : undefined,
+  );
+}
+
+/**
+ * Rewrites lines inside the opening front-matter block.
+ *
+ * `rewrite` returns a replacement line, `null` to delete the line, or
+ * `undefined` to leave it alone. Everything outside the block — the body above
+ * all — is never handed to it.
+ */
+function rewriteFrontMatterLines(
+  text: string,
+  rewrite: (line: string) => string | null | undefined,
+): string | undefined {
   const lines = text.split("\n");
   if (lines[0]?.trim() !== "---") {
     return undefined;
@@ -274,20 +301,127 @@ export function renameFlavourKey(text: string): string | undefined {
     return undefined;
   }
 
+  const head = lines.slice(0, closing);
+  const kept: string[] = [];
   let changed = false;
-  for (let position = 1; position < closing; position += 1) {
-    const line = lines[position];
-    if (line?.startsWith(`${LEGACY_FLAVOUR_KEY}:`)) {
-      lines[position] = `${CURRENT_FLAVOUR_KEY}:${line.slice(
-        LEGACY_FLAVOUR_KEY.length + 1,
-      )}`;
+  for (const line of head) {
+    const next = rewrite(line);
+    if (next === null) {
       changed = true;
+      continue;
     }
+    if (next !== undefined) {
+      changed = true;
+      kept.push(next);
+      continue;
+    }
+    kept.push(line);
   }
-  return changed ? lines.join("\n") : undefined;
+  return changed ? [...kept, ...lines.slice(closing)].join("\n") : undefined;
 }
 
-/** Reads the migration record, treating absence or damage as "nothing applied". */
+/**
+ * Removes `edited` from staging candidates written before it was refused.
+ *
+ * Called before the rename migration, because the strict parser refuses a
+ * staging file carrying the field and would otherwise report that file as
+ * unparseable rather than migrating it.
+ *
+ * There is no backup and no retirement step, unlike the rename: nothing in the
+ * file's content changes, the line being removed is a timestamp that described
+ * an operation this area never has, and every rewritten file is parsed before
+ * it is written. A copy would preserve a second stale record of the store for
+ * the sake of one meaningless key.
+ */
+export async function stripCandidateEditedFields(
+  store: MemoryStore,
+  agentDir: string = getAgentDir(),
+  options: { dryRun?: boolean; force?: boolean } = {},
+): Promise<MigrationOutcome | null> {
+  const statePath = migrationsPath(agentDir);
+  const state = await readMigrationState(statePath);
+  if (
+    state.applied.includes(STAGING_EDITED_MIGRATION_ID) &&
+    options.force !== true
+  ) {
+    return null;
+  }
+
+  const scan = await scanStagingForEditedField(store);
+  if (options.dryRun === true) {
+    return {
+      status: "dry-run",
+      scanned: scan.scanned,
+      changed: scan.pending.map((file) => file.path),
+      skipped: scan.skipped,
+    };
+  }
+
+  for (const file of scan.pending) {
+    await store.writeTextFile(file.path, file.rewritten);
+  }
+
+  // Re-read rather than reuse: another migration may have recorded itself
+  // between these two points, and this write must not drop it.
+  const fresh = await readMigrationState(statePath);
+  fresh.applied = [...new Set([...fresh.applied, STAGING_EDITED_MIGRATION_ID])];
+  await writeMigrationState(statePath, fresh);
+
+  return {
+    status: "applied",
+    scanned: scan.scanned,
+    changed: scan.pending.map((file) => file.path),
+    skipped: scan.skipped,
+  };
+}
+
+/** Walks `staging/` for files that still carry an `edited` key. */
+async function scanStagingForEditedField(store: MemoryStore): Promise<StoreScan> {
+  let scanned = 0;
+  const pending: PendingRewrite[] = [];
+  const skipped: Array<{ path: string; error: string }> = [];
+
+  for (const relativePath of await listStoredMemoryFiles(store, "staging")) {
+    scanned += 1;
+    let text: string;
+    try {
+      text = await store.readTextFile(relativePath);
+    } catch (error) {
+      skipped.push({ path: relativePath, error: formatError(error) });
+      continue;
+    }
+
+    const rewritten = removeEditedKey(text);
+    if (rewritten === undefined) {
+      continue;
+    }
+    // Only keep the rewrite if the result is a candidate the strict parser
+    // accepts. A file that was already damaged is reported, never rewritten
+    // into something that merely looks damaged differently.
+    try {
+      parseStoredMemoryFile(rewritten, relativePath, "staging");
+    } catch (error) {
+      skipped.push({ path: relativePath, error: formatError(error) });
+      continue;
+    }
+    pending.push({ path: relativePath, rewritten });
+  }
+
+  return { scanned, pending, skipped };
+}
+
+/**
+ * Drops a top-level `edited:` line from the opening front-matter block.
+ *
+ * Only an unindented key is removed, so a body line — or an indented key that
+ * happens to share the name — is never touched.
+ */
+export function removeEditedKey(text: string): string | undefined {
+  return rewriteFrontMatterLines(text, (line) =>
+    line.startsWith("edited:") ? null : undefined,
+  );
+}
+
 async function readMigrationState(statePath: string): Promise<MigrationState> {
   try {
     const parsed: unknown = JSON.parse(await readFile(statePath, "utf8"));

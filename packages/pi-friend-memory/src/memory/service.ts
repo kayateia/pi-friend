@@ -553,7 +553,7 @@ export class MemoryNodeService {
       }
       if (target !== null && isQuarantinedMemoryType(target.frontMatter.type)) {
         throw new MemoryServiceError(
-          `Cannot merge a staging candidate into ${target.frontMatter.type} memory "${target.slug}".`,
+          `Cannot merge a staging candidate into ${target.frontMatter.type} memory "${target.slug}"; a dream is synthesized from memories and is never a merge target.`,
         );
       }
 
@@ -629,7 +629,7 @@ export class MemoryNodeService {
       }
       if (isQuarantinedMemoryType(target.frontMatter.type)) {
         throw new MemoryServiceError(
-          `Cannot merge into ${target.frontMatter.type} memory "${target.slug}".`,
+          `Cannot merge into ${target.frontMatter.type} memory "${target.slug}"; a dream is synthesized from memories and is never a merge target.`,
         );
       }
 
@@ -1061,7 +1061,11 @@ export class MemoryNodeService {
         restored.frontMatter.status = "candidate";
         restored.frontMatter.decay_weight = 1;
         restored.frontMatter.last_used = now;
-        restored.frontMatter.edited = now;
+        // A candidate is never edited, so the archived copy's `edited` — if an
+        // older build wrote one — describes nothing, and the staging schema
+        // refuses it. Restoring is a copy, so it is removed rather than left
+        // for the next writer to trip over.
+        delete restored.frontMatter.edited;
         await this.repository.write(restored, "staging");
         await this.repository.store.removeTextFile(relativePath);
         return {
