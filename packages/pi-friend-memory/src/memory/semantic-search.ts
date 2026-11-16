@@ -74,8 +74,10 @@ export function searchSemanticVectors(
   // can act before the `k` cutoff. The checks further down stay as a guard: they
   // are cheap, and they keep a result set from ever contradicting what was asked
   // for if the index and the file list disagree about a file.
-  // The restrictions travel into the vector query, which is the only place they
-  // can act before the `k` cutoff.
+  // `k` counts stored vectors, and stored vectors are chunks, not files: a file
+  // split across two chunks can occupy two of them, and the dedupe below then
+  // yields one fewer file than asked for. The slack covers that collapse; every
+  // filter travels into the query, so nothing else needs over-fetching.
   const hits = index.search(
     queryEmbedding,
     Math.min(100, limit * 4),

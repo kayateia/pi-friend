@@ -8,8 +8,12 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultRagInjectionConfig } from "../../src/memory/config.ts";
+import {
+  defaultRagInjectionConfig,
+  defaultRecencyInjectionConfig,
+} from "../../src/memory/config.ts";
 import { buildRagContext } from "../../src/memory/rag.ts";
+import type { RagContext } from "../../src/memory/rag.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import type {
   MemoryStatus,
@@ -18,6 +22,14 @@ import type {
 } from "../../src/memory/schema.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
 import { withTempDir } from "../helpers.ts";
+
+/** Recall-only tests: the time-ordered section has its own file. */
+const NO_RECENCY = { ...defaultRecencyInjectionConfig(), enabled: false };
+
+/** The delivered text, for assertions about the block as a whole. */
+function delivered(context: RagContext): string {
+  return context.blocks.map((block) => block.text).join("\n\n");
+}
 
 /** Builds one canonical node fixture. */
 function makeNode(options: {
@@ -113,34 +125,35 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
       service,
       "In one short sentence, what is the orchid fact? Do not use tools.",
       config,
+      NO_RECENCY,
     );
 
-    assert.equal(context.count, 3);
-    assert.ok(context.text.startsWith("<pi-friend-memory>\n"));
-    assert.ok(context.text.endsWith("\n</pi-friend-memory>"));
-    assert.deepEqual(context.slugs, [
+    assert.equal(context.recall.count, 3);
+    assert.ok(delivered(context).startsWith("<pi-friend-memory>\n"));
+    assert.ok(delivered(context).endsWith("\n</pi-friend-memory>"));
+    assert.deepEqual(context.recall.slugs, [
       "orchid-fresh",
       "orchid-middle",
       "scent-note",
     ]);
-    assert.match(context.text, /First orchid sentence\. Second orchid sentence/);
-    assert.match(context.text, /First middle orchid sentence\./);
+    assert.match(delivered(context), /First orchid sentence\. Second orchid sentence/);
+    assert.match(delivered(context), /First middle orchid sentence\./);
     assert.match(
-      context.text,
+      delivered(context),
       /Why recalled: keyword rank #1 · matched fields: body · score \d+\.\d{4}/,
     );
-    assert.doesNotMatch(context.text, /Second middle sentence/);
+    assert.doesNotMatch(delivered(context), /Second middle sentence/);
     assert.match(
-      context.text,
+      delivered(context),
       /see also: Scent Note — orchid, archive \(nodes\/scent-note\.md\)/,
     );
-    assert.doesNotMatch(context.text, /orchid-dream/);
-    assert.doesNotMatch(context.text, /orchid-archived/);
-    assert.doesNotMatch(context.text, /orchid-old/);
-    assert.match(context.text, /not instructions/);
+    assert.doesNotMatch(delivered(context), /orchid-dream/);
+    assert.doesNotMatch(delivered(context), /orchid-archived/);
+    assert.doesNotMatch(delivered(context), /orchid-old/);
+    assert.match(delivered(context), /not instructions/);
     // Attribution travels with the memory, not behind a second tool call.
-    assert.match(context.text, /Heard from: Aisling/);
-    assert.match(context.text, /heard from aisling/i);
+    assert.match(delivered(context), /Heard from: Aisling/);
+    assert.match(delivered(context), /heard from aisling/i);
   });
 });
 
@@ -169,14 +182,14 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
     };
     const service = new MemoryNodeService(repository);
     const reported: Array<{ label: string; error: unknown }> = [];
-    const context = await buildRagContext(service, "orchid", config, {
+    const context = await buildRagContext(service, "orchid", config, NO_RECENCY, {
       reportError: (label, error) => reported.push({ label, error }),
     });
 
-    assert.ok(context.count >= 1);
-    assert.ok(context.text.length <= config.maxChars);
-    assert.match(context.text, /Orchid 0/);
-    assert.match(context.text, /Why recalled: keyword rank #\d+/);
+    assert.ok(context.recall.count >= 1);
+    assert.ok(delivered(context).length <= config.maxChars);
+    assert.match(delivered(context), /Orchid 0/);
+    assert.match(delivered(context), /Why recalled: keyword rank #\d+/);
     assert.equal(reported[0]?.label, "RAG primary search");
     assert.match(String(reported[0]?.error), /no embedding provider/u);
   });
@@ -209,9 +222,9 @@ test("RAG ranks active nodes without ordinary documents crowding them out", asyn
       limit: 5,
     };
 
-    const context = await buildRagContext(service, "needle", config);
-    assert.equal(context.count, 1);
-    assert.deepEqual(context.slugs, ["needle-memory"]);
+    const context = await buildRagContext(service, "needle", config, NO_RECENCY);
+    assert.equal(context.recall.count, 1);
+    assert.deepEqual(context.recall.slugs, ["needle-memory"]);
     assert.equal(context.diagnostics.searchResultCount, 1);
     assert.equal(context.diagnostics.eligibleNodeCount, 1);
     assert.equal(context.diagnostics.selectedNodeCount, 1);
@@ -245,11 +258,12 @@ test("RAG injects staged candidates with an unverified marker", async () => {
         mode: "keyword",
         limit: 5,
       },
+      NO_RECENCY,
     );
 
-    assert.equal(context.count, 1);
-    assert.match(context.text, /^Candidate - unverified$/mu);
-    assert.match(context.text, /### Staged Lantern/);
-    assert.match(context.text, /staging\/staged-lantern\.md/);
+    assert.equal(context.recall.count, 1);
+    assert.match(delivered(context), /^Candidate - unverified$/mu);
+    assert.match(delivered(context), /### Staged Lantern/);
+    assert.match(delivered(context), /staging\/staged-lantern\.md/);
   });
 });

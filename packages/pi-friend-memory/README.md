@@ -353,6 +353,33 @@ Pi reads the extension entry point from the `pi.extensions` field in
 Supersession through `memory_add` is intentionally deferred until correction
 handling can update both sides of the relationship atomically.
 
+## What gets injected
+
+Two sections, answering different questions over the same store.
+
+Recall is the one described below: memories ranked by relevance to the message,
+each with a `Why recalled:` explanation.
+
+Recency is new and answers *what have I been doing*, which relevance alone
+cannot: a conversation in one workspace and a memory from another do not match
+on text, and an event from ten minutes ago loses to a fact from ten weeks ago
+when text similarity is the only axis. Its pool is chosen by date — `edited ??
+created` — as the union of two conditions, so a quiet day still has a floor:
+everything inside `max_age_seconds`, plus the newest `last_n`. `limit` then
+takes the most relevant of that pool, and the section is rendered as a timeline:
+each entry carries its local date and age (labelled `edited` when the record has
+one, `created` otherwise). No per-entry explanation: the date is the
+explanation, and the eligibility rule and score are in `/memory-last-rag`.
+
+Both sections share one `<pi-friend-memory>` block when their positions match
+(the default), Recently first; when they differ, each is its own block in its
+own user turn. Each has its own `max_chars`. A memory chosen by both is shown
+once, under Recalled.
+
+The recency pass is read-only. It moves no counters and leaves no access-log
+entry, because reading memories to describe them is neither a use nor a search
+anyone made.
+
 ## Speaker tags
 
 A name tag marks who is speaking and is not part of what was said. One
@@ -629,6 +656,11 @@ semantic similarity, both ranks, the final fused score, and whether it was
 injected. It runs entirely in the extension — no model call, no cost — and PI
 WEB shows its output as command output, because the handler reports through
 `ctx.ui.notify`.
+
+It also reports the recency pass: how many memories the date conditions
+admitted, the mode it ranked them with, and for each one its eligibility reason
+(inside the age window, among the newest N, or both), its rank in the pool, its
+score, its date, and whether it reached the prompt.
 
 `memory_last_rag` returns the same report as a tool, for when a conversation
 rightly includes the numbers. The command is the cheap path; the tool exists

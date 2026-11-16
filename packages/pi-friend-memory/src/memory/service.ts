@@ -171,6 +171,28 @@ export interface MemoryDreamInput {
   source?: string;
 }
 
+/**
+ * Who asked for a search, and whether it should be logged.
+ *
+ * The log records every returned row, so without the source it cannot tell a
+ * deliberate search from a recall block. `logAccess: false` is for the recency
+ * pass: it reads memories to describe them, and a diagnostic entry would claim
+ * a use that never happened.
+ */
+export interface SearchAuditOptions {
+  source?: AccessLogSource;
+  logAccess?: boolean;
+}
+
+/** One memory eligible for the recency section, and why it is. */
+export interface RecentMemory {
+  slug: string;
+  /** `edited ?? created`, normalised to a UTC instant. */
+  modifiedAt: string;
+  /** Inside the age window, among the newest N, or both. */
+  reason: "window" | "count" | "both";
+}
+
 /** Optional semantic-search dependencies, available only when configured. */
 export interface SemanticSearchDependencies {
   provider: EmbeddingProvider;
@@ -345,7 +367,7 @@ export class MemoryNodeService {
    */
   async search(
     options: MemorySearchOptions,
-    audit: { source?: AccessLogSource } = {},
+    audit: SearchAuditOptions = {},
   ): Promise<MemorySearchResult[]> {
     // A speaker tag marks who is speaking and is not part of what was asked, so
     // it leaves the query before keyword matching, the embedding and the access
@@ -405,7 +427,7 @@ export class MemoryNodeService {
     // shares `PI_FRIEND_DEBUG_HOOKS` with the lifecycle dump rather than adding
     // a second switch: one debug flag to remember, and the verbosity of the
     // hooks side is acceptable because it is not a switch anyone leaves on.
-    if (isDebugEnabled()) {
+    if (audit.logAccess !== false && isDebugEnabled()) {
       const source = audit.source ?? "tool";
       for (const result of results) {
         await this.repository.store.appendAccessLog({
@@ -419,6 +441,81 @@ export class MemoryNodeService {
     }
 
     return results;
+  }
+
+  /**
+   * Lists the memory records the recency section may draw from.
+   *
+   * Eligibility is a union, not an intersection: inside the age window **or**
+   * among the newest N. Both conditions are read from `edited ?? created`, the
+   * content timestamp the store already defines — never from file mtime, which
+   * a read now moves, and never from `decay_weight`, which measures how much
+   * has been written since a use rather than when anything happened.
+   *
+   * Candidates are included: they are injected by recall already, so the
+   * section raises their proportion rather than introducing them. Dreams are
+   * not — they are quarantined from factual injection everywhere else.
+   *
+   * Returns the pool in chronological order, which is the order it is rendered.
+   */
+  async recentPool(options: {
+    maxAgeSeconds: number;
+    lastN: number;
+    now?: Date;
+  }): Promise<RecentMemory[]> {
+    const files = await buildMemoryDocumentIndex(this.repository.store);
+    const now = (options.now ?? this.now()).getTime();
+
+    const dated = files.flatMap((file) => {
+      if (file.slug === undefined || file.modifiedAt === undefined) {
+        return [];
+      }
+      const isMemory =
+        (file.kind === "node" && file.status === "active") ||
+        (file.kind === "staging-candidate" && file.status === "candidate");
+      if (!isMemory) {
+        return [];
+      }
+      if (file.type !== undefined && isQuarantinedMemoryType(file.type)) {
+        return [];
+      }
+      return [{ slug: file.slug, at: Date.parse(file.modifiedAt), modifiedAt: file.modifiedAt }];
+    });
+
+    const windowStart =
+      options.maxAgeSeconds > 0 ? now - options.maxAgeSeconds * 1_000 : Infinity;
+    const inWindow = new Set(
+      dated.filter((entry) => entry.at >= windowStart).map((entry) => entry.slug),
+    );
+    const newest = new Set(
+      options.lastN > 0
+        ? [...dated]
+            .sort((left, right) => right.at - left.at || (left.slug < right.slug ? -1 : 1))
+            .slice(0, options.lastN)
+            .map((entry) => entry.slug)
+        : [],
+    );
+
+    return dated
+      .filter((entry) => inWindow.has(entry.slug) || newest.has(entry.slug))
+      .map((entry): RecentMemory => ({
+        slug: entry.slug,
+        modifiedAt: entry.modifiedAt,
+        reason: inWindow.has(entry.slug)
+          ? newest.has(entry.slug)
+            ? "both"
+            : "window"
+          : "count",
+      }))
+      .sort((left, right) =>
+        left.modifiedAt < right.modifiedAt
+          ? -1
+          : left.modifiedAt > right.modifiedAt
+            ? 1
+            : left.slug < right.slug
+              ? -1
+              : 1,
+      );
   }
 
   /**

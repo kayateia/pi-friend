@@ -10,7 +10,10 @@ import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import * as path from "node:path";
 import test from "node:test";
-import { defaultRagInjectionConfig } from "../../src/memory/config.ts";
+import {
+  defaultRagInjectionConfig,
+  defaultRecencyInjectionConfig,
+} from "../../src/memory/config.ts";
 import { buildRagContext } from "../../src/memory/rag.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
@@ -87,10 +90,12 @@ test("the log distinguishes a tool search from a recall pass", async () => {
       const { repository, service } = await makeStore(agentDir);
 
       await service.search({ query: "orchid", mode: "keyword" });
-      await buildRagContext(service, "what about the orchid", {
-        ...defaultRagInjectionConfig(),
-        mode: "keyword",
-      });
+      await buildRagContext(
+        service,
+        "what about the orchid",
+        { ...defaultRagInjectionConfig(), mode: "keyword" },
+        { ...defaultRecencyInjectionConfig(), enabled: false },
+      );
 
       const entries = await readLog(repository);
       const sources = new Set(entries.map((entry) => entry.source));
