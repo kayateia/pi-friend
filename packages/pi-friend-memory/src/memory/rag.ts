@@ -13,10 +13,11 @@ import type {
 import type { MemoryNodeService, RecentMemory } from "./service.ts";
 import type { MemoryNodeArea } from "./repository.ts";
 import type { MemorySearchResult } from "./search.ts";
+import type { IndexedMarkdownFile } from "./indexer.ts";
 import { ATTRIBUTION_LABEL, formatAttribution } from "./attribution.ts";
 import { formatRetrievalExplanation } from "./search.ts";
 import type { ParsedMemoryNode } from "./schema.ts";
-import { isQuarantinedMemoryType } from "./schema.ts";
+import { MEMORY_TYPES, isQuarantinedMemoryType } from "./schema.ts";
 import { formatErrorChain } from "../debug/log.ts";
 
 /** One rendered section of the injection, before it is wrapped in a block. */
@@ -131,6 +132,17 @@ const OPENING_TAG = "<pi-friend-memory>";
 const CLOSING_TAG = "</pi-friend-memory>";
 const WRAPPER_LENGTH = OPENING_TAG.length + CLOSING_TAG.length + 2;
 
+/**
+ * Types an injection may contain: everything except the quarantined ones.
+ *
+ * Named as a list so the exclusion happens inside the query rather than after
+ * the cutoff. A filter applied afterwards removes rows the search already spent
+ * its slots on, which is the failure the vector filters exist to prevent.
+ */
+const INJECTABLE_TYPES = MEMORY_TYPES.filter(
+  (type) => !isQuarantinedMemoryType(type),
+);
+
 const EMPTY_SECTION: RagSection = { text: "", count: 0, slugs: [] };
 
 /**
@@ -177,8 +189,12 @@ export async function buildRagContext(
   // diagnostic that reported the message instead would not explain the ranking.
   const searchedQuery = service.prepareQuery(query).text;
 
+  // One corpus for the whole turn. Parsing the store is the expensive part of
+  // any retrieval — hundreds of files — and both passes search the same one.
+  const files = await service.searchFiles();
+
   const recall = config.enabled
-    ? await buildRecall(service, query, config, options)
+    ? await buildRecall(service, query, config, options, files)
     : { section: EMPTY_SECTION, diagnostics: emptyDiagnostics };
 
   const recency = recencyConfig.enabled
@@ -189,6 +205,7 @@ export async function buildRagContext(
         new Set(recall.section.slugs),
         now,
         options,
+        files,
       )
     : undefined;
 
@@ -217,6 +234,7 @@ async function buildRecall(
   query: string,
   config: RagInjectionConfig,
   options: RagContextOptions,
+  files: readonly IndexedMarkdownFile[],
 ): Promise<{ section: RagSection; diagnostics: RagRetrievalDiagnostics }> {
   let results: MemorySearchResult[] = [];
   let modeUsed: RagInjectionConfig["mode"] = config.mode;
@@ -228,11 +246,14 @@ async function buildRecall(
       mode: config.mode,
       kinds: ["node", "staging-candidate"],
       statuses: ["active", "candidate"],
-      limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
+      types: INJECTABLE_TYPES,
+      // No over-fetch: the filters run inside the query, so every returned row
+      // is a row that can be injected.
+      limit: config.limit,
       // A conversational prompt should contribute any matching memory term,
       // not require every word from the sentence to occur in one node.
       minTokenMatches: 1,
-    }, { source: "rag" });
+    }, { source: "rag", files });
   } catch (error) {
     options.reportError?.("RAG primary search", error);
     searchError = formatErrorChain(error);
@@ -245,9 +266,10 @@ async function buildRecall(
           mode: "keyword",
           kinds: ["node", "staging-candidate"],
           statuses: ["active", "candidate"],
-          limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
+          types: INJECTABLE_TYPES,
+          limit: config.limit,
           minTokenMatches: 1,
-        }, { source: "rag" });
+        }, { source: "rag", files });
       } catch (fallbackError) {
         options.reportError?.("RAG keyword fallback", fallbackError);
         searchError =
@@ -335,14 +357,22 @@ async function buildRecency(
   recalled: ReadonlySet<string>,
   now: Date,
   options: RagContextOptions,
+  files: readonly IndexedMarkdownFile[],
 ): Promise<{ section: RagSection; diagnostics: RagRecencyDiagnostics }> {
   const pool = await service.recentPool({
     maxAgeSeconds: config.maxAgeSeconds,
     lastN: config.lastN,
     now,
+    files,
   });
+  // Recall's selections are removed before the search, not after it. They would
+  // be dropped anyway, and dropping them afterwards spends a slot the fetch has
+  // already paid for — with no over-fetch left, that is the difference between
+  // a full section and a short one.
   const poolSlugs: ReadonlySet<string> = new Set(
-    pool.map((entry) => entry.slug),
+    pool
+      .map((entry) => entry.slug)
+      .filter((slug) => !recalled.has(slug)),
   );
   const bySlug = new Map(pool.map((entry) => [entry.slug, entry]));
 
@@ -358,15 +388,16 @@ async function buildRecency(
           mode: config.mode,
           kinds: ["node", "staging-candidate"],
           statuses: ["active", "candidate"],
+          types: INJECTABLE_TYPES,
           slugs: poolSlugs,
           // No gate: an unrelated recent memory is the case this section exists
           // for, so a pool member that matches nothing is still ranked, at zero.
           minTokenMatches: 0,
-          limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
+          limit: config.limit,
         },
         // Reading memories to describe them is not a use, and it is not a
         // search anyone made: no counters, no access-log entry.
-        { logAccess: false },
+        { logAccess: false, files },
       );
     } catch (error) {
       options.reportError?.("recency search", error);
@@ -381,11 +412,12 @@ async function buildRecency(
               mode: "keyword",
               kinds: ["node", "staging-candidate"],
               statuses: ["active", "candidate"],
-                  slugs: poolSlugs,
+              types: INJECTABLE_TYPES,
+              slugs: poolSlugs,
               minTokenMatches: 0,
-              limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
+              limit: config.limit,
             },
-            { logAccess: false },
+            { logAccess: false, files },
           );
         } catch (fallbackError) {
           options.reportError?.("recency keyword fallback", fallbackError);

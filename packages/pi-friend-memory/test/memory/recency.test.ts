@@ -153,10 +153,33 @@ test("a memory recalled for relevance is not repeated in Recently", async () => 
     assert.equal(context.recall.count, 1);
     assert.equal(context.recency.count, 0, "one section only, and Recalled wins");
     assert.doesNotMatch(context.blocks[0]?.text ?? "", /## Recently/);
-    // The recalled memory was in the pool — the dedupe, not the pool, is what
-    // keeps it out of the section.
-    assert.equal(context.diagnostics.recency?.results.length, 1);
-    assert.equal(context.diagnostics.recency?.results[0]?.injected, false);
+    // Recalled slugs leave the pool before the search, so a slot is not spent
+    // on a memory the dedupe would drop anyway.
+    assert.equal(context.diagnostics.recency?.results.length, 0);
+  });
+});
+
+test("a corpus built for the turn is what the pool reads", async () => {
+  await withTempDir(async (agentDir) => {
+    const { repository, service } = await makeStore(agentDir);
+    await repository.write(
+      makeNode({ slug: "recent", created: "2026-11-15T16:55:00.000Z" }),
+    );
+    await repository.write(
+      makeNode({ slug: "other", created: "2026-11-15T16:50:00.000Z" }),
+    );
+
+    const files = await service.searchFiles();
+    // The pool is filtered from the supplied corpus rather than re-read from
+    // disk, which is what lets one turn pay for one index build.
+    const pool = await service.recentPool({
+      maxAgeSeconds: 86_400,
+      lastN: 8,
+      now: NOW,
+      files: files.filter((file) => file.slug !== "other"),
+    });
+
+    assert.deepEqual(pool.map((entry) => entry.slug), ["recent"]);
   });
 });
 

@@ -182,6 +182,15 @@ export interface MemoryDreamInput {
 export interface SearchAuditOptions {
   source?: AccessLogSource;
   logAccess?: boolean;
+  /**
+   * A search corpus already built for this turn.
+   *
+   * Parsing every memory file is the expensive part of a search — measured at
+   * ~200 ms for this store's 630 files — and a turn that recalls and then looks
+   * at recency would otherwise parse the store three times. A caller doing more
+   * than one retrieval in a turn builds the index once and passes it.
+   */
+  files?: readonly IndexedMarkdownFile[];
 }
 
 /** One memory eligible for the recency section, and why it is. */
@@ -390,7 +399,9 @@ export class MemoryNodeService {
         ? cleaned
         : { ...cleaned, kinds: kindsForCorpus(cleaned.corpus) };
 
-    const index = await this.buildSearchIndex();
+    const index = audit.files
+      ? [...audit.files]
+      : await this.buildSearchIndex();
     const mode = options.mode ?? this.store.config.search.defaultMode;
     const vectorOptions = {
       chunkSize: this.store.config.vector.chunkSize,
@@ -462,8 +473,11 @@ export class MemoryNodeService {
     maxAgeSeconds: number;
     lastN: number;
     now?: Date;
+    /** A corpus already built for this turn; see {@link searchFiles}. */
+    files?: readonly IndexedMarkdownFile[];
   }): Promise<RecentMemory[]> {
-    const files = await buildMemoryDocumentIndex(this.repository.store);
+    const files =
+      options.files ?? (await buildMemoryDocumentIndex(this.repository.store));
     const now = (options.now ?? this.now()).getTime();
 
     const dated = files.flatMap((file) => {
@@ -1541,6 +1555,17 @@ export class MemoryNodeService {
     return duplicate?.slug
       ? this.repository.read(duplicate.slug, "canonical")
       : null;
+  }
+
+  /**
+   * Builds the corpus a search runs over, for a caller doing several in a turn.
+   *
+   * Each call re-reads and re-parses the store, so a caller that searches more
+   * than once should take this once and pass the result through
+   * `SearchAuditOptions.files`.
+   */
+  async searchFiles(): Promise<IndexedMarkdownFile[]> {
+    return this.buildSearchIndex();
   }
 
   /** Builds the in-memory search corpus from memory files and imports. */

@@ -61,6 +61,16 @@ export async function searchSemantically(
   );
 }
 
+/**
+ * Extra chunks fetched beyond the requested file count.
+ *
+ * Measured on a live store with `chunk_size: 4000`: 10 of 643 memory files need
+ * more than one chunk. Four is enough slack for those to collapse without
+ * costing a query, and it is not a filter allowance — filters run inside the
+ * query, so they never consume a slot.
+ */
+const SEMANTIC_CHUNK_SLACK = 4;
+
 /** Searches an already-synchronized index with a prepared query embedding. */
 export function searchSemanticVectors(
   files: IndexedMarkdownFile[],
@@ -80,7 +90,7 @@ export function searchSemanticVectors(
   // filter travels into the query, so nothing else needs over-fetching.
   const hits = index.search(
     queryEmbedding,
-    Math.min(100, limit * 4),
+    Math.min(100, limit + SEMANTIC_CHUNK_SLACK),
     {
       ...(options.kinds === undefined ? {} : { kinds: options.kinds }),
       ...(options.type === undefined ? {} : { type: options.type }),
