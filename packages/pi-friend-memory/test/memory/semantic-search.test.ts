@@ -14,7 +14,7 @@ import type { EmbeddingProvider } from "../../src/memory/embedding.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
 import { SqliteVectorIndex } from "../../src/memory/vector-index.ts";
-import { withTempDir } from "../helpers.ts";
+import { withEnv, withTempDir } from "../helpers.ts";
 
 /** Embedding provider that maps warm/cold words into orthogonal vectors. */
 class SemanticTestProvider implements EmbeddingProvider {
@@ -36,7 +36,8 @@ class SemanticTestProvider implements EmbeddingProvider {
 }
 
 test("semantic search embeds documents and records the retrieval mode", async () => {
-  await withTempDir(async (agentDir) => {
+  await withEnv({ PI_FRIEND_DEBUG_HOOKS: "1" }, () =>
+    withTempDir(async (agentDir) => {
     const repository = await MemoryNodeRepository.open({
       agentDir,
       homeDir: agentDir,
@@ -82,7 +83,8 @@ test("semantic search embeds documents and records the retrieval mode", async ()
     } finally {
       index.close();
     }
-  });
+    }),
+  );
 });
 
 test("semantic mode fails clearly when no provider is configured", async () => {

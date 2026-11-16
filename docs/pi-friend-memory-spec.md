@@ -37,7 +37,7 @@ memory/
 │   ├── edited/          ← <slug>/<timestamp>.md, the version an edit replaced
 │   ├── merged/          ← <slug>/<timestamp>.md, before a merge rewrote it
 │   └── split/           ← <slug>/<timestamp>.md, before a split divided it
-├── access-log           ← append-only: one line per returned search hit
+├── access-log           ← append-only: one line per returned search hit; written only when PI_FRIEND_DEBUG_HOOKS=1
 ├── sweeps/              ← dated sweep+dream logs
 └── index/               ← vector store config/state (non-canonical)
 ```

@@ -50,11 +50,21 @@ export interface StoredMarkdownFile {
   kind: MemoryFileKind;
 }
 
+/**
+ * Who asked for a search.
+ *
+ * `tool` is a person or an agent calling `memory_search`; `rag` is the
+ * automatic recall pass. Without this the log cannot tell a deliberate search
+ * from a block of memories injected into a prompt, which is the distinction the
+ * field exists for.
+ */
+export type AccessLogSource = "rag" | "tool";
+
 /** One append-only access-log record. */
 export interface AccessLogEntry {
   /** Defaults to the current UTC ISO timestamp. */
   timestamp?: string;
-  source: "rag" | "tool";
+  source: AccessLogSource;
   slug?: string;
   path?: string;
   /**

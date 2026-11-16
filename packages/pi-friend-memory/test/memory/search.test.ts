@@ -11,7 +11,7 @@ import test from "node:test";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
 import { searchIndexedFiles } from "../../src/memory/search.ts";
-import { withTempDir } from "../helpers.ts";
+import { withEnv, withTempDir } from "../helpers.ts";
 
 /** Creates a service backed by an isolated memory tree. */
 async function makeService(
@@ -140,7 +140,8 @@ test("type filters exclude documents and other memory types", async () => {
 });
 
 test("search applies limits and records one access-log entry per result", async () => {
-  await withTempDir(async (agentDir) => {
+  await withEnv({ PI_FRIEND_DEBUG_HOOKS: "1" }, () =>
+    withTempDir(async (agentDir) => {
     const { repository, service } = await makeService(agentDir);
     for (const suffix of ["one", "two", "three"]) {
       await service.add({
@@ -167,7 +168,8 @@ test("search applies limits and records one access-log entry per result", async 
       assert.equal(entry.mode, "keyword");
       assert.equal(entry.query, "comet");
     }
-  });
+    }),
+  );
 });
 
 test("malformed nodes remain discoverable as documents", async () => {

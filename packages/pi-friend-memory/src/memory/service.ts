@@ -7,7 +7,12 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { formatErrorChain, logError, logNotice } from "../debug/log.ts";
+import {
+  formatErrorChain,
+  isDebugEnabled,
+  logError,
+  logNotice,
+} from "../debug/log.ts";
 import type { MemorySpeaker, MemoryType, ParsedMemoryNode } from "./schema.ts";
 import {
   isQuarantinedMemoryType,
@@ -58,6 +63,7 @@ import { searchSemanticVectors } from "./semantic-search.ts";
 import type { ExternalIndexSource } from "./external-index-manager.ts";
 import { computeDecayUpdates, type DecayUpdate } from "./decay.ts";
 import type { MemoryNodeArea, MemoryNodeRepository } from "./repository.ts";
+import type { AccessLogSource } from "./store.ts";
 import { collapseSpeakers } from "./speakers.ts";
 
 /** Input accepted when creating a new canonical memory node. */
@@ -329,8 +335,18 @@ export class MemoryNodeService {
     return this.repository.read(slug, area);
   }
 
-  /** Searches all indexed Markdown files and records returned tool hits. */
-  async search(options: MemorySearchOptions): Promise<MemorySearchResult[]> {
+  /**
+   * Searches all indexed Markdown files.
+   *
+   * `audit.source` names who asked, because the log records every returned row
+   * and cannot otherwise tell a deliberate search from a recall block. It says
+   * nothing about the search itself, which is why it is a parameter rather than
+   * an entry in `MemorySearchOptions`.
+   */
+  async search(
+    options: MemorySearchOptions,
+    audit: { source?: AccessLogSource } = {},
+  ): Promise<MemorySearchResult[]> {
     // A speaker tag marks who is speaking and is not part of what was asked, so
     // it leaves the query before keyword matching, the embedding and the access
     // log see it. The names it carried are not thrown away: a memory attributed
@@ -384,14 +400,22 @@ export class MemoryNodeService {
       results = searchIndexedFiles(index, resolved);
     }
 
-    for (const result of results) {
-      await this.repository.store.appendAccessLog({
-        source: "tool",
-        ...(result.slug === undefined ? {} : { slug: result.slug }),
-        path: result.relativePath,
-        mode,
-        query: options.query,
-      });
+    // The log is a diagnostic, not a data source: nothing reads it, so with the
+    // flag off it is not written at all and its absence changes nothing. It
+    // shares `PI_FRIEND_DEBUG_HOOKS` with the lifecycle dump rather than adding
+    // a second switch: one debug flag to remember, and the verbosity of the
+    // hooks side is acceptable because it is not a switch anyone leaves on.
+    if (isDebugEnabled()) {
+      const source = audit.source ?? "tool";
+      for (const result of results) {
+        await this.repository.store.appendAccessLog({
+          source,
+          ...(result.slug === undefined ? {} : { slug: result.slug }),
+          path: result.relativePath,
+          mode,
+          query: options.query,
+        });
+      }
     }
 
     return results;

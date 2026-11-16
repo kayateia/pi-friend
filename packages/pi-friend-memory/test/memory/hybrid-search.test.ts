@@ -17,7 +17,7 @@ import {
 } from "../../src/memory/search.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
 import { SqliteVectorIndex } from "../../src/memory/vector-index.ts";
-import { withTempDir } from "../helpers.ts";
+import { withEnv, withTempDir } from "../helpers.ts";
 
 /** Creates one minimal result fixture. */
 function result(
@@ -76,7 +76,8 @@ class HybridTestProvider implements EmbeddingProvider {
 }
 
 test("hybrid search fuses keyword and semantic candidates", async () => {
-  await withTempDir(async (agentDir) => {
+  await withEnv({ PI_FRIEND_DEBUG_HOOKS: "1" }, () =>
+    withTempDir(async (agentDir) => {
     const repository = await MemoryNodeRepository.open({
       agentDir,
       homeDir: agentDir,
@@ -125,7 +126,8 @@ test("hybrid search fuses keyword and semantic candidates", async () => {
     } finally {
       index.close();
     }
-  });
+    }),
+  );
 });
 
 test("hybrid mode fails clearly without embedding configuration", async () => {
