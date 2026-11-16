@@ -25,8 +25,9 @@ The prompt extension reads:
 ~/.pi/agent/pi-friend/pi-friend-prompt.yml
 ```
 
-See [`pi-friend-memory.example.yml`](./pi-friend-memory.example.yml) for the memory
-configuration and
+See
+[`pi-friend-memory.example.yml`](./packages/pi-friend-memory/pi-friend-memory.example.yml)
+for the memory configuration and
 [`pi-friend-prompt.example.yml`](./packages/pi-friend-prompt/pi-friend-prompt.example.yml)
 for the prompt configuration.
 
