@@ -61,6 +61,16 @@ export async function searchSemantically(
   );
 }
 
+/**
+ * Extra chunks fetched beyond the requested file count.
+ *
+ * Measured on a live store with `chunk_size: 4000`: 10 of 643 memory files need
+ * more than one chunk. Four is enough slack for those to collapse without
+ * costing a query, and it is not a filter allowance — filters run inside the
+ * query, so they never consume a slot.
+ */
+const SEMANTIC_CHUNK_SLACK = 4;
+
 /** Searches an already-synchronized index with a prepared query embedding. */
 export function searchSemanticVectors(
   files: IndexedMarkdownFile[],
@@ -74,13 +84,23 @@ export function searchSemanticVectors(
   // can act before the `k` cutoff. The checks further down stay as a guard: they
   // are cheap, and they keep a result set from ever contradicting what was asked
   // for if the index and the file list disagree about a file.
-  const hits = index.search(queryEmbedding, Math.min(100, limit * 4), {
-    ...(options.kinds === undefined ? {} : { kinds: options.kinds }),
-    ...(options.type === undefined ? {} : { type: options.type }),
-    ...(options.status === undefined ? {} : { status: options.status }),
-    ...(options.since === undefined ? {} : { since: options.since }),
-    ...(options.until === undefined ? {} : { until: options.until }),
-  });
+  // `k` counts stored vectors, and stored vectors are chunks, not files: a file
+  // split across two chunks can occupy two of them, and the dedupe below then
+  // yields one fewer file than asked for. The slack covers that collapse; every
+  // filter travels into the query, so nothing else needs over-fetching.
+  const hits = index.search(
+    queryEmbedding,
+    Math.min(100, limit + SEMANTIC_CHUNK_SLACK),
+    {
+      ...(options.kinds === undefined ? {} : { kinds: options.kinds }),
+      ...(options.type === undefined ? {} : { type: options.type }),
+      ...(options.types === undefined ? {} : { types: options.types }),
+      ...(options.status === undefined ? {} : { status: options.status }),
+      ...(options.statuses === undefined ? {} : { statuses: options.statuses }),
+      ...(options.since === undefined ? {} : { since: options.since }),
+      ...(options.until === undefined ? {} : { until: options.until }),
+    },
+  );
   const fileByPath = new Map(files.map((file) => [file.relativePath, file]));
   const chunkCache = new Map<string, string[]>();
   const seenPaths = new Set<string>();

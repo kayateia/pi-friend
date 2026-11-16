@@ -63,6 +63,25 @@ memory:
     limit: 5
     max_chars: 6000
 
+  # A second, time-ordered section in the same block: what has been done and
+  # discussed lately, independent of whether it matches this message.
+  #
+  # `max_age_seconds` and `last_n` are a union, not a choice: a memory is
+  # eligible when it is inside the age window OR among the newest N. 0 disables
+  # one condition; both at 0 is an error, because nothing could ever be eligible.
+  #
+  # Eligibility is by date (`edited ?? created`); `limit` then takes the most
+  # relevant entries from that pool, and `max_chars` bounds the section on its
+  # own, so a busy recall cannot crowd out the recent past.
+  recency_injection:
+    enabled: true
+    position: -1
+    mode: hybrid
+    limit: 5
+    max_chars: 3000
+    max_age_seconds: 86400
+    last_n: 8
+
   auto_capture:
     enabled: true
     every_turns: 5

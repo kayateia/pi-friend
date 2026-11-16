@@ -23,7 +23,9 @@ import {
 import {
   DEFAULT_MEMORY_TOOL_PREFIX,
   defaultRagInjectionConfig,
+  defaultRecencyInjectionConfig,
   loadMemoryConfig,
+  type RecencyInjectionConfig,
 } from "./src/memory/config.ts";
 import {
   defaultAutoCaptureConfig,
@@ -68,6 +70,7 @@ import {
 import type { MemoryStore } from "./src/memory/store.ts";
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
 import { buildRagContext } from "./src/memory/rag.ts";
+import type { RagBlock } from "./src/memory/rag.ts";
 import type { RagRetrievalDiagnostics } from "./src/memory/rag.ts";
 import {
   buildRagQuery,
@@ -89,7 +92,8 @@ import {
 interface RagSessionState {
   userIndex: number;
   query: string;
-  context: Promise<string>;
+  /** Resolves to the blocks to inject, in order. */
+  context: Promise<RagBlock[]>;
   text?: string;
 }
 
@@ -109,6 +113,7 @@ export default async function registerPiFriend(
   let externalIndexManager: ExternalIndexManager | undefined;
   const ragSessions = new Map<string, RagSessionState>();
   let injectionConfig = defaultRagInjectionConfig();
+  let recencyConfig: RecencyInjectionConfig = defaultRecencyInjectionConfig();
   let queryPrefixes: readonly QueryPrefix[] = [];
   // The last injection this session produced, for the memory_last_rag tool.
   let lastRetrieval:
@@ -401,6 +406,7 @@ export default async function registerPiFriend(
       // the error it exists to prevent.
       await reportMigrations(repository.store, ctx);
       injectionConfig = repository.store.config.injection;
+      recencyConfig = repository.store.config.recencyInjection;
       queryPrefixes = compileQueryPrefixes(
         repository.store.config.queryPrefixes.patterns,
       );
@@ -493,10 +499,14 @@ export default async function registerPiFriend(
   });
 
   pi.on("context", async (event, ctx) => {
-    if (!memoryService || !injectionConfig.enabled) {
+    if (
+      !memoryService ||
+      (!injectionConfig.enabled && !recencyConfig.enabled)
+    ) {
       debugRag("skipped", {
         hasService: memoryService !== undefined,
         enabled: injectionConfig.enabled,
+        recencyEnabled: recencyConfig.enabled,
       });
       return;
     }
@@ -520,6 +530,7 @@ export default async function registerPiFriend(
           service,
           ragQuery.query,
           injectionConfig,
+          recencyConfig,
           {
             reportError: (label, error) => logError(label, error),
           },
@@ -533,42 +544,54 @@ export default async function registerPiFriend(
               rawQuery: ragQuery.query,
               userPromptChars: ragQuery.userPrompt.length,
               assistantTextChars: ragQuery.assistantText?.length ?? 0,
-              contextChars: rag.text.length,
+              contextChars: rag.blocks.reduce(
+                (total, block) => total + block.text.length,
+                0,
+              ),
               ...rag.diagnostics,
             });
-            return rag.text;
+            return rag.blocks;
           })
           .catch((error: unknown) => {
             logError("RAG context", error);
             debugRag("failed", { error });
-            return "";
+            return [] as RagBlock[];
           }),
       };
       ragSessions.set(sessionId, state);
     }
 
-    const retrievedText = await state.context;
-    const contextText = ragBlockForDelivery(
-      retrievedText,
-      isDebugEnabled(),
-    );
-    state.text = contextText;
-    if (contextText === "") {
-      return;
+    const retrieved = await state.context;
+    if (retrieved.length === 0) {
+      // A debug run marks the spot even when nothing was selected, so a missing
+      // block is distinguishable from an injection pass that never ran.
+      const marker = ragBlockForDelivery("", isDebugEnabled());
+      if (marker === "") {
+        return;
+      }
+      state.text = marker;
+      return {
+        messages: injectRagContext(event.messages, marker, injectionConfig.position),
+      };
     }
 
+    // One block when both sections share a position; two otherwise, each in its
+    // own target turn. Prepending does not change message indices, so the
+    // second injection still lands on the turn it was computed for.
+    let messages = event.messages;
+    for (const block of retrieved) {
+      messages = injectRagContext(messages, block.text, block.position);
+    }
+    state.text = retrieved.map((block) => block.text).join("\n\n");
+
     debugRag("injected", {
-      contextChars: contextText.length,
-      emptyDebugBlock: retrievedText === "",
-      position: injectionConfig.position,
+      contextChars: state.text.length,
+      blocks: retrieved.map((block) => ({
+        position: block.position,
+        chars: block.text.length,
+      })),
     });
-    return {
-      messages: injectRagContext(
-        event.messages,
-        contextText,
-        injectionConfig.position,
-      ),
-    };
+    return { messages };
   });
 
   pi.on("context_with_system", (event, ctx) => {

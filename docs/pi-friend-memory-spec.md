@@ -59,6 +59,14 @@ memory:
     mode: hybrid
     limit: 5
     max_chars: 6000
+  recency_injection:
+    enabled: true
+    position: -1
+    mode: hybrid
+    limit: 5
+    max_chars: 3000
+    max_age_seconds: 86400
+    last_n: 8
   auto_capture:
     enabled: true
     every_turns: 5
@@ -200,6 +208,9 @@ once-per-day consolidation schedule, not daily-log processing.
   - a position deeper than the history injects into the earliest user turn that exists; a positive position is a configuration warning and is treated as `0`
   - omitted entirely, the position defaults to `-1`
 - The retrieved block is prepended to the selected user message and wrapped in `<pi-friend-memory>...</pi-friend-memory>`.
+- **Two sections, two questions.** Recall answers *what do I know that bears on this message*; the recency section answers *what have I been doing*, over the same store and on a different axis. Its pool is chosen by date — `edited ?? created`, never file mtime and never `decay_weight` — as a **union**: inside `max_age_seconds` **or** among the newest `last_n`. `limit` then takes the most relevant of that pool, using `mode` as recall does, so an unrelated recent memory can lose to five that match; the section is for orientation, not a guarantee. It is rendered chronologically, each entry carrying its own local date and relative age — labelled `edited` when the record has one, `created` otherwise — and nothing else. There is deliberately no `Why recent:` line: the date already says how recent it is, and the eligibility rule and the score are things an operator asks about, so they live in `/memory-last-rag` rather than in the prompt. Candidates keep `Candidate - unverified`; dreams are excluded. A memory chosen by both passes is rendered once, in Recalled, so each section means what it says.
+- **One block or two** depends on the positions: when `recency_injection.position` equals `injection.position` (the default, `-1`), both sections share one `<pi-friend-memory>` block, Recently first — where I have been is the frame, what matches is the content. When the positions differ, each section is its own block, injected into its own user turn with only its own header. Each section has its own `max_chars`, so neither can crowd out the other.
+- A recency pass is read-only: it moves no counters and writes no access record, because reading memories to describe them is not a use and not a search anyone made.
 - Only two types of items are considered for injection: active, non-quarantined canonical nodes; and candidate nodes in `staging`.
 - Plain documents remain searchable through tools but are not copied into factual RAG context.
 - Each injected memory carries a compact `Why recalled:` explanation with its semantic rank, keyword rank, keyword-matched fields, and score.
@@ -225,7 +236,7 @@ once-per-day consolidation schedule, not daily-log processing.
 ## 7. Decay
 
 - **Volume-relative**: each node's weight decreases by a function of *how many new memories have been stored since its last use*, not elapsed clock time. Quiet weeks don't bury things.
-- `decay_weight` is recomputed once per sweep. Search calls append access records with the retrieval mode, query, path, and slug when available; RAG retrieval uses the same search path and may log candidate hits before injection filtering. Access logging never rewrites node files.
+- `decay_weight` is recomputed once per sweep from `last_used`, which the operations that touch a node write at the moment they run — a read, a search hit, an injection that reached the prompt, an edit, a merge, a promotion. Nothing is projected from a log, and the recency pass writes neither counters nor access records.
 - Decay is also calculated once per sweep on candidate items in `staging`, using the same volume curve, weights, canonical-only volume count, and `0.05` floor as canonical nodes. Candidate RAG hits do not reset candidate decay; only sweep processing updates it. A candidate expires when its decay weight reaches `0.05`. Candidate expiry is volume-based; elapsed wall-clock time does not decay candidates.
 - Superseded nodes get `decay_weight: 0` and are excluded from RAG, but remain searchable with an explicit `superseded` marker (so the model can say "an earlier record says X, but it was corrected by Y").
 
@@ -323,7 +334,7 @@ Once per day, a model pass:
 
 ## 11a. Inspecting one retrieval
 
-- `/memory-last-rag` reports the last injection: cleaned query, mode and fallback, and per result the keyword score broken down by contributing field, the semantic similarity, both ranks, the fused score and whether the block was injected. It is a command, so it runs locally and costs nothing.
+- `/memory-last-rag` reports the last injection: cleaned query, mode and fallback, and per result the keyword score broken down by contributing field, the semantic similarity, both ranks, the fused score and whether the block was injected. It also reports the recency pass — pool size, mode, and per eligible memory its eligibility reason, rank in the pool, score, date and whether it was injected. It is a command, so it runs locally and costs nothing; `memory_last_rag` returns the same report as a tool.
 - The same numbers are available as the `memory_last_rag` tool when a conversation needs them. Both read one record kept per session by the extension, not a re-run of the search.
 
 ## 12. Optional passes (proposals for Aisling's ruling)

@@ -58,6 +58,29 @@ export interface RagInjectionConfig {
   maxChars: number;
 }
 
+/**
+ * Configuration for the time-ordered section injected beside recall.
+ *
+ * Two queries, two budgets: recall answers "what do I know that bears on this",
+ * and this answers "what have I been doing". They share an injection point when
+ * their positions match, so the block is assembled from both.
+ */
+export interface RecencyInjectionConfig {
+  enabled: boolean;
+  /** Same meaning as `injection.position`: 0 is the current user turn. */
+  position: number;
+  /** How the eligible pool is ranked; the pool itself is chosen by date. */
+  mode: MemorySearchMode;
+  /** How many of the pool's most relevant entries are written. */
+  limit: number;
+  /** Budget for this section alone, so recall cannot crowd it out. */
+  maxChars: number;
+  /** Eligible when `edited ?? created` is within this many seconds. 0 disables. */
+  maxAgeSeconds: number;
+  /** Eligible when it is among the newest N by the same date. 0 disables. */
+  lastN: number;
+}
+
 /** Configuration for periodic conversation capture into staging. */
 export interface AutoCaptureConfig {
   enabled: boolean;
@@ -242,6 +265,7 @@ export interface MemoryConfig {
    */
   indexExclude: string[];
   injection: RagInjectionConfig;
+  recencyInjection: RecencyInjectionConfig;
   autoCapture: AutoCaptureConfig;
   sweep: SweepConfig;
   merge: MergeConfig;
@@ -284,6 +308,25 @@ export function defaultRagInjectionConfig(): RagInjectionConfig {
     mode: "hybrid",
     limit: 5,
     maxChars: 6_000,
+  };
+}
+
+/**
+ * Returns the default recency policy.
+ *
+ * Both eligibility conditions are on by default and are a union: everything
+ * from the last day, plus a floor of the eight newest, so a quiet day still
+ * has something to say.
+ */
+export function defaultRecencyInjectionConfig(): RecencyInjectionConfig {
+  return {
+    enabled: true,
+    position: -1,
+    mode: "hybrid",
+    limit: 5,
+    maxChars: 3_000,
+    maxAgeSeconds: 86_400,
+    lastN: 8,
   };
 }
 
@@ -432,6 +475,7 @@ export function parseMemoryConfig(
       indexExclude: [],
       search: defaultSearchConfig(),
       injection: defaultRagInjectionConfig(),
+      recencyInjection: defaultRecencyInjectionConfig(),
       autoCapture: defaultAutoCaptureConfig(),
       sweep: defaultSweepConfig(),
       merge: defaultMergeConfig(),
@@ -502,6 +546,11 @@ export function parseMemoryConfig(
       warnings,
     ),
     injection: parseRagInjection(memoryConfig.injection, configPath, warnings),
+    recencyInjection: parseRecencyInjection(
+      memoryConfig.recency_injection,
+      configPath,
+      warnings,
+    ),
     autoCapture: parseAutoCapture(
       memoryConfig.auto_capture,
       configPath,
@@ -542,6 +591,7 @@ export async function loadMemoryConfig(
         indexExclude: [],
         search: defaultSearchConfig(),
         injection: defaultRagInjectionConfig(),
+        recencyInjection: defaultRecencyInjectionConfig(),
         autoCapture: defaultAutoCaptureConfig(),
         sweep: defaultSweepConfig(),
         merge: defaultMergeConfig(),
@@ -713,6 +763,134 @@ function parseSearch(
     }
     config.defaultMode = value.default_mode;
   }
+  return config;
+}
+
+/**
+ * Parses the recency section, applying defaults.
+ *
+ * `max_age_seconds` and `last_n` are a union rather than alternatives: a memory
+ * is eligible when it falls inside the age window or among the newest N. Both
+ * zero is a configuration error rather than an empty section, because a section
+ * that can never contain anything is a mistake, not a preference.
+ */
+function parseRecencyInjection(
+  value: unknown,
+  configPath: string,
+  warnings: string[],
+): RecencyInjectionConfig {
+  const config = defaultRecencyInjectionConfig();
+  if (value === undefined) {
+    return config;
+  }
+  if (!isRecord(value)) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.recency_injection must be a YAML object.`,
+    );
+  }
+  collectUnknownKeys(
+    value,
+    "recency_injection",
+    `${configPath}: memory.recency_injection`,
+    warnings,
+  );
+
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled !== "boolean") {
+      throw new MemoryConfigError(
+        `${configPath}: memory.recency_injection.enabled must be a boolean.`,
+      );
+    }
+    config.enabled = value.enabled;
+  }
+
+  if (value.position !== undefined) {
+    if (typeof value.position !== "number" || !Number.isInteger(value.position)) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.recency_injection.position must be zero or a negative integer.`,
+      );
+    }
+    if (value.position > 0) {
+      warnings.push(
+        `${configPath}: memory.recency_injection.position must be zero or a negative integer; ${value.position} is treated as 0.`,
+      );
+      config.position = 0;
+    } else {
+      config.position = value.position;
+    }
+  }
+
+  if (value.mode !== undefined) {
+    if (!isSearchMode(value.mode)) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.recency_injection.mode must be keyword, semantic, or hybrid.`,
+      );
+    }
+    config.mode = value.mode;
+  }
+
+  if (value.limit !== undefined) {
+    if (
+      typeof value.limit !== "number" ||
+      !Number.isInteger(value.limit) ||
+      value.limit < 1 ||
+      value.limit > 25
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.recency_injection.limit must be an integer from 1 to 25.`,
+      );
+    }
+    config.limit = value.limit;
+  }
+
+  if (value.max_chars !== undefined) {
+    if (
+      typeof value.max_chars !== "number" ||
+      !Number.isInteger(value.max_chars) ||
+      value.max_chars < 200 ||
+      value.max_chars > 50_000
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.recency_injection.max_chars must be an integer from 200 to 50000.`,
+      );
+    }
+    config.maxChars = value.max_chars;
+  }
+
+  if (value.max_age_seconds !== undefined) {
+    if (
+      typeof value.max_age_seconds !== "number" ||
+      !Number.isInteger(value.max_age_seconds) ||
+      value.max_age_seconds < 0 ||
+      value.max_age_seconds > 315_360_000
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.recency_injection.max_age_seconds must be an integer number of seconds from 0 to 315360000; 0 disables the age window.`,
+      );
+    }
+    config.maxAgeSeconds = value.max_age_seconds;
+  }
+
+  if (value.last_n !== undefined) {
+    if (
+      typeof value.last_n !== "number" ||
+      !Number.isInteger(value.last_n) ||
+      value.last_n < 0 ||
+      value.last_n > 1_000
+    ) {
+      throw new MemoryConfigError(
+        `${configPath}: memory.recency_injection.last_n must be an integer from 0 to 1000; 0 disables the count floor.`,
+      );
+    }
+    config.lastN = value.last_n;
+  }
+
+  if (config.maxAgeSeconds === 0 && config.lastN === 0) {
+    throw new MemoryConfigError(
+      `${configPath}: memory.recency_injection needs max_age_seconds or last_n (or both); with both at 0 nothing could ever be eligible.`,
+    );
+  }
+
   return config;
 }
 
@@ -1299,6 +1477,7 @@ const KNOWN_KEYS = {
     "search",
     "vector",
     "injection",
+    "recency_injection",
     "auto_capture",
     "sweep",
     "merge",
@@ -1312,6 +1491,15 @@ const KNOWN_KEYS = {
   speaker_tags: ["patterns"],
   query_prefixes: ["patterns"],
   injection: ["enabled", "position", "mode", "limit", "max_chars"],
+  recency_injection: [
+    "enabled",
+    "position",
+    "mode",
+    "limit",
+    "max_chars",
+    "max_age_seconds",
+    "last_n",
+  ],
   vector: ["chunk_size"],
   auto_capture: [
     "enabled",

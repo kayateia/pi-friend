@@ -371,6 +371,25 @@ test("filters restrict the search before the nearest-neighbour cutoff", async ()
         keys(index.search(query, 3, { kinds: [] })),
         [],
       );
+      // A list filter is what quarantine needs: "everything except a dream" is
+      // not expressible as an equality, and filtering afterwards would cost a
+      // slot the nearest-neighbour cut already spent.
+      assert.deepEqual(
+        keys(index.search(query, 3, { types: ["fact"] })),
+        ["old-1", "undated", "old-4"],
+      );
+      assert.deepEqual(
+        keys(index.search(query, 3, { statuses: ["active"] })),
+        ["old-1", "undated", "old-2"],
+      );
+      assert.deepEqual(
+        keys(index.search(query, 3, { types: [] })),
+        [],
+      );
+      assert.deepEqual(
+        keys(index.search(query, 3, { statuses: [] })),
+        [],
+      );
       assert.deepEqual(
         keys(
           index.search(query, 3, {

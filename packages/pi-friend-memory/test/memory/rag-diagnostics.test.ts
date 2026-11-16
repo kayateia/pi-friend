@@ -8,7 +8,10 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultRagInjectionConfig } from "../../src/memory/config.ts";
+import {
+  defaultRagInjectionConfig,
+  defaultRecencyInjectionConfig,
+} from "../../src/memory/config.ts";
 import { buildRagContext, formatRagDiagnostics } from "../../src/memory/rag.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
@@ -34,7 +37,10 @@ test("the diagnostics record the query, the scores and what was injected", async
     });
 
     const config = { ...defaultRagInjectionConfig(), mode: "keyword" as const };
-    const context = await buildRagContext(service, "\\>>Aria: kettle", config);
+    const context = await buildRagContext(service, "\\>>Aria: kettle", config, {
+      ...defaultRecencyInjectionConfig(),
+      enabled: false,
+    });
 
     assert.equal(context.diagnostics.query, "kettle");
     assert.equal(context.diagnostics.modeUsed, "keyword");

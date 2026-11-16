@@ -73,7 +73,18 @@ export interface VectorEntryMetadata {
 export interface VectorSearchFilters {
   kinds?: readonly MemoryFileKind[];
   type?: MemoryType;
+  /**
+   * Types to admit, for a caller that means "everything except …".
+   *
+   * `type` is equality, so quarantine could not be expressed with it: the only
+   * way to say "not a dream" was to filter the results, which is a filter
+   * applied after the cutoff — the starvation shape these filters exist to
+   * remove. Combine with `type` at your peril; they are ANDed.
+   */
+  types?: readonly MemoryType[];
   status?: MemoryStatus;
+  /** Statuses to admit; see `types` for why a list is needed as well. */
+  statuses?: readonly MemoryStatus[];
   /** Inclusive lower bound on `modifiedAt`, as an ISO timestamp. */
   since?: string;
   /** Inclusive upper bound on `modifiedAt`, as an ISO timestamp. */
@@ -763,9 +774,29 @@ function buildFilterClause(filters: VectorSearchFilters): {
     conditions.push("memory_type = ?");
     params.push(filters.type);
   }
+  if (filters.types !== undefined) {
+    if (filters.types.length === 0) {
+      conditions.push("0 = 1");
+    } else {
+      conditions.push(
+        `memory_type IN (${filters.types.map(() => "?").join(", ")})`,
+      );
+      params.push(...filters.types);
+    }
+  }
   if (filters.status !== undefined) {
     conditions.push("memory_status = ?");
     params.push(filters.status);
+  }
+  if (filters.statuses !== undefined) {
+    if (filters.statuses.length === 0) {
+      conditions.push("0 = 1");
+    } else {
+      conditions.push(
+        `memory_status IN (${filters.statuses.map(() => "?").join(", ")})`,
+      );
+      params.push(...filters.statuses);
+    }
   }
   if (filters.since !== undefined) {
     // An entry with no recorded date cannot satisfy a date bound; SQL would

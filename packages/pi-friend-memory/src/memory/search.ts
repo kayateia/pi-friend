@@ -55,6 +55,16 @@ export interface MemoryFilterOptions {
   corpus?: MemorySearchCorpus;
   status?: MemoryStatus;
   statuses?: readonly MemoryStatus[];
+  /** Types to admit, for a caller that means "everything except …". */
+  types?: readonly MemoryType[];
+  /**
+   * Restrict to these slugs. The caller has already decided the pool — the
+   * recency section does — and this only stops the scorer considering the rest.
+   *
+   * A set, not a list: the predicate runs once per file and a linear scan of a
+   * hundred-entry pool would make the filter cost more than the ranking.
+   */
+  slugs?: ReadonlySet<string>;
   /**
    * Inclusive lower bound on the file's modification date.
    *
@@ -206,6 +216,11 @@ export function matchesSearchFilters(
   if (options.kinds !== undefined && !options.kinds.includes(file.kind)) {
     return false;
   }
+  if (options.types !== undefined) {
+    if (file.type === undefined || !options.types.includes(file.type)) {
+      return false;
+    }
+  }
   if (options.status !== undefined && file.status !== options.status) {
     return false;
   }
@@ -214,6 +229,11 @@ export function matchesSearchFilters(
     (file.status === undefined || !options.statuses.includes(file.status))
   ) {
     return false;
+  }
+  if (options.slugs !== undefined) {
+    if (file.slug === undefined || !options.slugs.has(file.slug)) {
+      return false;
+    }
   }
   return isWithinDateWindow(file, options.since, options.until);
 }
@@ -414,7 +434,7 @@ function scoreFile(
   const requiredMatches =
     minTokenMatches === undefined
       ? tokens.length
-      : Math.max(1, Math.floor(minTokenMatches));
+      : Math.max(0, Math.floor(minTokenMatches));
   if (!phraseMatch && matchedTokenCount < requiredMatches) {
     return null;
   }
@@ -468,7 +488,10 @@ function scoreFile(
   }
 
   if (fields.length === 0) {
-    return null;
+    // With no minimum, an entry that matches nothing is still ranked — at zero.
+    return requiredMatches === 0
+      ? { value: 0, fields: [], contributions: [] }
+      : null;
   }
   contributions.sort((left, right) => right.points - left.points);
   return { value, fields, contributions };
