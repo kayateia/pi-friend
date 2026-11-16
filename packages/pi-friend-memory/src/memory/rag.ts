@@ -189,6 +189,8 @@ export async function buildRagContext(
   let length = 0;
   let selectedNodeCount = 0;
   const injectedSlugs = new Set<string>();
+  /** Canonical nodes that reached the prompt, which is what counts as a use. */
+  const injectedMemorySlugs: string[] = [];
   if (retrieved.length > 0) {
     const selectedMemory: string[] = [];
     length += memoryHeader.length;
@@ -198,7 +200,11 @@ export async function buildRagContext(
           break;
         }
         selectedMemory.push(block);
-        injectedSlugs.add(retrieved[index]?.node.slug ?? "");
+        const used = retrieved[index];
+        injectedSlugs.add(used?.node.slug ?? "");
+        if (used?.area === "canonical") {
+          injectedMemorySlugs.push(used.node.slug);
+        }
         length += block.length + 2;
       }
     }
@@ -225,6 +231,11 @@ export async function buildRagContext(
       },
     };
   }
+
+  // A recall hit is a use only once it reached the prompt: a row the budget cut
+  // was found, not read. Candidates are never bumped, and recordUse ignores
+  // them by reading the canonical area.
+  await service.recordUse(injectedMemorySlugs);
 
   return {
     text: `${openingTag}\n${sections
