@@ -39,8 +39,9 @@ The default tree is:
 
 `nodes/` and `staging/` are memory and are searchable. `history/`, `sweeps/`,
 `index/` and `access-log` are the extension's own bookkeeping — the vector index,
-run logs, and every previous version of a memory — and are never enumerated for
-search, even though they are Markdown. A history entry is a copy of a memory as
+run logs, every previous version of a memory, and a record of what retrieval
+returned — and are never enumerated for search, even though they are Markdown.
+`access-log` exists only when `PI_FRIEND_DEBUG_HOOKS=1`; see [Record retrieval](#record-retrieval). A history entry is a copy of a memory as
 it was, so indexing one would let an outdated version answer a search as though
 it were current.
 
@@ -652,6 +653,19 @@ results and normal runtime output are not written to this file.
 Users see the message chain for initialization and background warnings without
 the stack details. Full stacks, nested `cause` failures, and lower-level
 sqlite-vec diagnostics remain in the log file.
+
+## Record retrieval
+
+Set `PI_FRIEND_DEBUG_HOOKS=1` to append one line per returned search hit to
+`access-log` beside the memory root: the source (`tool` for a `memory_search`
+call, `rag` for the automatic recall pass), the path, the retrieval mode and
+the query. It is the same switch that turns on the lifecycle dump below, so a
+debugging session gets both rather than a second flag to remember; the hooks
+side is the noisy one, and it is not a switch anyone leaves on.
+
+The log is a diagnostic, not a data source. Nothing reads it, nothing depends
+on its contents, and deleting the file changes no counter, no weight and no
+result — which is why it is off by default and excluded from host syncing.
 
 ## Inspect lifecycle hooks
 

@@ -98,16 +98,19 @@ export async function buildRagContext(
   let fallbackUsed = false;
   let searchError: string | undefined;
   try {
-    results = await service.search({
-      query,
-      mode: config.mode,
-      kinds: ["node", "staging-candidate"],
-      statuses: ["active", "candidate"],
-      limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
-      // A conversational prompt should contribute any matching memory term,
-      // not require every word from the sentence to occur in one node.
-      minTokenMatches: 1,
-    });
+    results = await service.search(
+      {
+        query,
+        mode: config.mode,
+        kinds: ["node", "staging-candidate"],
+        statuses: ["active", "candidate"],
+        limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
+        // A conversational prompt should contribute any matching memory term,
+        // not require every word from the sentence to occur in one node.
+        minTokenMatches: 1,
+      },
+      { source: "rag" },
+    );
   } catch (error) {
     options.reportError?.("RAG primary search", error);
     searchError = formatErrorChain(error);
@@ -115,14 +118,17 @@ export async function buildRagContext(
       fallbackUsed = true;
       modeUsed = "keyword";
       try {
-        results = await service.search({
-          query,
-          mode: "keyword",
-          kinds: ["node", "staging-candidate"],
-          statuses: ["active", "candidate"],
-          limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
-          minTokenMatches: 1,
-        });
+        results = await service.search(
+          {
+            query,
+            mode: "keyword",
+            kinds: ["node", "staging-candidate"],
+            statuses: ["active", "candidate"],
+            limit: Math.min(25, Math.max(config.limit, config.limit * 3)),
+            minTokenMatches: 1,
+          },
+          { source: "rag" },
+        );
       } catch (fallbackError) {
         options.reportError?.("RAG keyword fallback", fallbackError);
         searchError =
