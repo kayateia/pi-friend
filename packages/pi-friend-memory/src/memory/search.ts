@@ -55,6 +55,8 @@ export interface MemoryFilterOptions {
   corpus?: MemorySearchCorpus;
   status?: MemoryStatus;
   statuses?: readonly MemoryStatus[];
+  /** Types to admit, for a caller that means "everything except …". */
+  types?: readonly MemoryType[];
   /**
    * Inclusive lower bound on the file's modification date.
    *
@@ -205,6 +207,11 @@ export function matchesSearchFilters(
   }
   if (options.kinds !== undefined && !options.kinds.includes(file.kind)) {
     return false;
+  }
+  if (options.types !== undefined) {
+    if (file.type === undefined || !options.types.includes(file.type)) {
+      return false;
+    }
   }
   if (options.status !== undefined && file.status !== options.status) {
     return false;
