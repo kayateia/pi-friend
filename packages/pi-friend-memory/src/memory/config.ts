@@ -101,6 +101,11 @@ export interface AutoCaptureConfig {
   prompt?: string;
   /** Optional text appended after the built-in capture system prompt. */
   promptAppend?: string;
+  /**
+   * Optional wall-clock budget for each capture model request, in milliseconds.
+   * Defaults to the capture pass's built-in 30 seconds when unset.
+   */
+  timeoutMs?: number;
 }
 
 /** Configuration for the daily consolidation pass. */
@@ -130,6 +135,13 @@ export interface SweepConfig {
   allowDrop: boolean;
   /** Batches smaller than this never report a removal ratio above a quarter. */
   minGuardedBatchSize: number;
+  /**
+   * Optional wall-clock budget for the sweep decision request, in milliseconds.
+   * The sweep prompt is the largest nested request in the extension, so this is
+   * the budget most likely to need raising. Defaults to the built-in 30 seconds
+   * when unset.
+   */
+  timeoutMs?: number;
 }
 
 /** Configuration for the post-sweep dream narrative pass. */
@@ -149,6 +161,11 @@ export interface DreamingConfig {
   prompt?: string;
   /** Optional text appended after the built-in dream system prompt. */
   promptAppend?: string;
+  /**
+   * Optional wall-clock budget for each dream model request, in milliseconds.
+   * Defaults to the dream pass's built-in 30 seconds when unset.
+   */
+  timeoutMs?: number;
 }
 
 /** Configuration for the pass that writes a consolidated memory body. */
@@ -165,6 +182,11 @@ export interface MergeConfig {
   prompt?: string;
   /** Optional text appended after the built-in merge system prompt. */
   promptAppend?: string;
+  /**
+   * Optional wall-clock budget for each merge model request, in milliseconds.
+   * Defaults to the merge pass's built-in 30 seconds when unset.
+   */
+  timeoutMs?: number;
 }
 
 /** Merge writer settings used when the configuration says nothing. */
@@ -201,6 +223,14 @@ function parseMerge(
     config.model = value.model.trim();
   }
   applyModelPrompt(config, value, configPath, "memory.merge", "merge", warnings);
+  const mergeTimeoutMs = parseTimeoutMs(
+    value.timeout_ms,
+    configPath,
+    "memory.merge.timeout_ms",
+  );
+  if (mergeTimeoutMs !== undefined) {
+    config.timeoutMs = mergeTimeoutMs;
+  }
   return config;
 }
 
@@ -1176,6 +1206,14 @@ function parseAutoCapture(
     "capture",
     warnings,
   );
+  const captureTimeoutMs = parseTimeoutMs(
+    value.timeout_ms,
+    configPath,
+    "memory.auto_capture.timeout_ms",
+  );
+  if (captureTimeoutMs !== undefined) {
+    config.timeoutMs = captureTimeoutMs;
+  }
   return config;
 }
 
@@ -1268,6 +1306,14 @@ function parseSweep(
     }
     config.minGuardedBatchSize = value.min_guarded_batch_size;
   }
+  const sweepTimeoutMs = parseTimeoutMs(
+    value.timeout_ms,
+    configPath,
+    "memory.sweep.timeout_ms",
+  );
+  if (sweepTimeoutMs !== undefined) {
+    config.timeoutMs = sweepTimeoutMs;
+  }
   return config;
 }
 
@@ -1332,7 +1378,37 @@ function parseDreaming(
     "dream",
     warnings,
   );
+  const dreamTimeoutMs = parseTimeoutMs(
+    value.timeout_ms,
+    configPath,
+    "memory.dreaming.timeout_ms",
+  );
+  if (dreamTimeoutMs !== undefined) {
+    config.timeoutMs = dreamTimeoutMs;
+  }
   return config;
+}
+
+/** Parses the optional wall-clock budget for one internal model request. */
+function parseTimeoutMs(
+  value: unknown,
+  configPath: string,
+  field: string,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 1_000 ||
+    value > 600_000
+  ) {
+    throw new MemoryConfigError(
+      `${configPath}: ${field} must be an integer number of milliseconds from 1000 to 600000.`,
+    );
+  }
+  return value;
 }
 
 /** Parses a non-empty replacement prompt for an internal model request. */
@@ -1510,6 +1586,7 @@ const KNOWN_KEYS = {
     "prompt",
     "prompt_append",
     "thinking_level",
+    "timeout_ms",
   ],
   sweep: [
     "enabled",
@@ -1520,9 +1597,10 @@ const KNOWN_KEYS = {
     "allow_drop",
     "min_guarded_batch_size",
     "thinking_level",
+    "timeout_ms",
   ],
   history: ["keep_days"],
-  merge: ["model", "prompt", "prompt_append", "thinking_level"],
+  merge: ["model", "prompt", "prompt_append", "thinking_level", "timeout_ms"],
   dreaming: [
     "enabled",
     "max_nodes",
@@ -1530,6 +1608,7 @@ const KNOWN_KEYS = {
     "prompt",
     "prompt_append",
     "thinking_level",
+    "timeout_ms",
   ],
   embeddings: ["model"],
 } as const;

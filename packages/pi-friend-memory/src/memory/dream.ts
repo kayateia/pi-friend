@@ -136,6 +136,7 @@ export async function runDreamModel(
   signal?: AbortSignal,
   systemPrompt: string = DREAM_SYSTEM_PROMPT,
   thinkingLevel?: ThinkingLevel,
+  timeoutMs: number = 30_000,
 ): Promise<DreamDraft> {
   const model = resolveConfiguredModel(
     ctx,
@@ -151,7 +152,7 @@ export async function runDreamModel(
     systemPrompt,
     userContent: buildDreamPrompt(shortlist, maxNodes),
     maxTokens: 2_000,
-    timeoutMs: 30_000,
+    timeoutMs,
     label: "dreaming",
     reportWarning,
     ...(signal === undefined ? {} : { signal }),

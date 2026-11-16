@@ -72,15 +72,18 @@ memory:
     every_turns: 5
     max_candidates: 3
     idle_timeout: 600 # seconds after the last settled run
+    # timeout_ms: 30000
     # model: openrouter/google/gemini-2.5-flash
   sweep:
     enabled: true
     background: false
     min_guarded_batch_size: 10
+    # timeout_ms: 120000
     # model: openrouter/google/gemini-2.5-flash
   dreaming:
     enabled: true
     max_nodes: 4
+    # timeout_ms: 60000
     # model: openrouter/google/gemini-2.5-flash
   embeddings:
     model: openrouter/openai/text-embedding-3-small
@@ -299,6 +302,7 @@ Once per day, a model pass:
 
 **State file rule:** the sweep maintains a state file (last-run timestamp, cursor). It MUST be updated in every outcome, including failure. A pass that does not advance the timestamp is a failed pass — otherwise the next run re-reads the same window forever.
 - **Loss is reported, not vetoed**: for batches at or above `min_guarded_batch_size`, a sweep that removes more than 25% of prior entries (expired candidates and model drops counted together) reports it and proceeds. Removing a candidate is recoverable — drops are archived under `history/dropped/` and restorable — while refusing a run would discard that run's promotions and merges and leave a larger queue for the next attempt. Smaller batches never report the ratio.
+- **Request budgets are configurable**: each internal model pass (capture, sweep, dream, merge) takes an optional `timeout_ms` — an integer number of milliseconds from 1,000 to 600,000 bounding one model request. The default is 30,000 everywhere. The sweep prompt is the largest request in the extension, so it is the pass most likely to need a larger budget: a sweep request that exceeds its budget is aborted client-side (surfacing on the provider as a cancelled request) and the whole run fails without acting, leaving the queue for the next attempt.
 - **Every sweep writes a dated log** in `sweeps/`: what moved, what merged, what was dropped, why. Record-is-load-bearing applies to the janitor.
 - **History instead of snapshots**: every operation that replaces or removes content stores the previous version under `history/` first, so undo works per memory rather than per sweep. A whole-sweep snapshot was tried and removed: it copied the entire store to protect operations that already keep their own copies, and nothing ever read it.
 

@@ -87,6 +87,9 @@ memory:
     every_turns: 5
     idle_timeout: 600
     max_candidates: 3
+    # Wall-clock budget for one capture model request, in milliseconds
+    # (default 30000).
+    # timeout_ms: 30000
     # model: openrouter/google/gemini-2.5-flash
     #
     # This section's system prompt can be adjusted two ways, and only one at a
@@ -129,6 +132,10 @@ memory:
     # quarter of a queue this size or larger — reported, not blocked.
     # allow_drop: false
     min_guarded_batch_size: 10
+    # Wall-clock budget for the sweep decision request, in milliseconds
+    # (default 30000). The sweep prompt is the largest model request in the
+    # extension, so this is the budget most likely to need raising.
+    # timeout_ms: 120000
     # model: openrouter/google/gemini-2.5-flash
     #
     # `prompt` replaces, `prompt_append` extends; set at most one. The parser
@@ -161,6 +168,9 @@ memory:
   # to appending, with a warning, because refusing a merge would re-offer the
   # same candidates every sweep.
   merge:
+    # Wall-clock budget for one merge model request, in milliseconds
+    # (default 30000).
+    # timeout_ms: 60000
     # model: openrouter/google/gemini-2.5-flash
     # thinking_level: low   # minimal, low, medium, high, xhigh, max
     #
@@ -186,6 +196,9 @@ memory:
   dreaming:
     enabled: true
     max_nodes: 4
+    # Wall-clock budget for one dream model request, in milliseconds
+    # (default 30000).
+    # timeout_ms: 60000
     # model: openrouter/google/gemini-2.5-flash
     #
     # `prompt` replaces, `prompt_append` extends; set at most one.

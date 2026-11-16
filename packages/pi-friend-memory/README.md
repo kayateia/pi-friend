@@ -93,6 +93,7 @@ memory:
     every_turns: 5
     idle_timeout: 600
     max_candidates: 3
+    # timeout_ms: 30000
     # model: openrouter/google/gemini-2.5-flash
     # prompt: |
     #   Replacement system prompt for capture.
@@ -108,6 +109,7 @@ memory:
     #   Replacement system prompt for sweep decisions.
     # prompt_append: |
     #   Added after the built-in sweep prompt.
+    # timeout_ms: 120000
   dreaming:
     enabled: true
     max_nodes: 4
@@ -116,6 +118,7 @@ memory:
     #   Replacement system prompt for dream selection and writing.
     # prompt_append: |
     #   Added after the built-in dream prompt.
+    # timeout_ms: 60000
   embeddings:
     model: openrouter/openai/text-embedding-3-small
 ```
@@ -623,6 +626,13 @@ keyword and semantic candidates using reciprocal-rank fusion.
 Capture, the sweep, dreaming and the merge writer each take an optional
 `model` (`memory.auto_capture.model`, `memory.sweep.model`,
 `memory.dreaming.model`, `memory.merge.model`) and an optional `thinking_level`.
+Each pass also takes an optional `timeout_ms`
+(`memory.auto_capture.timeout_ms`, `memory.sweep.timeout_ms`,
+`memory.dreaming.timeout_ms`, `memory.merge.timeout_ms`), an integer number of
+milliseconds from 1,000 to 600,000 that bounds one model request. The default
+is 30,000 everywhere: the sweep prompt is the largest request in the
+extension, so it is the one most likely to need a larger budget when a big
+staging queue or a slow provider makes the built-in one too small.
 Everything about "the configured model cannot be used" is handled once, so the
 four passes behave the same way:
 

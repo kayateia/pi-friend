@@ -60,7 +60,8 @@ export async function runCaptureModel(
     throw new Error("No model is available for auto-capture.");
   }
 
-  const signal = AbortSignal.timeout(CAPTURE_TIMEOUT_MS);
+  const timeoutMs = config.timeoutMs ?? CAPTURE_TIMEOUT_MS;
+  const signal = AbortSignal.timeout(timeoutMs);
   // Kept for the failure path: the text alone cannot say whether a bad reply
   // was truncated, filtered, or came from a different model than configured.
   let finalMessage: AssistantMessage | undefined;
@@ -72,7 +73,7 @@ export async function runCaptureModel(
       speakerHint,
     ),
     maxTokens: 2_000,
-    timeoutMs: CAPTURE_TIMEOUT_MS,
+    timeoutMs,
     label: "auto-capture",
     reportWarning,
     signal,
@@ -202,7 +203,7 @@ async function retryCandidateTypes(
       systemPrompt: CAPTURE_TYPE_RETRY_SYSTEM_PROMPT,
       userContent: buildTypeRetryPrompt(refusals),
       maxTokens: 300,
-      timeoutMs: CAPTURE_TIMEOUT_MS,
+      timeoutMs: config.timeoutMs ?? CAPTURE_TIMEOUT_MS,
       label: "capture type retry",
       reportWarning,
       ...(signal === undefined ? {} : { signal }),
@@ -433,7 +434,7 @@ export function createCaptureRepairer(
       systemPrompt: CAPTURE_REPAIR_SYSTEM_PROMPT,
       userContent: buildRepairPrompt(rejected),
       maxTokens: 2_000,
-      timeoutMs: CAPTURE_TIMEOUT_MS,
+      timeoutMs: config.timeoutMs ?? CAPTURE_TIMEOUT_MS,
       label: "capture repair",
       reportWarning,
       ...(config.thinkingLevel === undefined
