@@ -153,6 +153,7 @@ export async function runSweepModel(
   systemPrompt: string = SWEEP_SYSTEM_PROMPT,
   allowDrop = false,
   thinkingLevel?: ThinkingLevel,
+  timeoutMs: number = 30_000,
 ): Promise<SweepDecision[]> {
   const model = resolveConfiguredModel(
     ctx,
@@ -168,7 +169,7 @@ export async function runSweepModel(
     systemPrompt,
     userContent: buildSweepPrompt(candidates, canonical, allowDrop),
     maxTokens: SWEEP_MAX_TOKENS,
-    timeoutMs: 30_000,
+    timeoutMs,
     label: "sweep",
     reportWarning,
     ...(signal === undefined ? {} : { signal }),

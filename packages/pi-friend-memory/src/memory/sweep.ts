@@ -162,6 +162,7 @@ async function runDailySweepLocked(
           resolveSweepSystemPrompt(config, config.allowDrop),
           config.allowDrop,
           config.thinkingLevel,
+          config.timeoutMs ?? 30_000,
         );
       }
       options.signal?.throwIfAborted();
@@ -290,6 +291,7 @@ async function runDailySweepLocked(
                   options.signal,
                   resolveSystemPrompt(DREAM_SYSTEM_PROMPT, options.dreaming),
                   options.dreaming.thinkingLevel,
+                  options.dreaming.timeoutMs ?? 30_000,
                 )
               : (() => {
                   throw new Error("Dream model context is unavailable.");

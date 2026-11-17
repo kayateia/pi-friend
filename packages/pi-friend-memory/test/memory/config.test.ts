@@ -457,6 +457,55 @@ test("sweep settings are parsed and validated", () => {
   );
 });
 
+test("timeout_ms is parsed per call type and bounds-checked", () => {
+  const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
+  const config = parseMemoryConfig(
+    [
+      "memory:",
+      "  auto_capture:",
+      "    timeout_ms: 45000",
+      "  sweep:",
+      "    timeout_ms: 120000",
+      "  merge:",
+      "    timeout_ms: 60000",
+      "  dreaming:",
+      "    timeout_ms: 90000",
+    ].join("\n"),
+    configPath,
+  );
+  assert.equal(config.autoCapture.timeoutMs, 45_000);
+  assert.equal(config.sweep.timeoutMs, 120_000);
+  assert.equal(config.merge.timeoutMs, 60_000);
+  assert.equal(config.dreaming.timeoutMs, 90_000);
+
+  // Left unset, each config stays optional so call sites keep their built-in
+  // 30-second budgets; nothing needs to change for existing configurations.
+  const defaults = parseMemoryConfig("memory: {}\n", configPath);
+  assert.equal(defaults.sweep.timeoutMs, undefined);
+  assert.equal(defaults.dreaming.timeoutMs, undefined);
+  assert.equal(defaults.merge.timeoutMs, undefined);
+  assert.equal(defaults.autoCapture.timeoutMs, undefined);
+
+  for (const bad of ["timeout_ms: 999", "timeout_ms: 600_001", "timeout_ms: soon", "timeout_ms: 30_000.5"]) {
+    assert.throws(
+      () =>
+        parseMemoryConfig(
+          `memory:\n  sweep:\n    ${bad}\n`,
+          configPath,
+        ),
+      MemoryConfigError,
+    );
+    assert.throws(
+      () =>
+        parseMemoryConfig(
+          `memory:\n  auto_capture:\n    ${bad}\n`,
+          configPath,
+        ),
+      MemoryConfigError,
+    );
+  }
+});
+
 test("dreaming settings are parsed and validated", () => {
   const configPath = path.join(path.sep, "tmp", "pi-friend-memory.yml");
   const config = parseMemoryConfig(
