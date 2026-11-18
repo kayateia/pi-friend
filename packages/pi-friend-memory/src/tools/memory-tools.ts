@@ -13,6 +13,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   MEMORY_TYPES,
+  isQuarantinedMemoryType,
   serializeMemoryNode,
 } from "../memory/schema.ts";
 import { ATTRIBUTION_LABEL, formatAttribution } from "../memory/attribution.ts";
@@ -23,6 +24,7 @@ import {
 import type {
   MemoryStatus,
   MemoryType,
+  ParsedMemoryNode,
 } from "../memory/schema.ts";
 import type { MemoryNodeArea } from "../memory/repository.ts";
 import type {
@@ -50,6 +52,19 @@ const MEMORY_AREAS = [
   "canonical",
   "staging",
 ] as const satisfies readonly MemoryNodeArea[];
+
+/**
+ * Default body length for a listing, in characters.
+ *
+ * Chosen from the store's own distribution: at 2000 every dream narrative fits
+ * whole (they run 822–1781 before the source list), and only about one memory
+ * in twelve is cut at all. A 1000-character clamp cut twelve of the fifteen
+ * dream narratives mid-sentence.
+ */
+const DEFAULT_LIST_BODY_CHARS = 2_000;
+
+/** Upper bound on one listing request, so a typo cannot mean "a million". */
+const MAX_LIST_LIMIT = 1_000;
 
 /** Structured details shared by successful and failed memory reads. */
 interface MemoryReadDetails {
@@ -132,6 +147,17 @@ interface MemorySearchDetails {
   mode: MemorySearchMode;
   count: number;
   results: MemorySearchResult[];
+  since?: string;
+  until?: string;
+}
+
+/** Structured details returned by a memory listing. */
+interface MemoryListDetails {
+  count: number;
+  total: number;
+  type?: MemoryType;
+  bodyChars: number;
+  clamped: number;
   since?: string;
   until?: string;
 }
@@ -785,6 +811,7 @@ export function registerMemoryTools(
       "corpus documents: imported Markdown (notes, journals, workspace files) and ordinary documents in the tree. Searchable, and never injected automatically — context, not memory.",
       "corpus all (default): both, ranked together.",
       "Exact slug and title matches rank above tag and body matches. Semantic mode uses embeddings; hybrid mode fuses keyword and semantic ranks.",
+      "For browsing memories without a query, use memory_list: this tool always ranks results for a query.",
       "Use type to restrict results to one memory-node category; it implies the memory corpus.",
       "since and until keep only entries modified inside that window. They apply to memories only — a document's date is its file modification time, which a backlink or a touch can move without the content changing.",
       "A date without a time means that calendar day in the server's local timezone, inclusive at both ends.",
@@ -918,6 +945,133 @@ export function registerMemoryTools(
     },
   });
 
+  pi.registerTool({
+    name: toolName("memory_list"),
+    label: "Memory List",
+    description: [
+      "List memories in this store, newest first, without ranking or searching. Use it to survey what is remembered: which memories repeat each other, what was recorded across a range of days, or what the dreams have been.",
+      "Canonical memories only. Staging candidates, imported documents and history are not listed.",
+      "Dreams are excluded by default, because a dream is synthesized from memories rather than being one; name type \"dream\" to read them back.",
+      "Each block shows the slug, title, type, who it is attributed to, modified date and the body, clamped so one long memory cannot crowd out the rest. The header says how many bodies were cut.",
+      "With no date window and no limit it lists everything. That is deliberate and expensive: pass limit or since to keep a scan small.",
+    ].join("\n"),
+    parameters: Type.Object({
+      since: Type.Optional(
+        Type.String({
+          description:
+            "Only memories modified on or after this date. YYYY-MM-DD means the start of that local calendar day; a timestamp such as 2026-11-08T09:00:00Z means that exact instant.",
+        }),
+      ),
+      until: Type.Optional(
+        Type.String({
+          description:
+            "Only memories modified on or before this date, inclusive. YYYY-MM-DD covers the whole local calendar day.",
+        }),
+      ),
+      type: Type.Optional(
+        StringEnum(MEMORY_TYPES, {
+          description:
+            "One memory type: fact, preference, event, person-note, or dream. Default: every type except quarantined ones (currently dream, which holds synthesized dream narratives). Name dream explicitly to list dreams.",
+        }),
+      ),
+      body_chars: Type.Optional(
+        Type.Number({
+          description:
+            "Characters of each body to print before a visible ellipsis. 0 prints whole bodies. Default: 2000, which fits every dream narrative whole and most memories.",
+        }),
+      ),
+      limit: Type.Optional(
+        Type.Number({
+          description:
+            "Maximum memories to print, from 1 to 1000. Default: no limit — every matching memory.",
+        }),
+      ),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async execute(
+      _toolCallId,
+      params,
+    ): Promise<AgentToolResult<MemoryListDetails>> {
+      const service = requireService(getService);
+      const bodyChars = params.body_chars ?? DEFAULT_LIST_BODY_CHARS;
+      if (!Number.isInteger(bodyChars) || bodyChars < 0) {
+        throw new Error(
+          "body_chars must be a whole number of 0 or more; 0 prints whole bodies.",
+        );
+      }
+      if (
+        params.limit !== undefined &&
+        (!Number.isInteger(params.limit) ||
+          params.limit < 1 ||
+          params.limit > MAX_LIST_LIMIT)
+      ) {
+        throw new Error(
+          `limit must be a whole number from 1 to ${MAX_LIST_LIMIT}.`,
+        );
+      }
+      // Throws on an unreadable or inverted window, like memory_search: an
+      // empty answer would look like a fact about the store rather than a
+      // mistake in the question.
+      const window = resolveDateWindow(params.since, params.until);
+      const nodes = await service.listCanonicalNodes();
+      const matching = nodes
+        .filter((node) =>
+          params.type === undefined
+            ? !isQuarantinedMemoryType(node.frontMatter.type)
+            : node.frontMatter.type === params.type,
+        )
+        .filter((node) => {
+          const modified = memoryModifiedAt(node);
+          if (window.since !== undefined && modified < window.since) {
+            return false;
+          }
+          if (window.until !== undefined && modified > window.until) {
+            return false;
+          }
+          return true;
+        })
+        .sort(compareByModifiedDescending);
+      const printed =
+        params.limit === undefined
+          ? matching
+          : matching.slice(0, params.limit);
+      const blocks = printed.map((node) => formatListBlock(node, bodyChars));
+      const clamped = blocks.filter((block) => block.clamped).length;
+      const header = formatListHeader({
+        printed: printed.length,
+        total: matching.length,
+        type: params.type,
+        since: params.since,
+        until: params.until,
+        bodyChars,
+        clamped,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              printed.length === 0
+                ? header
+                : `${header}\n\n${blocks.map((block) => block.text).join("\n\n---\n\n")}`,
+          },
+        ],
+        details: {
+          count: printed.length,
+          total: matching.length,
+          ...(params.type === undefined ? {} : { type: params.type }),
+          bodyChars,
+          clamped,
+          ...window,
+        },
+      };
+    },
+  });
 }
 
 /**
@@ -986,6 +1140,129 @@ function formatSearchResults(
   const blocks = results.map((result, index) => formatResultBlock(result, index));
 
   return `Found ${results.length} result${results.length === 1 ? "" : "s"} for "${query}".\n\n${blocks.join("\n\n---\n\n")}`;
+}
+
+/** The date a memory is listed and filtered by: `edited` when present. */
+function memoryModifiedAt(node: ParsedMemoryNode): string {
+  return node.frontMatter.edited ?? node.frontMatter.created;
+}
+
+/** Newest first, with the slug as a stable tie-break between equal dates. */
+function compareByModifiedDescending(
+  left: ParsedMemoryNode,
+  right: ParsedMemoryNode,
+): number {
+  const leftAt = memoryModifiedAt(left);
+  const rightAt = memoryModifiedAt(right);
+  if (leftAt !== rightAt) {
+    return leftAt < rightAt ? 1 : -1;
+  }
+  return left.slug.localeCompare(right.slug);
+}
+
+/**
+ * Cuts a body at a character budget, appending a visible ellipsis.
+ *
+ * Counted in code points rather than UTF-16 units, so the cut cannot land
+ * inside an emoji, and the ellipsis is added after the budget so a reader can
+ * always tell a cut body from one that happened to end where the budget ran
+ * out. A budget of 0 means the whole body.
+ */
+function clampMemoryBody(
+  body: string,
+  maxChars: number,
+): { text: string; clamped: boolean } {
+  const trimmed = body.trim();
+  if (maxChars === 0) {
+    return { text: trimmed, clamped: false };
+  }
+  const points = [...trimmed];
+  if (points.length <= maxChars) {
+    return { text: trimmed, clamped: false };
+  }
+  return { text: `${points.slice(0, maxChars).join("")}…`, clamped: true };
+}
+
+/** Formats one memory block for a listing. */
+function formatListBlock(
+  node: ParsedMemoryNode,
+  bodyChars: number,
+): { text: string; clamped: boolean } {
+  const front = node.frontMatter;
+  // The title leads: a slug is capped by the store's own rules and can end
+  // mid-word, which reads as a broken identifier when it is the heading. The
+  // slug stays on its own line because every other tool takes one.
+  const metadata = [`type: ${front.type}`];
+  if (front.status !== "active") {
+    metadata.push(`status: ${front.status}`);
+  }
+  metadata.push(`modified: ${memoryModifiedAt(node)}`);
+  const lines = [
+    `### ${front.title}`,
+    `slug: ${node.slug}`,
+    metadata.join(" · "),
+  ];
+  // A dream's speaker is the `pi-friend` stub that says "synthesized dream";
+  // the model that wrote it is the interesting attribution, and it lives in
+  // `agents`. Printing the stub would read as if a person had said it.
+  if (front.type === "dream") {
+    if (front.agents.length > 0) {
+      lines.push(`agents: ${front.agents.join(", ")}`);
+    }
+  } else {
+    const heardFrom = formatAttribution(front.speaker);
+    if (heardFrom !== undefined) {
+      lines.push(`${ATTRIBUTION_LABEL}: ${heardFrom}`);
+    }
+  }
+  const body = clampMemoryBody(node.body, bodyChars);
+  lines.push("", body.text);
+  return { text: lines.join("\n"), clamped: body.clamped };
+}
+
+/**
+ * The header for a listing: what was selected, how much of it is shown, and
+ * whether any body was cut.
+ *
+ * The clamp count is stated because a listing is often read as if it were the
+ * whole memory; a reader who cannot see the cut cannot know to ask for more.
+ */
+function formatListHeader(input: {
+  printed: number;
+  total: number;
+  type: MemoryType | undefined;
+  since: string | undefined;
+  until: string | undefined;
+  bodyChars: number;
+  clamped: number;
+}): string {
+  const scope = [
+    input.type === undefined ? "dreams excluded" : `type: ${input.type}`,
+    input.since === undefined ? "" : `since ${input.since}`,
+    input.until === undefined ? "" : `until ${input.until}`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+  if (input.total === 0) {
+    return `No memories match (${scope}).`;
+  }
+  const header = [
+    `${input.total} memor${input.total === 1 ? "y" : "ies"} (${scope}), newest first.`,
+  ];
+  if (input.printed < input.total) {
+    header.push(`Showing ${input.printed} of ${input.total}.`);
+  }
+  if (input.clamped > 0) {
+    // One cut body reads better as a sentence than as a ratio of one to one,
+    // which looks like a mistake in the counting.
+    const cut = input.bodyChars;
+    header.push(
+      input.printed === 1
+        ? `The printed body was cut at ${cut} characters; pass body_chars: 0 for the whole body.`
+        : `${input.clamped} of the ${input.printed} printed bodies ${input.clamped === 1 ? "was" : "were"} cut at ${cut} characters; pass body_chars: 0 for whole bodies.`,
+    );
+  }
+  return header.join(" ");
 }
 
 /** Resolves the service or reports that storage initialization failed. */
