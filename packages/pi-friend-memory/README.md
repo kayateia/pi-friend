@@ -343,6 +343,15 @@ Pi reads the extension entry point from the `pi.extensions` field in
   and is configured separately from retrieval's `injection.mode`. If that
   default needs embeddings and none are available, the tool searches with
   keyword and says so; an explicit `mode` that cannot run still fails.
+- `memory_list` browses the store without a query, newest first: slug, title,
+  type, attribution, modified date and body. `type` takes `fact`, `preference`,
+  `event`, `person-note` or `dream`; when it is omitted every type except
+  quarantined ones is listed, which today means everything but dreams, so
+  dreams are read back by asking for `type: dream`. `since` and `until` use the
+  same dates as `memory_search`. Bodies are clamped to `body_chars` characters
+  (default 2000, `0` for whole) and the header says how many were cut, because
+  a listing gets read as if it were the memory itself. Listing is not
+  retrieval: nothing is written to the access log.
 - A speaker tag is never searchable: every query is cleaned of tags before it is
   matched or embedded, so `\>>Aria: kettle` searches for `kettle` and nothing
   else, and the name never reaches the embedding. The name is not discarded,

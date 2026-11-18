@@ -16,6 +16,7 @@ import {
   registerMemoryTools,
 } from "../../src/tools/memory-tools.ts";
 import type { RagRetrievalDiagnostics } from "../../src/memory/rag.ts";
+import { MEMORY_TYPES } from "../../src/memory/schema.ts";
 
 test("memory tool names use a configurable prefix without duplication", () => {
   assert.equal(formatMemoryToolName("", "memory_add"), "memory_add");
@@ -543,4 +544,194 @@ Body.
     assert.match(notices[0]?.message ?? "", /nodes\/broken\.md/u);
     assert.match(notices[0]?.message ?? "", /type/u);
   });
+});
+
+// ---- memory_list -----------------------------------------------------------
+
+function listNode(options: {
+  slug: string;
+  title?: string;
+  type?: "dream" | "fact" | "preference" | "event" | "person-note";
+  body: string;
+  created?: string;
+  edited?: string;
+  speaker?: Array<{ name: string; confident: boolean; note?: string }>;
+  agents?: string[];
+}) {
+  return {
+    slug: options.slug,
+    body: `\n${options.body}\n`,
+    frontMatter: {
+      title: options.title ?? options.slug,
+      type: options.type ?? "fact",
+      status: "active",
+      speaker: options.speaker ?? [],
+      agents: options.agents ?? [],
+      created: options.created ?? "2026-11-01T00:00:00.000Z",
+      ...(options.edited === undefined ? {} : { edited: options.edited }),
+      last_used: "2026-11-01T00:00:00.000Z",
+      use_count: 0,
+      decay_weight: 1,
+      tags: [],
+      links: [],
+      supersedes: [],
+      superseded_by: "",
+      emotional_flavour: "neutral",
+    },
+  };
+}
+
+function listHarness(nodes: unknown[]) {
+  const definitions = new Map<string, unknown>();
+  const pi = {
+    registerTool(definition: { name: string }) {
+      definitions.set(definition.name, definition);
+    },
+  } as unknown as ExtensionAPI;
+  const recordUseCalls: unknown[] = [];
+  const stubService = {
+    async listCanonicalNodes() {
+      return nodes;
+    },
+    async recordUse(slugs: unknown) {
+      recordUseCalls.push(slugs);
+    },
+  };
+  registerMemoryTools(pi, () => stubService as unknown as MemoryNodeService);
+  const definition = definitions.get("memory_list") as {
+    parameters: {
+      properties: Record<string, { description?: string; enum?: readonly string[] }>;
+    };
+    execute: (
+      id: string,
+      params: unknown,
+    ) => Promise<{
+      content: Array<{ text: string }>;
+      details: Record<string, unknown>;
+    }>;
+  };
+  return { definition, recordUseCalls, definitions };
+}
+
+test("memory_list lists every type and its default in the parameter description", () => {
+  const { definition, definitions } = listHarness([]);
+  assert.ok(definitions.has("memory_list"));
+  const type = definition.parameters.properties["type"];
+  assert.deepEqual(type?.enum, MEMORY_TYPES);
+  assert.match(type?.description ?? "", /fact, preference, event, person-note, or dream/u);
+  assert.match(type?.description ?? "", /Default: every type except quarantined ones/u);
+});
+
+test("memory_list excludes dreams by default and orders newest first", async () => {
+  const { definition, recordUseCalls } = listHarness([
+    listNode({ slug: "older-fact", body: "Older.", created: "2026-11-01T12:00:00.000Z" }),
+    listNode({ slug: "newer-event", type: "event", body: "Newer.", created: "2026-11-03T12:00:00.000Z", edited: "2026-11-09T12:00:00.000Z" }),
+    listNode({ slug: "a-dream", type: "dream", body: "A dream.", created: "2026-11-10T12:00:00.000Z" }),
+  ]);
+
+  const result = await definition.execute("call", {});
+  const text = result.content[0]?.text ?? "";
+  assert.match(text, /2 memories \(dreams excluded\), newest first\./u);
+  assert.doesNotMatch(text, /a-dream/u);
+  assert.ok(text.indexOf("newer-event") < text.indexOf("older-fact"));
+  assert.match(text, /modified: 2026-11-09T12:00:00\.000Z/u);
+  assert.equal(result.details["total"], 2);
+  // Listing is not retrieval: nothing is recorded as a use.
+  assert.equal(recordUseCalls.length, 0);
+});
+
+test("memory_list type dream lists dreams and shows the model, not the stub speaker", async () => {
+  const { definition } = listHarness([
+    listNode({ slug: "a-fact", body: "A fact." }),
+    listNode({
+      slug: "a-dream",
+      type: "dream",
+      body: "A dream narrative.",
+      created: "2026-11-10T12:00:00.000Z",
+      speaker: [{ name: "pi-friend", confident: false, note: "synthesized dream" }],
+      agents: ["openrouter/deepseek-v4"],
+    }),
+  ]);
+
+  const result = await definition.execute("call", { type: "dream" });
+  const text = result.content[0]?.text ?? "";
+  assert.match(text, /1 memory \(type: dream\), newest first\./u);
+  assert.match(text, /agents: openrouter\/deepseek-v4/u);
+  assert.doesNotMatch(text, /Heard from: pi-friend/u);
+  assert.doesNotMatch(text, /a-fact/u);
+  assert.equal(result.details["count"], 1);
+});
+
+test("memory_list clamps bodies and says how many were cut, and 0 prints whole bodies", async () => {
+  const body = "abcdefghij";
+  const { definition } = listHarness([
+    listNode({ slug: "long-one", body, created: "2026-11-01T12:00:00.000Z" }),
+  ]);
+
+  const clamped = await definition.execute("call", { body_chars: 5 });
+  const clampedText = clamped.content[0]?.text ?? "";
+  assert.match(clampedText, /abcde…/u);
+  assert.match(
+    clampedText,
+    /The printed body was cut at 5 characters; pass body_chars: 0 for the whole body\./u,
+  );
+  assert.match(clampedText, /### long-one/u);
+  assert.match(clampedText, /slug: long-one/u);
+  assert.equal(clamped.details["clamped"], 1);
+
+  const whole = await definition.execute("call", { body_chars: 0 });
+  const wholeText = whole.content[0]?.text ?? "";
+  assert.match(wholeText, /abcdefghij/u);
+  assert.doesNotMatch(wholeText, /…/u);
+  assert.doesNotMatch(wholeText, /cut at/u);
+});
+
+test("memory_list reports a limit and a date window in the header", async () => {
+  const { definition } = listHarness([
+    listNode({ slug: "before-window", body: "Before.", created: "2026-11-03T12:00:00.000Z" }),
+    listNode({ slug: "inside-a", body: "Inside A.", created: "2026-11-07T12:00:00.000Z" }),
+    listNode({ slug: "inside-b", body: "Inside B.", created: "2026-11-08T12:00:00.000Z" }),
+  ]);
+
+  const since = await definition.execute("call", { since: "2026-11-05" });
+  const sinceText = since.content[0]?.text ?? "";
+  assert.match(sinceText, /2 memories \(dreams excluded; since 2026-11-05\), newest first\./u);
+  assert.doesNotMatch(sinceText, /before-window/u);
+
+  const until = await definition.execute("call", { until: "2026-11-05" });
+  assert.match(until.content[0]?.text ?? "", /1 memory \(dreams excluded; until 2026-11-05\), newest first\./u);
+
+  const limited = await definition.execute("call", { limit: 1 });
+  const limitedText = limited.content[0]?.text ?? "";
+  assert.match(limitedText, /Showing 1 of 3\./u);
+  assert.equal(limited.details["count"], 1);
+  assert.equal(limited.details["total"], 3);
+});
+
+test("memory_list says when nothing matches", async () => {
+  const { definition } = listHarness([
+    listNode({ slug: "a-fact", body: "A fact." }),
+  ]);
+  const result = await definition.execute("call", { type: "person-note" });
+  assert.equal(result.content[0]?.text, "No memories match (type: person-note).");
+});
+
+test("memory_list leads with the title and keeps the slug on its own line", async () => {
+  const { definition } = listHarness([
+    listNode({ slug: "a-readable-slug", title: "A readable title", body: "Body." }),
+  ]);
+  const text = (await definition.execute("call", {})).content[0]?.text ?? "";
+  assert.match(text, /### A readable title\nslug: a-readable-slug\n/u);
+});
+
+test("memory_list counts cut bodies in the plural", async () => {
+  const { definition } = listHarness([
+    listNode({ slug: "long-a", body: "abcdefghij" }),
+    listNode({ slug: "long-b", body: "klmnopqrst" }),
+  ]);
+  const text = (await definition.execute("call", { body_chars: 4 })).content[0]?.text ?? "";
+  assert.match(
+    text,
+    /2 of the 2 printed bodies were cut at 4 characters; pass body_chars: 0 for whole bodies\./u,
+  );
 });
