@@ -67,7 +67,7 @@ test("a truncated body and a spent budget are both reported", async () => {
     assert.ok(refused.budgetExcluded.used <= 650);
 
     const text = formatRagDiagnostics(context.diagnostics);
-    assert.match(text, /truncated: \d+\/600 characters \(body \d+; tier cap 4 sentences\)/u);
+    assert.match(text, /truncated: \d+\/600 characters \(tier cap: 4 sentences\)/u);
     assert.match(
       text,
       /not injected: the section's body budget was spent \(\d+\/650\)/u,

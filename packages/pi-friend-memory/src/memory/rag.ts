@@ -792,7 +792,7 @@ export function formatRagDiagnostics(
       if (result.truncation !== undefined) {
         const cut = result.truncation;
         lines.push(
-          `  truncated: ${cut.excerptChars}/${cut.limit} characters (body ${cut.bodyLength}; tier cap ${cut.sentenceLimit} sentence${
+          `  truncated: ${cut.bodyLength}/${cut.limit} characters (tier cap: ${cut.sentenceLimit} sentence${
             cut.sentenceLimit === 1 ? "" : "s"
           })`,
         );
@@ -831,7 +831,7 @@ export function formatRagDiagnostics(
     if (entry.truncation !== undefined) {
       const cut = entry.truncation;
       lines.push(
-        `  truncated: ${cut.excerptChars}/${cut.limit} characters (body ${cut.bodyLength}; tier cap ${cut.sentenceLimit} sentence${
+        `  truncated: ${cut.bodyLength}/${cut.limit} characters (tier cap: ${cut.sentenceLimit} sentence${
           cut.sentenceLimit === 1 ? "" : "s"
         })`,
       );
