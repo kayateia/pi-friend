@@ -20,6 +20,7 @@ import type {
   ParsedMemoryNode,
 } from "./schema.ts";
 import {
+  MEMORY_TYPES,
   isQuarantinedMemoryType,
   parseMemoryNode,
   serializeMemoryNode,
@@ -277,6 +278,117 @@ export class MemoryNodeService {
   /** Lists canonical nodes for sweep decisions and decay. */
   async listCanonicalNodes(): Promise<ParsedMemoryNode[]> {
     return this.repository.list("canonical");
+  }
+
+  /**
+   * Chooses the canonical nodes a sweep shows the model as merge targets.
+   *
+   * A sweep used to show `canonical.slice(0, 50)`, and because the repository
+   * sorts by slug that was the first fifty alphabetically: a memory could be a
+   * merge target forever for no better reason than its name, and everything
+   * past the cut was invisible however relevant. Relevance is what a merge
+   * decision actually needs, so this embeds the whole candidate batch in one
+   * request — `EmbeddingProvider.embed` takes an array — and runs one
+   * nearest-neighbour query per candidate, keeping the best `perCandidate`
+   * nodes and folding nodes proposed by several candidates into one entry.
+   *
+   * Filters travel into the vector query rather than being applied to its
+   * results, so a dream or an inactive node cannot crowd out an admissible one.
+   * The result is ordered by best similarity, then slug, so two sweeps over the
+   * same store propose the same window.
+   *
+   * Returns `undefined` when semantic search is unavailable. That is the
+   * caller's cue to fall back to a different window; an empty array would mean
+   * "no canonical node is relevant", which is a different claim.
+   */
+  async selectSweepTargets(
+    candidates: readonly ParsedMemoryNode[],
+    mergeTargets: readonly ParsedMemoryNode[],
+    perCandidate: number,
+    signal?: AbortSignal,
+  ): Promise<ParsedMemoryNode[] | undefined> {
+    const semantic = this.semantic;
+    if (!semantic) {
+      return undefined;
+    }
+    if (candidates.length === 0 || mergeTargets.length === 0) {
+      return [];
+    }
+
+    const files = await this.buildSearchIndex();
+    const chunkSize = this.store.config.vector.chunkSize;
+    await synchronizeVectorIndex(files, semantic.provider, semantic.index, {
+      chunkSize,
+      ...(signal === undefined ? {} : { signal }),
+    });
+
+    // Embed through the same function the index uses, so a candidate is a
+    // query in the space its neighbours were stored in. A candidate that the
+    // index has not picked up yet (a very fresh staging write) falls back to
+    // the reading the prompt itself would see.
+    const fileByPath = new Map(
+      files.map((file) => [file.relativePath, file] as const),
+    );
+    const embeddings = await semantic.provider.embed(
+      candidates.map((candidate) => {
+        const file = fileByPath.get(`staging/${candidate.slug}.md`);
+        return file === undefined
+          ? [candidate.frontMatter.title, candidate.body.trim()]
+              .filter((part) => part !== "")
+              .join("\n\n")
+          : buildEmbeddingText(file);
+      }),
+      signal === undefined ? undefined : { signal },
+    );
+
+    const admittedTypes = MEMORY_TYPES.filter(
+      (type) => !isQuarantinedMemoryType(type),
+    );
+    const bestScore = new Map<string, number>();
+    for (const embedding of embeddings) {
+      if (embedding === undefined) {
+        continue;
+      }
+      const results = searchSemanticVectors(
+        files,
+        embedding,
+        {
+          // The embedding is the query; the field is required by the options
+          // type but `searchSemanticVectors` ranks by the vector it is given.
+          query: "",
+          mode: "semantic",
+          limit: perCandidate,
+          kinds: ["node"],
+          status: "active",
+          types: admittedTypes,
+        },
+        semantic.index,
+        chunkSize,
+      );
+      for (const result of results) {
+        if (result.slug === undefined) {
+          continue;
+        }
+        const previous = bestScore.get(result.slug);
+        if (previous === undefined || result.score > previous) {
+          bestScore.set(result.slug, result.score);
+        }
+      }
+    }
+
+    const nodeBySlug = new Map(
+      mergeTargets.map((node) => [node.slug, node] as const),
+    );
+    return [...bestScore.entries()]
+      .sort(
+        ([leftSlug, leftScore], [rightSlug, rightScore]) =>
+          rightScore - leftScore ||
+          (leftSlug < rightSlug ? -1 : leftSlug > rightSlug ? 1 : 0),
+      )
+      .flatMap(([slug]) => {
+        const node = nodeBySlug.get(slug);
+        return node === undefined ? [] : [node];
+      });
   }
 
   /**

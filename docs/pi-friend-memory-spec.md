@@ -276,6 +276,7 @@ once-per-day consolidation schedule, not daily-log processing.
 - Promotion happens two ways:
   1. **Sweep promotion** (daily): the sweep model chooses `promote` or `merge` for each candidate. Every decision is logged with reasoning in the sweep log. Dreams are not offered as merge targets, so the model is never shown a destination it must not choose.
   2. **Main-model promotion**: the interactive model may call `memory_promote` for a candidate it has verified mid-conversation. Unpromoted candidates remain staged for a later sweep.
+- **The merge-target window is chosen by relevance, not by slug.** Before the model is asked, the staging candidates are embedded in one request and each is used to query the vector index for its nearest canonical neighbours; the best three per candidate are kept, duplicates folded together, and the union is shown as one flat list. Filters — canonical nodes only, `active`, no dreams — are applied inside the vector query, so an inadmissible node cannot take a slot from an admissible one. A merge may name only a memory in that window; one the model never saw cannot be justified by the prompt. When no embedding provider is configured the window falls back to the first fifty canonical nodes in slug order, which is what every sweep used before relevance selection.
 - Dedupe happens at promotion time: staging candidates are compared (via embedding similarity) against existing nodes before promotion; near-duplicates are merged with `links` preserved.
 
 ## 9. Daily sweep ("sweeping down")

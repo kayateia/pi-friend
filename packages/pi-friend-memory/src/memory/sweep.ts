@@ -14,7 +14,7 @@ import type {
   SweepConfig,
 } from "./config.ts";
 import type { MemoryNodeService } from "./service.ts";
-import { isQuarantinedMemoryType } from "./schema.ts";
+import { isQuarantinedMemoryType, type ParsedMemoryNode } from "./schema.ts";
 import { planCandidateDecay } from "./decay.ts";
 import { pruneHistory } from "./history.ts";
 import {
@@ -42,6 +42,25 @@ interface SweepState {
   lastRunId?: string;
 }
 
+/**
+ * How many canonical nodes one staging candidate may propose as merge targets.
+ *
+ * Three, not more. The prompt is one flat list and the model reasons across it,
+ * so a per-candidate breakdown with a long tail would spend prompt space on
+ * runners-up the decision does not need. Every node here is shown once however
+ * many candidates proposed it.
+ */
+export const SWEEP_TARGETS_PER_CANDIDATE = 3;
+
+/**
+ * The canonical window used when relevance selection is unavailable.
+ *
+ * This is the pre-relevance window exactly — the first fifty nodes in slug
+ * order — kept so a store without an embedding provider behaves as it always
+ * has rather than silently showing nothing.
+ */
+export const SWEEP_FALLBACK_WINDOW = 50;
+
 /** Summary of one daily sweep invocation. */
 export interface SweepResult {
   ran: boolean;
@@ -63,6 +82,13 @@ export interface RunDailySweepOptions {
   dreaming?: DreamingConfig;
   random?: () => number;
   signal?: AbortSignal;
+  /**
+   * Replacement for the sweep model's decisions, for tests and experiments.
+   *
+   * It receives the candidates and the same canonical window the model would
+   * have been shown — relevance-selected, or the sorted slice when no embedding
+   * provider is configured — so a caller sees what the prompt would contain.
+   */
   decide?: (
     candidates: Awaited<ReturnType<MemoryNodeService["listStagingCandidates"]>>,
     canonical: Awaited<ReturnType<MemoryNodeService["listCanonicalNodes"]>>,
@@ -142,10 +168,32 @@ async function runDailySweepLocked(
       (candidate) => !expiredSet.has(candidate.slug),
     );
     if (candidates.length > 0) {
+      // Relevance is an improvement to the window, not a precondition for the
+      // pass. If selection fails — no provider, a synchronisation error — the
+      // sweep continues on the sorted window it used before relevance existed,
+      // and says so rather than quietly offering a worse list.
+      let promptTargets: ParsedMemoryNode[];
+      try {
+        promptTargets =
+          (await service.selectSweepTargets(
+            candidates,
+            mergeTargets,
+            SWEEP_TARGETS_PER_CANDIDATE,
+            options.signal,
+          )) ?? mergeTargets.slice(0, SWEEP_FALLBACK_WINDOW);
+      } catch (error) {
+        if (options.signal?.aborted) {
+          throw error;
+        }
+        options.reportWarning?.(
+          `pi-friend memory sweep could not select merge targets by relevance (${formatErrorChain(error)}); it is offering the first ${SWEEP_FALLBACK_WINDOW} canonical memories by slug instead.`,
+        );
+        promptTargets = mergeTargets.slice(0, SWEEP_FALLBACK_WINDOW);
+      }
       if (options.decide) {
         decisions = await options.decide(
           candidates,
-          mergeTargets,
+          promptTargets,
           options.signal,
         );
       } else {
@@ -156,7 +204,7 @@ async function runDailySweepLocked(
           ctx,
           config.model,
           candidates,
-          mergeTargets,
+          promptTargets,
           options.reportWarning ?? (() => {}),
           options.signal,
           resolveSweepSystemPrompt(config, config.allowDrop),
