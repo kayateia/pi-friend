@@ -17,6 +17,64 @@ import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { MemoryNodeService } from "../../src/memory/service.ts";
 import { withTempDir } from "../helpers.ts";
 
+test("a truncated body and a spent budget are both reported", async () => {
+  await withTempDir(async (agentDir) => {
+    const repository = await MemoryNodeRepository.open({
+      agentDir,
+      homeDir: agentDir,
+    });
+    const service = new MemoryNodeService(repository);
+    // Two bodies of a single long sentence each: the fresh tier's four-sentence
+    // allowance does not touch them, so the 600-character cap is what cuts.
+    const body =
+      `The lantern ${"very ".repeat(160)}hangs by the door. ` +
+      `The handle ${"quite ".repeat(160)}is chipped.`;
+    for (const slug of ["lantern-a", "lantern-b"]) {
+      await service.add({
+        slug,
+        title: slug,
+        type: "fact",
+        body,
+        speaker: [{ name: "Aria", confident: true }],
+      });
+    }
+
+    // Exactly one 600-character excerpt fits; the second is rendered and then
+    // refused, which is the case the diagnostic has to explain.
+    const config = {
+      ...defaultRagInjectionConfig(),
+      mode: "keyword" as const,
+      limit: 2,
+      maxChars: 650,
+    };
+    const context = await buildRagContext(service, "lantern", config, {
+      ...defaultRecencyInjectionConfig(),
+      enabled: false,
+    });
+
+    const injected = context.diagnostics.results.find(
+      (result) => result.injected,
+    );
+    assert.ok(injected?.truncation);
+    assert.equal(injected.truncation.limit, 600);
+    assert.ok(injected.truncation.bodyLength > 600);
+
+    const refused = context.diagnostics.results.find(
+      (result) => !result.injected && result.slug !== undefined,
+    );
+    assert.ok(refused?.budgetExcluded);
+    assert.equal(refused.budgetExcluded.limit, 650);
+    assert.ok(refused.budgetExcluded.used <= 650);
+
+    const text = formatRagDiagnostics(context.diagnostics);
+    assert.match(text, /truncated: \d+\/600 characters \(body \d+; tier cap 4 sentences\)/u);
+    assert.match(
+      text,
+      /not injected: the section's body budget was spent \(\d+\/650\)/u,
+    );
+  });
+});
+
 test("the diagnostics record the query, the scores and what was injected", async () => {
   await withTempDir(async (agentDir) => {
     const repository = await MemoryNodeRepository.open({ agentDir, homeDir: agentDir });

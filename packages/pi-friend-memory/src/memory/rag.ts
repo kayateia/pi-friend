@@ -65,6 +65,35 @@ export interface RagResultDiagnostic {
   matchedFields: string[];
   /** Whether this result made it into the block that was injected. */
   injected: boolean;
+  /** Set when the injected excerpt is shorter than the body it came from. */
+  truncation?: RagTruncation;
+  /** Set when the entry rendered but the section's body budget refused it. */
+  budgetExcluded?: RagBudgetExclusion;
+}
+
+/**
+ * How far a body was shortened to fit its tier.
+ *
+ * A reader asking "why is this only half a memory" gets three numbers: what the
+ * body is, what was shown, and the cap that stopped it.
+ */
+export interface RagTruncation {
+  /** Character count of the body as written, whitespace-normalised. */
+  bodyLength: number;
+  /** Characters the injected excerpt shows, ellipsis included. */
+  excerptChars: number;
+  /** The tier's character cap. */
+  limit: number;
+  /** The tier's sentence cap, when sentences were what stopped it. */
+  sentenceLimit: number;
+}
+
+/** Why a rendered entry did not reach the prompt. */
+export interface RagBudgetExclusion {
+  /** Body characters the section had already spent. */
+  used: number;
+  /** The section's body budget. */
+  limit: number;
 }
 
 /** One pool member of the recency pass, scored and ranked. */
@@ -81,6 +110,10 @@ export interface RagRecencyDiagnostic {
   score: number;
   /** Whether this entry made it into the section that was injected. */
   injected: boolean;
+  /** Set when the injected excerpt is shorter than the body it came from. */
+  truncation?: RagTruncation;
+  /** Set when the entry rendered but the section's body budget refused it. */
+  budgetExcluded?: RagBudgetExclusion;
 }
 
 /** What the recency pass did, for an operator asking why something appeared. */
@@ -319,8 +352,35 @@ async function buildRecall(
   const blocks = retrieved.map(({ node, result, area }) =>
     formatMemoryNode(node, result, area, options.now ?? new Date()),
   );
-  const { text, selected } = fillSection(MEMORY_HEADER, blocks, config.maxChars);
-  const injectedSlugs = new Set<string>();
+  const { text, selected, used, limit } = fillSection(
+    MEMORY_HEADER,
+    blocks,
+    config.maxChars,
+  );
+  const selectedSlugs = new Set(
+    selected.map((index) => retrieved[index]?.node.slug ?? ""),
+  );
+  const results_ = describeResults(results, selectedSlugs);
+  const rendered = new Map(
+    retrieved.map((entry, index) => [entry.node.slug, blocks[index]]),
+  );
+  for (const result of results_) {
+    if (result.slug === undefined) {
+      continue;
+    }
+    const block = rendered.get(result.slug);
+    if (block === undefined) {
+      continue;
+    }
+    if (result.injected) {
+      if (block.truncation !== undefined) {
+        result.truncation = block.truncation;
+      }
+    } else {
+      // Rendered, but the section's body budget stopped before this entry.
+      result.budgetExcluded = { used, limit };
+    }
+  }
 
   return {
     section: {
@@ -334,12 +394,7 @@ async function buildRecall(
       modeUsed,
       fallbackUsed,
       ...(searchError === undefined ? {} : { searchError }),
-      results: describeResults(
-        results,
-        new Set(
-          selected.map((index) => retrieved[index]?.node.slug ?? ""),
-        ),
-      ),
+      results: results_,
       searchResultCount: results.length,
       eligibleNodeCount: retrieved.length,
       selectedNodeCount: selected.length,
@@ -506,7 +561,7 @@ async function buildRecency(
   const blocks = chronological.map(({ node, area }) =>
     formatRecentNode(node, area, now),
   );
-  const { text, selected: kept } = fillSection(
+  const { text, selected: kept, used, limit } = fillSection(
     RECENT_HEADER,
     blocks,
     config.maxChars,
@@ -514,8 +569,19 @@ async function buildRecency(
   const injectedSlugs = new Set(
     kept.map((index) => chronological[index]?.node.slug ?? ""),
   );
+  const renderedBySlug = new Map(
+    chronological.map((entry, index) => [entry.node.slug, blocks[index]]),
+  );
   for (const entry of diagnostics) {
     entry.injected = injectedSlugs.has(entry.slug);
+    const block = renderedBySlug.get(entry.slug);
+    if (entry.injected) {
+      if (block?.truncation !== undefined) {
+        entry.truncation = block.truncation;
+      }
+    } else if (block !== undefined) {
+      entry.budgetExcluded = { used, limit };
+    }
   }
 
   return {
@@ -538,7 +604,10 @@ async function buildRecency(
 
 /** One rendered entry, and how much of the section budget its body spends. */
 interface RenderedEntry {
+  slug: string;
   text: string;
+  /** Set when the excerpt is shorter than the body it came from. */
+  truncation?: RagTruncation;
   /**
    * Characters the body excerpt contributes.
    *
@@ -565,10 +634,10 @@ function fillSection(
   header: string,
   blocks: readonly RenderedEntry[],
   maxChars: number,
-): { text: string; selected: number[] } {
+): { text: string; selected: number[]; used: number; limit: number } {
   const limit = Math.max(0, maxChars);
   if (blocks.length === 0) {
-    return { text: "", selected: [] };
+    return { text: "", selected: [], used: 0, limit };
   }
   const selected: number[] = [];
   const parts: string[] = [];
@@ -582,9 +651,9 @@ function fillSection(
     used += block.bodyChars;
   }
   if (parts.length === 0) {
-    return { text: "", selected: [] };
+    return { text: "", selected: [], used: 0, limit };
   }
-  return { text: `${header}\n\n${parts.join("\n\n")}`, selected };
+  return { text: `${header}\n\n${parts.join("\n\n")}`, selected, used, limit };
 }
 
 /**
@@ -720,6 +789,19 @@ export function formatRagDiagnostics(
         );
       }
       lines.push(`  fields: ${result.matchedFields.join(", ") || "(none)"}`);
+      if (result.truncation !== undefined) {
+        const cut = result.truncation;
+        lines.push(
+          `  truncated: ${cut.excerptChars}/${cut.limit} characters (body ${cut.bodyLength}; tier cap ${cut.sentenceLimit} sentence${
+            cut.sentenceLimit === 1 ? "" : "s"
+          })`,
+        );
+      }
+      if (result.budgetExcluded !== undefined) {
+        lines.push(
+          `  not injected: the section's body budget was spent (${result.budgetExcluded.used}/${result.budgetExcluded.limit})`,
+        );
+      }
     }
   }
 
@@ -746,6 +828,19 @@ export function formatRagDiagnostics(
       `${entry.injected ? "INJECTED" : "not injected"}  ${entry.slug}`,
       `  rank #${entry.poolRank} of ${recency.poolSize} · score ${entry.score.toFixed(4)} · ${entry.reason} · ${entry.modifiedAt}`,
     );
+    if (entry.truncation !== undefined) {
+      const cut = entry.truncation;
+      lines.push(
+        `  truncated: ${cut.excerptChars}/${cut.limit} characters (body ${cut.bodyLength}; tier cap ${cut.sentenceLimit} sentence${
+          cut.sentenceLimit === 1 ? "" : "s"
+        })`,
+      );
+    }
+    if (entry.budgetExcluded !== undefined) {
+      lines.push(
+        `  not injected: the section's body budget was spent (${entry.budgetExcluded.used}/${entry.budgetExcluded.limit})`,
+      );
+    }
   }
   return lines.join("\n");
 }
@@ -778,15 +873,24 @@ function formatMemoryNode(
   if (area === "staging") {
     const excerpt = summarizeBody(node.body, 1, 280);
     return {
+      slug: node.slug,
       text: [
         "Candidate - unverified",
         `### ${node.frontMatter.title}`,
         `Tier: candidate · ${dated} ${stamp} · staging/${node.slug}.md`,
         ...attributionLine,
         explanation,
-        excerpt,
+        excerpt.text,
       ].join("\n"),
-      bodyChars: excerpt.length,
+      bodyChars: excerpt.text.length,
+      ...(excerpt.truncation === undefined
+        ? {}
+        : {
+            truncation: {
+              ...excerpt.truncation,
+              bodyLength: normalizeBodyLength(node.body),
+            },
+          }),
     };
   }
   if (tier === "cold") {
@@ -796,6 +900,7 @@ function formatMemoryNode(
         : node.frontMatter.emotional_flavour || "no keywords";
     // The cold tier is a pointer, not an account: it has no body to spend.
     return {
+      slug: node.slug,
       text: [
         `- see also: ${node.frontMatter.title} — ${keywords} (${link})${
           attribution === undefined ? "" : ` · ${ATTRIBUTION_LABEL.toLowerCase()} ${attribution}`
@@ -810,14 +915,23 @@ function formatMemoryNode(
   const charLimit = tier === "fresh" ? 600 : 280;
   const excerpt = summarizeBody(node.body, sentenceLimit, charLimit);
   return {
+    slug: node.slug,
     text: [
       `### ${node.frontMatter.title}`,
       `Tier: ${tier} · ${dated} ${stamp} · ${link}`,
       ...attributionLine,
       explanation,
-      excerpt,
+      excerpt.text,
     ].join("\n"),
-    bodyChars: excerpt.length,
+    bodyChars: excerpt.text.length,
+    ...(excerpt.truncation === undefined
+      ? {}
+      : {
+          truncation: {
+            ...excerpt.truncation,
+            bodyLength: normalizeBodyLength(node.body),
+          },
+        }),
   };
 }
 
@@ -847,15 +961,24 @@ function formatRecentNode(
   const attribution = formatAttribution(node.frontMatter.speaker);
   const excerpt = summarizeBody(node.body, 4, 600);
   return {
+    slug: node.slug,
     text: [
       `### ${node.frontMatter.title}`,
       `${marker}${edited ? "edited" : "created"} ${stamp} · ${link}`,
       ...(attribution === undefined
         ? []
         : [`${ATTRIBUTION_LABEL}: ${attribution}`]),
-      excerpt,
+      excerpt.text,
     ].join("\n"),
-    bodyChars: excerpt.length,
+    bodyChars: excerpt.text.length,
+    ...(excerpt.truncation === undefined
+      ? {}
+      : {
+          truncation: {
+            ...excerpt.truncation,
+            bodyLength: normalizeBodyLength(node.body),
+          },
+        }),
   };
 }
 
@@ -912,17 +1035,43 @@ function getTier(decayWeight: number): RagTier {
 }
 
 /** Returns a sentence-bounded summary without altering canonical content. */
+/** The body's length as the excerpt measurement sees it. */
+function normalizeBodyLength(body: string): number {
+  return body.replace(/\s+/gu, " ").trim().length;
+}
+
+/**
+ * Cuts a body to a tier's allowance and reports what the cut took.
+ *
+ * Reported rather than silent: a reader of the injected block sees an excerpt
+ * and cannot tell a short memory from a truncated one, which is what the
+ * retrieval diagnostic is for.
+ */
 function summarizeBody(
   body: string,
   sentenceLimit: number,
   charLimit: number,
-): string {
+): { text: string; truncation?: Omit<RagTruncation, "bodyLength"> } {
   const normalized = body.replace(/\s+/gu, " ").trim();
   const sentences =
     normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/gu)?.map((part) => part.trim()) ??
     [normalized];
   const summary = sentences.slice(0, sentenceLimit).join(" ");
-  return summary.length <= charLimit
-    ? summary
-    : `${summary.slice(0, charLimit - 1).trimEnd()}…`;
+  const charLimited = summary.length > charLimit;
+  const text = charLimited
+    ? `${summary.slice(0, charLimit - 1).trimEnd()}…`
+    : summary;
+  const sentenceLimited = sentences.length > sentenceLimit;
+  return {
+    text,
+    ...(charLimited || sentenceLimited
+      ? {
+          truncation: {
+            excerptChars: text.length,
+            limit: charLimit,
+            sentenceLimit,
+          },
+        }
+      : {}),
+  };
 }
