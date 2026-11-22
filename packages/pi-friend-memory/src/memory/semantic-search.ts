@@ -128,6 +128,8 @@ export function searchSemanticVectors(
         ? {}
         : { decayWeight: file.decayWeight }),
       ...(file.speaker === undefined ? {} : { speaker: file.speaker }),
+      tags: [...file.tags],
+      links: [...(file.links ?? [])],
       ...(file.modifiedAt === undefined
         ? {}
         : { modifiedAt: file.modifiedAt }),

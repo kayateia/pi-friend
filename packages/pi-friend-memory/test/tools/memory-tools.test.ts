@@ -143,6 +143,7 @@ test("memory_search prints speaker attribution when present", async () => {
           type: "fact",
           status: "active",
           tags: [],
+          links: [],
           body: "Something Aria said.",
           snippet: "Something Aria said.",
           score: 200,

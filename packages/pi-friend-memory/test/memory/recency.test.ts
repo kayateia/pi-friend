@@ -252,9 +252,11 @@ test("a recent candidate keeps the unverified marker and carries no tier", async
     const context = await build(service, "unrelated words entirely");
 
     const text = context.recency.text;
+    // The marker is its own line above the title, the same as in recall.
+    assert.match(text, /Candidate - unverified\n### A staged thought\n/u);
     assert.match(
       text,
-      /Candidate - unverified · created \w{3} 2026-11-15 \d{2}:30:00/u,
+      /created \w{3} 2026-11-15 \d{2}:30:00 \(\d+ (?:second|minute|hour)s? ago\)/u,
     );
     assert.match(text, /staging\/staged\.md/);
     assert.doesNotMatch(text, /Tier:/, "decay weight has no business here");

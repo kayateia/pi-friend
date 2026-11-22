@@ -102,6 +102,10 @@ export interface MemorySearchResult {
   decayWeight?: number;
   /** Attribution recorded on the node; absent for documents. */
   speaker?: readonly MemorySpeaker[];
+  /** Keywords recorded on the node; empty for documents. */
+  tags: string[];
+  /** Outgoing links recorded on the node; empty for documents. */
+  links: string[];
   modifiedAt?: string;
   provenance?: string;
   snippet: string;
@@ -283,6 +287,8 @@ function baseResult(
       ? {}
       : { decayWeight: file.decayWeight }),
     ...(file.speaker === undefined ? {} : { speaker: file.speaker }),
+    tags: [...file.tags],
+    links: [...(file.links ?? [])],
     ...(file.modifiedAt === undefined ? {} : { modifiedAt: file.modifiedAt }),
     ...(file.provenance === undefined ? {} : { provenance: file.provenance }),
     snippet,
@@ -518,8 +524,11 @@ function makeSnippet(
     matchIndex = 0;
   }
 
-  const radiusBefore = 70;
-  const radiusAfter = 140;
+  // Sized to the fresh-tier injection excerpt (600 characters), split so the
+  // match sits a little past the middle of the window: enough context to judge
+  // what a memory says before opening it, without shipping the whole body.
+  const radiusBefore = 250;
+  const radiusAfter = 350;
   const start = Math.max(0, matchIndex - radiusBefore);
   const end = Math.min(source.length, matchIndex + radiusAfter);
   return `${start > 0 ? "…" : ""}${source.slice(start, end).trim()}${
