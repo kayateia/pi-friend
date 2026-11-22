@@ -1496,9 +1496,15 @@ export class MemoryNodeService {
    *
    * Per-slug rather than whole-tree: an edit should not pay for the size of
    * `history/`, and the sweep's daily pass catches anything this misses.
+   *
+   * The clock is the service's, not the wall's. Retention compares a version's
+   * timestamp against a cutoff, and the timestamps this service writes come
+   * from `now` — so reading the real clock here would make an operation judge
+   * its own output against a different calendar, which is how a version
+   * written at fixture-time and pruned at wall-time disappeared.
    */
   private async pruneHistoryFor(kind: HistoryKind, slug: string): Promise<void> {
-    await pruneHistorySlug(this.repository.store, kind, slug).catch(
+    await pruneHistorySlug(this.repository.store, kind, slug, this.now()).catch(
       (error: unknown) => logError("history retention", error),
     );
   }
