@@ -518,8 +518,11 @@ function makeSnippet(
     matchIndex = 0;
   }
 
-  const radiusBefore = 70;
-  const radiusAfter = 140;
+  // Sized to the fresh-tier injection excerpt (600 characters), split so the
+  // match sits a little past the middle of the window: enough context to judge
+  // what a memory says before opening it, without shipping the whole body.
+  const radiusBefore = 250;
+  const radiusAfter = 350;
   const start = Math.max(0, matchIndex - radiusBefore);
   const end = Math.min(source.length, matchIndex + radiusAfter);
   return `${start > 0 ? "…" : ""}${source.slice(start, end).trim()}${
