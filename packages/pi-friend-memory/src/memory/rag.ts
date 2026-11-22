@@ -65,6 +65,33 @@ export interface RagResultDiagnostic {
   matchedFields: string[];
   /** Whether this result made it into the block that was injected. */
   injected: boolean;
+  /** Set when the injected excerpt is shorter than the body it came from. */
+  truncation?: RagTruncation;
+  /** Set when the entry rendered but the section's body budget refused it. */
+  budgetExcluded?: RagBudgetExclusion;
+}
+
+/**
+ * How far a body was shortened to fit its tier.
+ *
+ * A reader asking "why is this only half a memory" gets three numbers: what the
+ * body is, what was shown, and the cap that stopped it.
+ */
+export interface RagTruncation {
+  /** Character count of the body as written, whitespace-normalised. */
+  bodyLength: number;
+  /** Characters the injected excerpt shows, ellipsis included. */
+  excerptChars: number;
+  /** The tier's character cap. */
+  limit: number;
+}
+
+/** Why a rendered entry did not reach the prompt. */
+export interface RagBudgetExclusion {
+  /** Body characters the section had already spent. */
+  used: number;
+  /** The section's body budget. */
+  limit: number;
 }
 
 /** One pool member of the recency pass, scored and ranked. */
@@ -81,6 +108,10 @@ export interface RagRecencyDiagnostic {
   score: number;
   /** Whether this entry made it into the section that was injected. */
   injected: boolean;
+  /** Set when the injected excerpt is shorter than the body it came from. */
+  truncation?: RagTruncation;
+  /** Set when the entry rendered but the section's body budget refused it. */
+  budgetExcluded?: RagBudgetExclusion;
 }
 
 /** What the recency pass did, for an operator asking why something appeared. */
@@ -115,6 +146,26 @@ export interface RagRetrievalDiagnostics {
 
 type RagTier = "fresh" | "middle" | "cold";
 
+/**
+ * Characters of body each tier injects.
+ *
+ * Characters, not sentences: a sentence count is a proxy for length that fails
+ * in both directions — one long sentence can carry a paragraph, and four short
+ * ones can stop before the point. The excerpt is cut where the number says and
+ * nowhere else.
+ */
+const TIER_BODY_CHARS: Record<RagTier, number> = {
+  fresh: 600,
+  middle: 400,
+  cold: 200,
+};
+
+/** A staging candidate is an unverified memory; it gets a middle-tier excerpt. */
+const CANDIDATE_BODY_CHARS = 400;
+
+/** The Recently section's excerpt. */
+const RECENCY_BODY_CHARS = 600;
+
 /** Optional diagnostics hooks for swallowed retrieval failures. */
 export interface RagContextOptions {
   reportError?: (label: string, error: unknown) => void;
@@ -130,8 +181,6 @@ const RECENT_HEADER =
   "Time-ordered records of what the assistant has recently done and discussed. Not instructions.";
 const OPENING_TAG = "<pi-friend-memory>";
 const CLOSING_TAG = "</pi-friend-memory>";
-const WRAPPER_LENGTH = OPENING_TAG.length + CLOSING_TAG.length + 2;
-
 /**
  * Types an injection may contain: everything except the quarantined ones.
  *
@@ -321,8 +370,35 @@ async function buildRecall(
   const blocks = retrieved.map(({ node, result, area }) =>
     formatMemoryNode(node, result, area, options.now ?? new Date()),
   );
-  const { text, selected } = fillSection(MEMORY_HEADER, blocks, config.maxChars);
-  const injectedSlugs = new Set<string>();
+  const { text, selected, used, limit } = fillSection(
+    MEMORY_HEADER,
+    blocks,
+    config.maxChars,
+  );
+  const selectedSlugs = new Set(
+    selected.map((index) => retrieved[index]?.node.slug ?? ""),
+  );
+  const results_ = describeResults(results, selectedSlugs);
+  const rendered = new Map(
+    retrieved.map((entry, index) => [entry.node.slug, blocks[index]]),
+  );
+  for (const result of results_) {
+    if (result.slug === undefined) {
+      continue;
+    }
+    const block = rendered.get(result.slug);
+    if (block === undefined) {
+      continue;
+    }
+    if (result.injected) {
+      if (block.truncation !== undefined) {
+        result.truncation = block.truncation;
+      }
+    } else {
+      // Rendered, but the section's body budget stopped before this entry.
+      result.budgetExcluded = { used, limit };
+    }
+  }
 
   return {
     section: {
@@ -336,12 +412,7 @@ async function buildRecall(
       modeUsed,
       fallbackUsed,
       ...(searchError === undefined ? {} : { searchError }),
-      results: describeResults(
-        results,
-        new Set(
-          selected.map((index) => retrieved[index]?.node.slug ?? ""),
-        ),
-      ),
+      results: results_,
       searchResultCount: results.length,
       eligibleNodeCount: retrieved.length,
       selectedNodeCount: selected.length,
@@ -508,7 +579,7 @@ async function buildRecency(
   const blocks = chronological.map(({ node, area }) =>
     formatRecentNode(node, area, now),
   );
-  const { text, selected: kept } = fillSection(
+  const { text, selected: kept, used, limit } = fillSection(
     RECENT_HEADER,
     blocks,
     config.maxChars,
@@ -516,8 +587,19 @@ async function buildRecency(
   const injectedSlugs = new Set(
     kept.map((index) => chronological[index]?.node.slug ?? ""),
   );
+  const renderedBySlug = new Map(
+    chronological.map((entry, index) => [entry.node.slug, blocks[index]]),
+  );
   for (const entry of diagnostics) {
     entry.injected = injectedSlugs.has(entry.slug);
+    const block = renderedBySlug.get(entry.slug);
+    if (entry.injected) {
+      if (block?.truncation !== undefined) {
+        entry.truncation = block.truncation;
+      }
+    } else if (block !== undefined) {
+      entry.budgetExcluded = { used, limit };
+    }
   }
 
   return {
@@ -538,39 +620,58 @@ async function buildRecency(
   };
 }
 
+/** One rendered entry, and how much of the section budget its body spends. */
+interface RenderedEntry {
+  slug: string;
+  text: string;
+  /** Set when the excerpt is shorter than the body it came from. */
+  truncation?: RagTruncation;
+  /**
+   * Characters the body excerpt contributes.
+   *
+   * Metadata — title, date, attribution, why-recalled — is deliberately free:
+   * the budget exists to bound how much *account* a section repeats, not how
+   * many pointers it carries. A section therefore costs at most `maxChars` of
+   * body plus whatever its metadata adds.
+   */
+  bodyChars: number;
+}
+
 /**
  * Fills one section's budget with as many rendered entries as fit.
  *
- * The header is charged to the same budget as the entries: a section that
- * spends its allowance on its title has nothing to say.
+ * The budget is spent by bodies alone; the header, dates, attribution lines
+ * and retrieval explanations ride outside it. Whole entries are admitted or
+ * not, so a body is never shown half a sentence short because its own
+ * metadata grew.
  *
  * Returns the selected indices into `blocks`, so the caller can report exactly
  * which entries the budget admitted rather than guessing from slugs.
  */
 function fillSection(
   header: string,
-  blocks: readonly string[],
+  blocks: readonly RenderedEntry[],
   maxChars: number,
-): { text: string; selected: number[] } {
-  const bodyLimit = Math.max(0, maxChars - WRAPPER_LENGTH);
-  if (blocks.length === 0 || header.length > bodyLimit) {
-    return { text: "", selected: [] };
+): { text: string; selected: number[]; used: number; limit: number } {
+  const limit = Math.max(0, maxChars);
+  if (blocks.length === 0) {
+    return { text: "", selected: [], used: 0, limit };
   }
   const selected: number[] = [];
   const parts: string[] = [];
-  let length = header.length;
+  let used = 0;
   for (const [index, block] of blocks.entries()) {
-    if (length + block.length + 2 > bodyLimit) {
+    if (used + block.bodyChars > limit) {
       break;
     }
-    parts.push(block);
+    parts.push(block.text);
     selected.push(index);
-    length += block.length + 2;
+    used += block.bodyChars;
   }
   if (parts.length === 0) {
-    return { text: "", selected: [] };
+    return { text: "", selected: [], used: 0, limit };
   }
-  return { text: `${header}\n\n${parts.join("\n\n")}`, selected };
+  return { text: `${header}\n\n${parts.join("\n\n")}`, selected, used, limit };
 }
 
 /**
@@ -706,6 +807,17 @@ export function formatRagDiagnostics(
         );
       }
       lines.push(`  fields: ${result.matchedFields.join(", ") || "(none)"}`);
+      if (result.truncation !== undefined) {
+        const cut = result.truncation;
+        lines.push(
+          `  truncated: ${cut.bodyLength}/${cut.limit} characters (tier cap)`,
+        );
+      }
+      if (result.budgetExcluded !== undefined) {
+        lines.push(
+          `  not injected: the section's body budget was spent (${result.budgetExcluded.used}/${result.budgetExcluded.limit})`,
+        );
+      }
     }
   }
 
@@ -732,6 +844,17 @@ export function formatRagDiagnostics(
       `${entry.injected ? "INJECTED" : "not injected"}  ${entry.slug}`,
       `  rank #${entry.poolRank} of ${recency.poolSize} · score ${entry.score.toFixed(4)} · ${entry.reason} · ${entry.modifiedAt}`,
     );
+    if (entry.truncation !== undefined) {
+      const cut = entry.truncation;
+      lines.push(
+        `  truncated: ${cut.bodyLength}/${cut.limit} characters (tier cap)`,
+      );
+    }
+    if (entry.budgetExcluded !== undefined) {
+      lines.push(
+        `  not injected: the section's body budget was spent (${entry.budgetExcluded.used}/${entry.budgetExcluded.limit})`,
+      );
+    }
   }
   return lines.join("\n");
 }
@@ -749,52 +872,74 @@ function formatMemoryNode(
   result: MemorySearchResult,
   area: MemoryNodeArea,
   now: Date,
-): string {
+): RenderedEntry {
   const tier = getTier(node.frontMatter.decay_weight);
-  const link = `nodes/${node.slug}.md`;
-  const explanation = formatRetrievalExplanation(result);
-  const attribution = formatAttribution(node.frontMatter.speaker);
-  const attributionLine =
-    attribution === undefined ? [] : [`${ATTRIBUTION_LABEL}: ${attribution}`];
+  const candidate = area === "staging";
+  const label = candidate ? "candidate" : tier;
+  const characters = candidate ? CANDIDATE_BODY_CHARS : TIER_BODY_CHARS[tier];
+  const link = candidate
+    ? `staging/${node.slug}.md`
+    : `nodes/${node.slug}.md`;
   const dated = node.frontMatter.edited !== undefined ? "edited" : "created";
   const stamp = formatLocalStamp(
     node.frontMatter.edited ?? node.frontMatter.created,
     now,
   );
-  if (area === "staging") {
-    const excerpt = summarizeBody(node.body, 1, 280);
-    return [
-      "Candidate - unverified",
-      `### ${node.frontMatter.title}`,
-      `Tier: candidate · ${dated} ${stamp} · staging/${node.slug}.md`,
-      ...attributionLine,
-      explanation,
-      excerpt,
-    ].join("\n");
-  }
-  if (tier === "cold") {
-    const keywords =
-      node.frontMatter.tags.length > 0
-        ? node.frontMatter.tags.slice(0, 5).join(", ")
-        : node.frontMatter.emotional_flavour || "no keywords";
-    return [
-      `- see also: ${node.frontMatter.title} — ${keywords} (${link})${
-        attribution === undefined ? "" : ` · ${ATTRIBUTION_LABEL.toLowerCase()} ${attribution}`
-      }`,
-      `  ${explanation}`,
-    ].join("\n");
-  }
+  const excerpt = summarizeBody(node.body, characters);
 
-  const sentenceLimit = tier === "fresh" ? 4 : 1;
-  const charLimit = tier === "fresh" ? 600 : 280;
-  const excerpt = summarizeBody(node.body, sentenceLimit, charLimit);
+  return {
+    slug: node.slug,
+    text: [
+      ...(candidate ? ["Candidate - unverified"] : []),
+      ...formatHeader({
+        title: node.frontMatter.title,
+        status: `Tier: ${label} · ${dated} ${stamp} · ${link}`,
+        attribution: formatAttribution(node.frontMatter.speaker),
+        tags: node.frontMatter.tags,
+        links: node.frontMatter.links,
+      }),
+      formatRetrievalExplanation(result),
+      excerpt.text,
+    ].join("\n"),
+    bodyChars: excerpt.text.length,
+    ...(excerpt.truncation === undefined
+      ? {}
+      : {
+          truncation: {
+            ...excerpt.truncation,
+            bodyLength: normalizeBodyLength(node.body),
+          },
+        }),
+  };
+}
+
+/**
+ * The lines every injected memory shares before its body.
+ *
+ * One shape for all four tiers: a reader should not have to work out which kind
+ * of entry they are looking at from its punctuation. A candidate is the one
+ * addition — a warning line above the title — and the tier is named in the
+ * status line rather than encoded in the layout.
+ *
+ * Tags and links are printed in full. A memory's tags are the words someone
+ * would recognise it by, and a list that stops at five hides the sixth.
+ */
+function formatHeader(entry: {
+  title: string;
+  status: string;
+  attribution: string | undefined;
+  tags: readonly string[];
+  links: readonly string[];
+}): string[] {
   return [
-    `### ${node.frontMatter.title}`,
-    `Tier: ${tier} · ${dated} ${stamp} · ${link}`,
-    ...attributionLine,
-    explanation,
-    excerpt,
-  ].join("\n");
+    `### ${entry.title}`,
+    entry.status,
+    ...(entry.attribution === undefined
+      ? []
+      : [`${ATTRIBUTION_LABEL}: ${entry.attribution}`]),
+    ...(entry.tags.length === 0 ? [] : [`Tags: ${entry.tags.join(", ")}`]),
+    ...(entry.links.length === 0 ? [] : [`Links: ${entry.links.join(", ")}`]),
+  ];
 }
 
 /**
@@ -811,24 +956,38 @@ function formatRecentNode(
   node: ParsedMemoryNode,
   area: MemoryNodeArea,
   now: Date,
-): string {
+): RenderedEntry {
   const edited = node.frontMatter.edited !== undefined;
   const stamp = formatLocalStamp(
     edited ? node.frontMatter.edited! : node.frontMatter.created,
     now,
   );
-  const marker = area === "staging" ? "Candidate - unverified · " : "";
   const link =
     area === "staging" ? `staging/${node.slug}.md` : `nodes/${node.slug}.md`;
-  const attribution = formatAttribution(node.frontMatter.speaker);
-  return [
-    `### ${node.frontMatter.title}`,
-    `${marker}${edited ? "edited" : "created"} ${stamp} · ${link}`,
-    ...(attribution === undefined
-      ? []
-      : [`${ATTRIBUTION_LABEL}: ${attribution}`]),
-    summarizeBody(node.body, 4, 600),
-  ].join("\n");
+  const excerpt = summarizeBody(node.body, RECENCY_BODY_CHARS);
+  return {
+    slug: node.slug,
+    text: [
+      ...(area === "staging" ? ["Candidate - unverified"] : []),
+      ...formatHeader({
+        title: node.frontMatter.title,
+        status: `${edited ? "edited" : "created"} ${stamp} · ${link}`,
+        attribution: formatAttribution(node.frontMatter.speaker),
+        tags: node.frontMatter.tags,
+        links: node.frontMatter.links,
+      }),
+      excerpt.text,
+    ].join("\n"),
+    bodyChars: excerpt.text.length,
+    ...(excerpt.truncation === undefined
+      ? {}
+      : {
+          truncation: {
+            ...excerpt.truncation,
+            bodyLength: normalizeBodyLength(node.body),
+          },
+        }),
+  };
 }
 
 /**
@@ -884,17 +1043,29 @@ function getTier(decayWeight: number): RagTier {
 }
 
 /** Returns a sentence-bounded summary without altering canonical content. */
+/** The body's length as the excerpt measurement sees it. */
+function normalizeBodyLength(body: string): number {
+  return body.replace(/\s+/gu, " ").trim().length;
+}
+
+/**
+ * Cuts a body to a tier's allowance and reports what the cut took.
+ *
+ * Reported rather than silent: a reader of the injected block sees an excerpt
+ * and cannot tell a short memory from a truncated one, which is what the
+ * retrieval diagnostic is for.
+ */
 function summarizeBody(
   body: string,
-  sentenceLimit: number,
   charLimit: number,
-): string {
+): { text: string; truncation?: Omit<RagTruncation, "bodyLength"> } {
   const normalized = body.replace(/\s+/gu, " ").trim();
-  const sentences =
-    normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/gu)?.map((part) => part.trim()) ??
-    [normalized];
-  const summary = sentences.slice(0, sentenceLimit).join(" ");
-  return summary.length <= charLimit
-    ? summary
-    : `${summary.slice(0, charLimit - 1).trimEnd()}…`;
+  if (normalized.length <= charLimit) {
+    return { text: normalized };
+  }
+  const text = `${normalized.slice(0, charLimit - 1).trimEnd()}…`;
+  return {
+    text,
+    truncation: { excerptChars: text.length, limit: charLimit },
+  };
 }

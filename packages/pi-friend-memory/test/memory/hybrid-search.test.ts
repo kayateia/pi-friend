@@ -30,6 +30,8 @@ function result(
     snippet: relativePath,
     score: 0,
     matchedFields,
+    tags: [],
+    links: [],
   };
 }
 

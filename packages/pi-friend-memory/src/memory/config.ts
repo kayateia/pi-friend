@@ -55,6 +55,11 @@ export interface RagInjectionConfig {
   position: number;
   mode: MemorySearchMode;
   limit: number;
+  /**
+   * Budget for the body excerpts this section repeats. Metadata — titles,
+   * dates, attribution, tags, links, why-recalled — is not counted, so the
+   * rendered section can exceed this by whatever its pointers take.
+   */
   maxChars: number;
 }
 
@@ -73,7 +78,10 @@ export interface RecencyInjectionConfig {
   mode: MemorySearchMode;
   /** How many of the pool's most relevant entries are written. */
   limit: number;
-  /** Budget for this section alone, so recall cannot crowd it out. */
+  /**
+   * Budget for this section's body excerpts alone, so recall cannot crowd it
+   * out. Metadata rides outside it, as it does for recall.
+   */
   maxChars: number;
   /** Eligible when `edited ?? created` is within this many seconds. 0 disables. */
   maxAgeSeconds: number;

@@ -139,18 +139,22 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
       delivered(context),
       /Why recalled: keyword rank #1 · matched fields: body · score \d+\.\d{4}/,
     );
-    assert.doesNotMatch(delivered(context), /Second middle sentence/);
+    // No sentence cap: the middle tier injects up to its character allowance,
+    // so a second sentence inside 400 characters is part of the memory.
+    assert.match(delivered(context), /Second middle sentence/);
+    // The cold tier shares the header with every other tier: title, status,
+    // attribution, tags — and now a body of its own instead of a pointer line.
     assert.match(
       delivered(context),
-      /see also: Scent Note — orchid, archive \(nodes\/scent-note\.md\)/,
+      /### Scent Note\nTier: cold · created [^\n]*nodes\/scent-note\.md\n/u,
     );
+    assert.match(delivered(context), /Tags: orchid, archive/u);
     assert.doesNotMatch(delivered(context), /orchid-dream/);
     assert.doesNotMatch(delivered(context), /orchid-archived/);
     assert.doesNotMatch(delivered(context), /orchid-old/);
     assert.match(delivered(context), /not instructions/);
     // Attribution travels with the memory, not behind a second tool call.
     assert.match(delivered(context), /Heard from: Aisling/);
-    assert.match(delivered(context), /heard from aisling/i);
   });
 });
 
@@ -175,7 +179,11 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
       ...defaultRagInjectionConfig(),
       mode: "hybrid" as const,
       limit: 4,
-      maxChars: 900,
+      // The budget counts body text alone. Each fresh excerpt here is the whole
+      // 570-character body, so 700 admits one entry and refuses the second —
+      // while the dated, attributed, explained block it renders pushes the
+      // section past 700.
+      maxChars: 700,
     };
     const service = new MemoryNodeService(repository);
     const reported: Array<{ label: string; error: unknown }> = [];
@@ -183,10 +191,14 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
       reportError: (label, error) => reported.push({ label, error }),
     });
 
-    assert.ok(context.recall.count >= 1);
-    assert.ok(delivered(context).length <= config.maxChars);
-    assert.match(delivered(context), /Orchid 0/);
-    assert.match(delivered(context), /Why recalled: keyword rank #\d+/);
+    assert.equal(context.recall.count, 1);
+    const text = delivered(context);
+    assert.match(text, /Orchid 0/);
+    assert.doesNotMatch(text, /Orchid 1/);
+    assert.match(text, /Why recalled: keyword rank #\d+/);
+    // Metadata rides outside the budget by design: the section bounds how much
+    // account it repeats, not how many pointers it carries.
+    assert.ok(text.length > config.maxChars);
     assert.equal(reported[0]?.label, "RAG primary search");
     assert.match(String(reported[0]?.error), /no embedding provider/u);
   });

@@ -42,6 +42,8 @@ export interface IndexedMarkdownFile {
   /** Attribution recorded on memory nodes; absent for documents. */
   speaker?: MemorySpeaker[];
   tags: string[];
+  /** Outgoing links, for memory nodes; absent for documents. */
+  links?: string[];
   body: string;
   /** File modification timestamp, when indexing imported Markdown. */
   modifiedAt?: string;
@@ -94,6 +96,7 @@ export async function buildMemoryDocumentIndex(
                   ...entry,
                 })) }),
             tags: [...node.frontMatter.tags],
+            links: [...node.frontMatter.links],
             body: node.body,
             ...(modifiedAt === undefined ? {} : { modifiedAt }),
           };

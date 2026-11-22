@@ -1227,6 +1227,8 @@ function formatResultBlock(
     `Path: ${result.relativePath}`,
     metadata,
     attribution === undefined ? "" : `${ATTRIBUTION_LABEL}: ${attribution}`,
+    result.tags.length === 0 ? "" : `tags: ${result.tags.join(", ")}`,
+    result.links.length === 0 ? "" : `links: ${result.links.join(", ")}`,
     formatRetrievalExplanation(result),
     result.snippet,
   ]
@@ -1302,11 +1304,17 @@ function formatListBlock(
   if (front.status !== "active") {
     metadata.push(`status: ${front.status}`);
   }
-  metadata.push(`modified: ${memoryModifiedAt(node)}`);
+  // The date is labelled for what it is: `created` until something substantive
+  // has changed the memory, `modified` afterwards.
+  metadata.push(
+    `${front.edited === undefined ? "created" : "modified"}: ${memoryModifiedAt(node)}`,
+  );
   const lines = [
     `### ${front.title}`,
     `slug: ${node.slug}`,
     metadata.join(" · "),
+    ...(front.tags.length === 0 ? [] : [`tags: ${front.tags.join(", ")}`]),
+    ...(front.links.length === 0 ? [] : [`links: ${front.links.join(", ")}`]),
   ];
   // A dream's speaker is the `pi-friend` stub that says "synthesized dream";
   // the model that wrote it is the interesting attribution, and it lives in

@@ -165,7 +165,7 @@ sources:
 
 A record is written by `memory_add`, by a merge on its destination, and by `memory_edit` only when the edit changes `title`, `speaker` or `body` — the same rule that decides whether `edited` moves. Promotion and restore carry the records they already have. Nothing prints them yet; `memory_read` shows the node whole.
 
-Body: concise, single-topic prose. May include short verbatim quotes (with speaker attributed). Ends with a `see also:` section listing links plus their one-line keywords, for the "very bottom of RAG" tier.
+Body: concise, single-topic prose. May include short verbatim quotes (with speaker attributed). Links belong in the `links` field, not in the body: the renderer prints them.
 
 **Attribution rules** (plural- and room-aware):
 - `speaker` names people: a human, a member of the plural system, or another non-AI entity. An AI agent is never a speaker — it belongs in `agents`, which lists every AI involved in the exchange, including the one writing the memory.
@@ -236,10 +236,13 @@ once-per-day consolidation schedule, not daily-log processing.
 - RAG uses the complete latest user message, plus the most recent agent chat-text output before that user message, as its query. "Agent chat text" means visible assistant prose only; exclude reasoning/thinking blocks, tool calls, and tool results. Keyword/hybrid retrieval accepts one meaningful token overlap rather than requiring every conversational word to appear in a memory. Semantic retrieval uses nearest-neighbor ranking without a fixed similarity cutoff.
 - When debug logging is enabled, the retrieval log records the query, search mode/fallback, errors, candidate/eligible/selected counts, and context size. A later `context_with_system` diagnostic verifies that the exact injected RAG block remains in the final request context.
 - In debug runs only, an empty `<pi-friend-memory></pi-friend-memory>` block is injected when retrieval selects no nodes, allowing end-to-end context-injection testing without fixture memories. Normal runs omit the block.
-- Injection content tiers (per node):
-  1. **Fresh/recent**: title + snippet (~2–4 sentences) + link.
-  2. **Middle-age (volume-relative) and candidates**: title + one sentence + link.
-  3. **Cold**: `see also: <title> — <keywords>` only.
+- **Every injected memory renders the same way**: a title, a status line (`Tier: … · created/edited … · path`), attribution, `Tags:`, `Links:`, the retrieval explanation, then the body. A candidate adds `Candidate - unverified` above the title. Tags and links print in full and are omitted when empty; the tiers differ in how much body they carry, not in what an entry is.
+- Injection content tiers (per node), by character allowance — there are no sentence caps:
+  1. **Fresh** (`decay_weight` ≥ 0.75): 600 characters of body.
+  2. **Middle** (≥ 0.35) and staging candidates: 400 characters.
+  3. **Cold** (< 0.35): 200 characters.
+- The Recently section uses the same header without the tier or the explanation, and a 600-character body.
+- `max_chars` bounds the **body excerpts** a section repeats. Metadata — titles, dates, attribution, tags, links, explanations — is outside it, so a rendered section may exceed `max_chars` by whatever its pointers take. An entry that does not fit is left out whole rather than shortened, and `/memory-last-rag` reports both cases.
 - Tier assignment is computed at retrieval time from `decay_weight` and access data; the md files are not rewritten at retrieval time (see §8).
 
 ### 6a. Speaker tags
