@@ -84,8 +84,6 @@ export interface RagTruncation {
   excerptChars: number;
   /** The tier's character cap. */
   limit: number;
-  /** The tier's sentence cap, when sentences were what stopped it. */
-  sentenceLimit: number;
 }
 
 /** Why a rendered entry did not reach the prompt. */
@@ -147,6 +145,26 @@ export interface RagRetrievalDiagnostics {
 }
 
 type RagTier = "fresh" | "middle" | "cold";
+
+/**
+ * Characters of body each tier injects.
+ *
+ * Characters, not sentences: a sentence count is a proxy for length that fails
+ * in both directions — one long sentence can carry a paragraph, and four short
+ * ones can stop before the point. The excerpt is cut where the number says and
+ * nowhere else.
+ */
+const TIER_BODY_CHARS: Record<RagTier, number> = {
+  fresh: 600,
+  middle: 400,
+  cold: 200,
+};
+
+/** A staging candidate is an unverified memory; it gets a middle-tier excerpt. */
+const CANDIDATE_BODY_CHARS = 400;
+
+/** The Recently section's excerpt. */
+const RECENCY_BODY_CHARS = 600;
 
 /** Optional diagnostics hooks for swallowed retrieval failures. */
 export interface RagContextOptions {
@@ -792,9 +810,7 @@ export function formatRagDiagnostics(
       if (result.truncation !== undefined) {
         const cut = result.truncation;
         lines.push(
-          `  truncated: ${cut.bodyLength}/${cut.limit} characters (tier cap: ${cut.sentenceLimit} sentence${
-            cut.sentenceLimit === 1 ? "" : "s"
-          })`,
+          `  truncated: ${cut.bodyLength}/${cut.limit} characters (tier cap)`,
         );
       }
       if (result.budgetExcluded !== undefined) {
@@ -831,9 +847,7 @@ export function formatRagDiagnostics(
     if (entry.truncation !== undefined) {
       const cut = entry.truncation;
       lines.push(
-        `  truncated: ${cut.bodyLength}/${cut.limit} characters (tier cap: ${cut.sentenceLimit} sentence${
-          cut.sentenceLimit === 1 ? "" : "s"
-        })`,
+        `  truncated: ${cut.bodyLength}/${cut.limit} characters (tier cap)`,
       );
     }
     if (entry.budgetExcluded !== undefined) {
@@ -871,7 +885,7 @@ function formatMemoryNode(
     now,
   );
   if (area === "staging") {
-    const excerpt = summarizeBody(node.body, 1, 280);
+    const excerpt = summarizeBody(node.body, CANDIDATE_BODY_CHARS);
     return {
       slug: node.slug,
       text: [
@@ -894,11 +908,14 @@ function formatMemoryNode(
     };
   }
   if (tier === "cold") {
+    // Every tag, not a sample: the pointer is the whole point of this tier, and
+    // a keyword list that silently stops at five hides the words someone would
+    // have recognised the memory by.
     const keywords =
       node.frontMatter.tags.length > 0
-        ? node.frontMatter.tags.slice(0, 5).join(", ")
+        ? node.frontMatter.tags.join(", ")
         : node.frontMatter.emotional_flavour || "no keywords";
-    // The cold tier is a pointer, not an account: it has no body to spend.
+    const excerpt = summarizeBody(node.body, TIER_BODY_CHARS.cold);
     return {
       slug: node.slug,
       text: [
@@ -906,14 +923,21 @@ function formatMemoryNode(
           attribution === undefined ? "" : ` · ${ATTRIBUTION_LABEL.toLowerCase()} ${attribution}`
         }`,
         `  ${explanation}`,
+        `  ${excerpt.text}`,
       ].join("\n"),
-      bodyChars: 0,
+      bodyChars: excerpt.text.length,
+      ...(excerpt.truncation === undefined
+        ? {}
+        : {
+            truncation: {
+              ...excerpt.truncation,
+              bodyLength: normalizeBodyLength(node.body),
+            },
+          }),
     };
   }
 
-  const sentenceLimit = tier === "fresh" ? 4 : 1;
-  const charLimit = tier === "fresh" ? 600 : 280;
-  const excerpt = summarizeBody(node.body, sentenceLimit, charLimit);
+  const excerpt = summarizeBody(node.body, TIER_BODY_CHARS[tier]);
   return {
     slug: node.slug,
     text: [
@@ -959,7 +983,7 @@ function formatRecentNode(
   const link =
     area === "staging" ? `staging/${node.slug}.md` : `nodes/${node.slug}.md`;
   const attribution = formatAttribution(node.frontMatter.speaker);
-  const excerpt = summarizeBody(node.body, 4, 600);
+  const excerpt = summarizeBody(node.body, RECENCY_BODY_CHARS);
   return {
     slug: node.slug,
     text: [
@@ -1049,29 +1073,15 @@ function normalizeBodyLength(body: string): number {
  */
 function summarizeBody(
   body: string,
-  sentenceLimit: number,
   charLimit: number,
 ): { text: string; truncation?: Omit<RagTruncation, "bodyLength"> } {
   const normalized = body.replace(/\s+/gu, " ").trim();
-  const sentences =
-    normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/gu)?.map((part) => part.trim()) ??
-    [normalized];
-  const summary = sentences.slice(0, sentenceLimit).join(" ");
-  const charLimited = summary.length > charLimit;
-  const text = charLimited
-    ? `${summary.slice(0, charLimit - 1).trimEnd()}…`
-    : summary;
-  const sentenceLimited = sentences.length > sentenceLimit;
+  if (normalized.length <= charLimit) {
+    return { text: normalized };
+  }
+  const text = `${normalized.slice(0, charLimit - 1).trimEnd()}…`;
   return {
     text,
-    ...(charLimited || sentenceLimited
-      ? {
-          truncation: {
-            excerptChars: text.length,
-            limit: charLimit,
-            sentenceLimit,
-          },
-        }
-      : {}),
+    truncation: { excerptChars: text.length, limit: charLimit },
   };
 }

@@ -139,7 +139,9 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
       delivered(context),
       /Why recalled: keyword rank #1 · matched fields: body · score \d+\.\d{4}/,
     );
-    assert.doesNotMatch(delivered(context), /Second middle sentence/);
+    // No sentence cap: the middle tier injects up to its character allowance,
+    // so a second sentence inside 400 characters is part of the memory.
+    assert.match(delivered(context), /Second middle sentence/);
     assert.match(
       delivered(context),
       /see also: Scent Note — orchid, archive \(nodes\/scent-note\.md\)/,
@@ -175,10 +177,11 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
       ...defaultRagInjectionConfig(),
       mode: "hybrid" as const,
       limit: 4,
-      // The budget counts body text alone. Each excerpt here is about sixty
-      // characters, so 100 admits one entry and refuses the second — while the
-      // dated, attributed, explained block it renders is longer than 100.
-      maxChars: 100,
+      // The budget counts body text alone. Each fresh excerpt here is the whole
+      // 570-character body, so 700 admits one entry and refuses the second —
+      // while the dated, attributed, explained block it renders pushes the
+      // section past 700.
+      maxChars: 700,
     };
     const service = new MemoryNodeService(repository);
     const reported: Array<{ label: string; error: unknown }> = [];

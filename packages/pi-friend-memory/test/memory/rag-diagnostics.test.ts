@@ -24,8 +24,7 @@ test("a truncated body and a spent budget are both reported", async () => {
       homeDir: agentDir,
     });
     const service = new MemoryNodeService(repository);
-    // Two bodies of a single long sentence each: the fresh tier's four-sentence
-    // allowance does not touch them, so the 600-character cap is what cuts.
+    // Two bodies far longer than the fresh tier's allowance, so both are cut.
     const body =
       `The lantern ${"very ".repeat(160)}hangs by the door. ` +
       `The handle ${"quite ".repeat(160)}is chipped.`;
@@ -67,7 +66,7 @@ test("a truncated body and a spent budget are both reported", async () => {
     assert.ok(refused.budgetExcluded.used <= 650);
 
     const text = formatRagDiagnostics(context.diagnostics);
-    assert.match(text, /truncated: \d+\/600 characters \(tier cap: 4 sentences\)/u);
+    assert.match(text, /truncated: \d+\/600 characters \(tier cap\)/u);
     assert.match(
       text,
       /not injected: the section's body budget was spent \(\d+\/650\)/u,
