@@ -39,7 +39,15 @@ export interface SweepDecision {
   reason: string;
 }
 
-/** Builds the sweep model request. */
+/**
+ * Builds the sweep model request.
+ *
+ * `canonical` is the window the caller selected, not the whole store: which
+ * memories are relevant to these candidates is a retrieval question, answered
+ * before the prompt is built. The function used to take the store and keep the
+ * first fifty itself, which made the window alphabetical once the repository's
+ * slug ordering reached it.
+ */
 export function buildSweepPrompt(
   candidates: ParsedMemoryNode[],
   canonical: ParsedMemoryNode[],
@@ -53,7 +61,7 @@ export function buildSweepPrompt(
     tags: node.frontMatter.tags,
     body: node.body.trim(),
   }));
-  const canonicalData = canonical.slice(0, 50).map((node) => ({
+  const canonicalData = canonical.map((node) => ({
     slug: node.slug,
     title: node.frontMatter.title,
     type: node.frontMatter.type,
@@ -77,7 +85,9 @@ export function buildSweepPrompt(
  *
  * `allowDrop` follows the configuration: with it off, a `drop` decision is left
  * on the floor exactly like any other unknown action, because the sweep model
- * was never offered the vocabulary.
+ * was never offered the vocabulary. `canonicalSlugs` is the window the model
+ * was shown: a merge into a memory it never saw cannot be justified by anything
+ * in the prompt, so it is rejected rather than trusted.
  */
 export function parseSweepResponse(
   response: string,
