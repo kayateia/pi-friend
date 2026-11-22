@@ -34,8 +34,6 @@ decay_weight: 1
 status: active
 emotional_flavor: ${flavour}
 tags: []
-supersedes: []
-superseded_by: ""
 links: []
 source: ""
 ---

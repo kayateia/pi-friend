@@ -37,8 +37,6 @@ decay_weight: 1
 status: candidate
 emotional_flavour: neutral
 tags: []
-supersedes: []
-superseded_by: ""
 links: []
 source: ""
 ${options.edited === undefined ? "" : `edited: ${options.edited}\n`}---

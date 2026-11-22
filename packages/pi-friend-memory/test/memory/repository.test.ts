@@ -15,10 +15,7 @@ import type {
   MemoryStatus,
   MemoryType,
 } from "../../src/memory/schema.ts";
-import {
-  MemorySchemaError,
-  serializeMemoryNode,
-} from "../../src/memory/schema.ts";
+import { MemorySchemaError } from "../../src/memory/schema.ts";
 import { MemoryNodeRepository } from "../../src/memory/repository.ts";
 import { withTempDir } from "../helpers.ts";
 
@@ -28,9 +25,7 @@ function makeNode(options: {
   body?: string;
   type?: MemoryType;
   status?: MemoryStatus;
-  supersededBy?: string;
 }): ParsedMemoryNode {
-  const status = options.status ?? "active";
   return {
     slug: options.slug,
     body: options.body ?? "\nA concise memory body.\n",
@@ -42,12 +37,10 @@ function makeNode(options: {
       created: "2026-10-18T09:00:00Z",
       last_used: "2026-10-18T09:00:00Z",
       use_count: 0,
-      decay_weight: status === "superseded" ? 0 : 1,
-      status,
+      decay_weight: 1,
+      status: options.status ?? "active",
       emotional_flavour: "warm",
       tags: ["repository"],
-      supersedes: [],
-      superseded_by: options.supersededBy ?? "",
       links: [],
       source: "",
     },
@@ -91,17 +84,31 @@ test("repository lists only files belonging to the requested area", async () => 
       }),
       "staging",
     );
-    // A tombstone from before the history tree: written by hand because
-    // nothing in the code can produce one any more.
+    // A tombstone from before the history tree: written by hand because neither
+    // the schema nor any operation can produce one any more. It must stay out of
+    // every reader that walks the canonical area.
     await repository.store.writeTextFile(
       "nodes/superseded/old-one.md",
-      serializeMemoryNode(
-        makeNode({
-          slug: "old-one",
-          status: "superseded",
-          supersededBy: "active-one",
-        }),
-      ),
+      [
+        "---",
+        "title: Old one",
+        "type: fact",
+        "speaker: []",
+        "agents: []",
+        "created: 2026-10-18T09:00:00Z",
+        "last_used: 2026-10-18T09:00:00Z",
+        "use_count: 0",
+        "decay_weight: 0",
+        "status: superseded",
+        'superseded_by: "active-one"',
+        "emotional_flavour: neutral",
+        "tags: []",
+        "links: []",
+        'source: ""',
+        "---",
+        "",
+        "A deleted memory.",
+      ].join("\n"),
     );
     await repository.store.writeTextFile("docs/reference.md", "plain\n");
 
@@ -145,17 +152,6 @@ test("repository enforces status rules for each area", async () => {
           }),
         ),
       /must not retain candidate status/,
-    );
-    await assert.rejects(
-      () =>
-        repository.write(
-          makeNode({
-            slug: "superseded-in-canon",
-            status: "superseded",
-            supersededBy: "newer",
-          }),
-        ),
-      /must live under nodes\/superseded/,
     );
     await assert.rejects(
       () =>

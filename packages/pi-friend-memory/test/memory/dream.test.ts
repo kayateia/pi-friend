@@ -100,8 +100,6 @@ function makeNode(slug: string, links: string[]) {
       status: "active" as const,
       emotional_flavour: "neutral",
       tags: [],
-      supersedes: [],
-      superseded_by: "",
       links,
       source: "",
     },

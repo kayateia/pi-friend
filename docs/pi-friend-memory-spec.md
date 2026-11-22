@@ -139,13 +139,11 @@ created: 2026-10-18T09:00:00Z
 last_used: 2026-10-18T09:00:00Z     # moves when the node is used: a read, a search hit, an injection, an edit
 use_count: 0
 decay_weight: 1.0                   # recomputed at sweep; see §7
-status: active                      # active | candidate | superseded | archived
+status: active                      # active | candidate | archived
 emotional_flavour: warm              # free tag, not an enum: warm | matter-of-fact | playful | frustrated |
                                     #   eager | introspective | nostalgic | anxious | triumphant | venting |
                                     #   curious | vulnerable | prickly | sore | funny | ..., or your own
 tags: []                            # searchable keywords
-supersedes: []                      # slugs of nodes this corrects/overrides
-superseded_by: ""                   # set on the overridden node when a correction lands
 links: []                           # slugs of related nodes (the wiki mesh)
 source: ""                          # optional pointer to a journal / conversation / document
 edited: 2026-10-18T09:00:00Z        # optional timestamp for when the memory was edited
@@ -223,7 +221,6 @@ once-per-day consolidation schedule, not daily-log processing.
 - RAG uses the complete latest user message, plus the most recent agent chat-text output before that user message, as its query. "Agent chat text" means visible assistant prose only; exclude reasoning/thinking blocks, tool calls, and tool results. Keyword/hybrid retrieval accepts one meaningful token overlap rather than requiring every conversational word to appear in a memory. Semantic retrieval uses nearest-neighbor ranking without a fixed similarity cutoff.
 - When debug logging is enabled, the retrieval log records the query, search mode/fallback, errors, candidate/eligible/selected counts, and context size. A later `context_with_system` diagnostic verifies that the exact injected RAG block remains in the final request context.
 - In debug runs only, an empty `<pi-friend-memory></pi-friend-memory>` block is injected when retrieval selects no nodes, allowing end-to-end context-injection testing without fixture memories. Normal runs omit the block.
-- **Recency beats depth rule**: if a node's `supersedes` list is non-empty, the superseded node is demoted out of RAG entirely (or injected only with an explicit `superseded` annotation) so a correction cannot be argued with on equal footing. See §7.
 - Injection content tiers (per node):
   1. **Fresh/recent**: title + snippet (~2–4 sentences) + link.
   2. **Middle-age (volume-relative) and candidates**: title + one sentence + link.
@@ -242,7 +239,6 @@ once-per-day consolidation schedule, not daily-log processing.
 - **Volume-relative**: each node's weight decreases by a function of *how many new memories have been stored since its last use*, not elapsed clock time. Quiet weeks don't bury things.
 - `decay_weight` is recomputed once per sweep from `last_used`, which the operations that touch a node write at the moment they run — a read, a search hit, an injection that reached the prompt, an edit, a merge, a promotion. Nothing is projected from a log, and the recency pass writes neither counters nor access records.
 - Decay is also calculated once per sweep on candidate items in `staging`, using the same volume curve, weights, canonical-only volume count, and `0.05` floor as canonical nodes. Candidate RAG hits do not reset candidate decay; only sweep processing updates it. A candidate expires when its decay weight reaches `0.05`. Candidate expiry is volume-based; elapsed wall-clock time does not decay candidates.
-- Superseded nodes get `decay_weight: 0` and are excluded from RAG, but remain searchable with an explicit `superseded` marker (so the model can say "an earlier record says X, but it was corrected by Y").
 
 ## 8. Auto-capture (staging)
 
@@ -288,7 +284,7 @@ background signal and waits for cleanup before closing the semantic index.
 
 **Merging cold nodes:** when a summary node absorbs detail, relocate detail, never delete it. Preserve any pointers to full analyses verbatim.
 
-**Merges are written, not concatenated.** The model that decides what merges also does not write the result: a separate writer composes one body from all the sources at once, seeing their speakers and dates so it can attribute and supersede correctly. Tags, links, speakers and supersedes are unioned by code, and a written body that cannot be produced falls back to appending, because an append cannot lose a fact.
+**Merges are written, not concatenated.** The model that decides what merges also does not write the result: a separate writer composes one body from all the sources at once, seeing their speakers and dates so it can attribute and supersede correctly. Tags, links and speakers are unioned by code, and a written body that cannot be produced falls back to appending, because an append cannot lose a fact.
 
 Once per day, a model pass:
   1. Processes volume-relative decay on `staging` nodes using the canonical volume curve and `0.05` floor, without resetting decay for RAG hits. Candidates whose decay weight reaches `0.05` are removed before model review, logged, and included in the 25% removal total. Do not expire candidates solely because wall-clock time has passed.
@@ -366,7 +362,7 @@ Reviews recent history for patterns in Aisling's (and other friends') behavior a
 
 1. **Schema + storage + basic tools** (hard to change later; build first).
 2. **Search** (embedding + keyword, typed results over nodes and documents).
-3. **RAG injection** (positioning, tiers, supersedes handling).
+3. **RAG injection** (positioning, tiers).
 4. **Auto-capture + staging.**
 5. **Decay + daily sweep.**
 6. **Dreaming last** (delightful, not load-bearing).

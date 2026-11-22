@@ -35,8 +35,6 @@ status: active
 emotional_flavour: warm
 tags:
   - friendship
-supersedes: []
-superseded_by: ""
 links:
   - shared-ritual
 source: "journal/2026-10-18.md"
@@ -85,14 +83,9 @@ test("optional source, speaker note, and edited timestamp may be omitted", () =>
 test("every approved type and status is accepted", () => {
   for (const type of MEMORY_TYPES) {
     for (const status of MEMORY_STATUSES) {
-      const decay = status === "superseded" ? "0" : "1";
-      const supersededBy =
-        status === "superseded" ? "replacement" : '""';
       const text = VALID_FRONT_MATTER
         .replace("type: fact", `type: ${type}`)
         .replace("status: active", `status: ${status}`)
-        .replace("decay_weight: 0.75", `decay_weight: ${decay}`)
-        .replace('superseded_by: ""', `superseded_by: ${supersededBy}`)
         .concat("\nbody\n");
 
       const node = parseMemoryNode(text, "warm-memory");
@@ -239,49 +232,9 @@ test("slug lists reject invalid values, duplicates, and self-reference", () => {
       ),
     /Duplicate value/,
   );
-  assert.throws(
-    () =>
-      parseMemoryNode(
-        VALID_FRONT_MATTER.replace("supersedes: []", "supersedes:\n  - warm-memory")
-          .concat("\nbody\n"),
-        "warm-memory",
-      ),
-    /must not supersede itself/,
-  );
 });
 
-test("supersession status and decay remain consistent", () => {
-  assert.throws(
-    () =>
-      parseMemoryNode(
-        VALID_FRONT_MATTER.replace('superseded_by: ""', "superseded_by: newer")
-          .concat("\nbody\n"),
-        "warm-memory",
-      ),
-    /must have status "superseded"/,
-  );
-  assert.throws(
-    () =>
-      parseMemoryNode(
-        VALID_FRONT_MATTER.replace("status: active", "status: superseded")
-          .replace('superseded_by: ""', "superseded_by: newer")
-          .concat("\nbody\n"),
-        "warm-memory",
-      ),
-    /must have decay_weight 0/,
-  );
-
-  assert.doesNotThrow(() =>
-    parseMemoryNode(
-      VALID_FRONT_MATTER.replace("status: active", "status: superseded")
-        .replace("decay_weight: 0.75", "decay_weight: 0")
-        .concat("\nbody\n"),
-      "warm-memory",
-    ),
-  );
-});
-
-test("location rules enforce staging and superseded semantics", () => {
+test("location rules enforce staging semantics", () => {
   const active = parseMemoryNode(
     `${VALID_FRONT_MATTER}\nbody\n`,
     "warm-memory",
@@ -295,15 +248,6 @@ test("location rules enforce staging and superseded semantics", () => {
     .replace("edited: 2026-10-18T10:00:00Z\n", "")
     .concat("\nbody\n");
   const candidate = parseMemoryNode(candidateText, "warm-memory");
-  const supersededText = VALID_FRONT_MATTER.replace(
-    "status: active",
-    "status: superseded",
-  )
-    .replace('superseded_by: ""', "superseded_by: newer")
-    .replace("decay_weight: 0.75", "decay_weight: 0")
-    .concat("\nbody\n");
-  const superseded = parseMemoryNode(supersededText, "warm-memory");
-
   assert.throws(
     () =>
       validateMemoryNodeLocation(active, {
@@ -334,25 +278,10 @@ test("location rules enforce staging and superseded semantics", () => {
       }),
     /must not retain candidate status/,
   );
-  assert.throws(
-    () =>
-      validateMemoryNodeLocation(active, {
-        kind: "node",
-        relativePath: "nodes/superseded/warm-memory.md",
-      }),
-    /must have status "superseded"/,
-  );
-
   assert.doesNotThrow(() =>
     validateMemoryNodeLocation(candidate, {
       kind: "staging-candidate",
       relativePath: "staging/warm-memory.md",
-    }),
-  );
-  assert.doesNotThrow(() =>
-    validateMemoryNodeLocation(superseded, {
-      kind: "node",
-      relativePath: "nodes/superseded/warm-memory.md",
     }),
   );
 });

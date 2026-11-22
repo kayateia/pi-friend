@@ -22,7 +22,7 @@ const MERGE_TIMEOUT_MS = 30_000;
 /**
  * One memory as the merge writer sees it.
  *
- * Deliberately reduced: no tags, links, supersedes or status. The code unions
+ * Deliberately reduced: no tags, links or status. The code unions
  * those mechanically, and a writer that cannot see them cannot mangle them. The
  * date is `edited ?? created` so "which account is newer" is answerable without
  * explaining the difference between the two fields.

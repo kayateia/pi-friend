@@ -869,7 +869,6 @@ function isMemoryStatus(value: string | undefined): value is MemoryStatus {
   return (
     value === "active" ||
     value === "candidate" ||
-    value === "superseded" ||
     value === "archived"
   );
 }
