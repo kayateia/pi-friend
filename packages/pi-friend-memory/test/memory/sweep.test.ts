@@ -705,7 +705,7 @@ function makeCandidate(slug: string, type: MemoryType = "fact") {
       emotional_flavour: "neutral",
       tags: [],
       links: [],
-      source: "",
+      sources: [],
     },
   };
 }

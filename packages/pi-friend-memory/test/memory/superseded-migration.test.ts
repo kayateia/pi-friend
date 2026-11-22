@@ -50,7 +50,7 @@ tags: []
 supersedes: ${options.supersedes ?? "[]"}
 superseded_by: ${options.supersededBy ?? '""'}
 links: []
-source: ""
+sources: []
 ---
 
 ${options.body ?? `Body of ${slug}.`}

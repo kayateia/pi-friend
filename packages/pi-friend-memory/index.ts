@@ -64,6 +64,7 @@ import {
 } from "./src/memory/embedding.ts";
 import { ExternalIndexManager } from "./src/memory/external-index-manager.ts";
 import {
+  convertSourceField,
   runPendingMigrations,
   stripCandidateEditedFields,
   stripSupersededFields,
@@ -206,10 +207,14 @@ export default async function registerPiFriend(
         { names },
         (message) => reportCaptureWarning(ctx, message),
       );
+      // The record names the entry the window begins at, which is where this
+      // capture's material starts rather than the message that happened to
+      // trigger it.
       const staged = await stageCaptureDrafts(
         service,
         drafts,
         ctx.sessionManager.getSessionId(),
+        entries[0]?.id,
         createCaptureRepairer(ctx, config, (message) =>
           reportCaptureWarning(ctx, message),
         ),
@@ -755,6 +760,28 @@ async function reportMigrations(
           supersededOutcome.changed.length
         } of ${supersededOutcome.scanned} files.${movedNote}`,
         supersededOutcome.skipped.length === 0 ? "info" : "warning",
+      );
+    }
+  } catch (error) {
+    logError("memory migration", error);
+    notify(
+      `pi-friend memory migration failed: ${formatErrorChain(error)}`,
+      "error",
+    );
+    return;
+  }
+
+  // Same slot and same reason as the superseded pass: `source` is no longer a
+  // schema key, so a file still carrying it fails the strict parser and every
+  // later pass would report it as damaged.
+  try {
+    const sourceOutcome = await convertSourceField(store);
+    if (sourceOutcome !== null && sourceOutcome.changed.length > 0) {
+      notify(
+        `pi-friend memory: converted the retired \`source\` field into \`sources\` in ${
+          sourceOutcome.changed.length
+        } of ${sourceOutcome.scanned} files.`,
+        sourceOutcome.skipped.length === 0 ? "info" : "warning",
       );
     }
   } catch (error) {

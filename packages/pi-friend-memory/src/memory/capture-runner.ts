@@ -331,9 +331,10 @@ export async function stageCaptureDrafts(
   service: MemoryNodeService,
   drafts: readonly CaptureCandidateDraft[],
   sessionId: string,
+  entryId?: string,
   repair?: RepairCaptureDrafts,
 ): Promise<StageCaptureResult> {
-  const first = await stageOneByOne(service, drafts, sessionId);
+  const first = await stageOneByOne(service, drafts, sessionId, entryId);
   if (first.rejected.length === 0 || repair === undefined) {
     return first;
   }
@@ -357,7 +358,7 @@ export async function stageCaptureDrafts(
   if (repaired.length === 0) {
     return first;
   }
-  const second = await stageOneByOne(service, repaired, sessionId);
+  const second = await stageOneByOne(service, repaired, sessionId, entryId);
   return {
     stored: first.stored + second.stored,
     rejected: [...second.rejected, ...unrepairable],
@@ -374,6 +375,7 @@ async function stageOneByOne(
   service: MemoryNodeService,
   drafts: readonly CaptureCandidateDraft[],
   sessionId: string,
+  entryId?: string,
 ): Promise<StageCaptureResult> {
   let stored = 0;
   const rejected: RejectedDraft[] = [];
@@ -389,7 +391,11 @@ async function stageOneByOne(
         emotionalFlavour: draft.emotionalFlavour,
         tags: draft.tags,
         links: draft.links,
-        source: draft.source ?? `session:${sessionId}`,
+        origin: {
+          action: "add",
+          sessionId,
+          ...(entryId === undefined ? {} : { entryId }),
+        },
       });
       stored += 1;
     } catch (error) {

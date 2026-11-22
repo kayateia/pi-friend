@@ -13,7 +13,12 @@ import {
   logError,
   logNotice,
 } from "../debug/log.ts";
-import type { MemorySpeaker, MemoryType, ParsedMemoryNode } from "./schema.ts";
+import type {
+  MemorySource,
+  MemorySpeaker,
+  MemoryType,
+  ParsedMemoryNode,
+} from "./schema.ts";
 import {
   isQuarantinedMemoryType,
   parseMemoryNode,
@@ -77,7 +82,8 @@ export interface MemoryAddInput {
   emotionalFlavour?: string;
   tags?: string[];
   links?: string[];
-  source?: string;
+  /** Origin recorded for this creation, appended to the node's `sources`. */
+  origin?: MemorySource;
 }
 
 /** Editable fields on an existing canonical memory node. */
@@ -90,7 +96,12 @@ export interface MemoryEditInput {
   emotionalFlavour?: string;
   tags?: string[];
   links?: string[];
-  source?: string;
+  /**
+   * Origin recorded when this edit changes the memory's substance. A
+   * metadata-only edit writes no record: nothing about where the memory came
+   * from has changed.
+   */
+  origin?: MemorySource;
   reason?: string;
 }
 
@@ -135,6 +146,8 @@ export interface MergeOptions {
   body?: string;
   /** Conflict note used when the writer does not supply one. */
   conflict?: string;
+  /** Origin recorded on the destination, one per merge. */
+  origin?: MemorySource;
   reportWarning?: (message: string) => void;
 }
 
@@ -168,7 +181,8 @@ export interface MemoryDreamInput {
   narrative: string;
   nodeSlugs: string[];
   agents?: string[];
-  source?: string;
+  /** Origin recorded for the dream, normally its sweep run. */
+  origin?: MemorySource;
 }
 
 /**
@@ -348,7 +362,7 @@ export class MemoryNodeService {
           emotional_flavour: "dreamlike",
           tags: ["dream"],
           links: slugs,
-          source: input.source ?? `dream; sources: ${slugs.join(", ")}`,
+          sources: input.origin === undefined ? [] : [{ ...input.origin }],
         },
       };
       await this.repository.write(dream, "canonical");
@@ -642,7 +656,7 @@ export class MemoryNodeService {
           emotional_flavour: input.emotionalFlavour ?? "neutral",
           tags: input.tags ?? [],
           links: input.links ?? [],
-          source: input.source ?? "",
+          sources: input.origin === undefined ? [] : [{ ...input.origin }],
         },
       };
 
@@ -688,7 +702,7 @@ export class MemoryNodeService {
           emotional_flavour: input.emotionalFlavour ?? "neutral",
           tags: input.tags ?? [],
           links: input.links ?? [],
-          source: input.source ?? "",
+          sources: input.origin === undefined ? [] : [{ ...input.origin }],
         },
       };
 
@@ -890,6 +904,12 @@ export class MemoryNodeService {
 
       const merged = cloneNode(target);
       merged.body = rewrite?.body ?? appendMechanically(target, sourceNodes);
+      if (options.origin !== undefined) {
+        merged.frontMatter.sources = [
+          ...merged.frontMatter.sources,
+          { ...options.origin },
+        ];
+      }
       merged.frontMatter.edited = now;
       // A merge is an edit, and an edit is a use: the node was opened, reasoned
       // about and rewritten. It does not count as a *read*, so `use_count` is
@@ -1007,7 +1027,6 @@ export class MemoryNodeService {
         input.emotionalFlavour,
         input.tags,
         input.links,
-        input.source,
       ].some((value) => value !== undefined);
       if (!hasEdit) {
         throw new MemoryServiceError("No memory fields were supplied to edit.");
@@ -1029,7 +1048,6 @@ export class MemoryNodeService {
       }
       if (input.tags !== undefined) frontMatter.tags = input.tags;
       if (input.links !== undefined) frontMatter.links = input.links;
-      if (input.source !== undefined) frontMatter.source = input.source;
 
       // The three fields that change what the memory claims. Each is compared
       // rather than merely supplied: sending back the value the node already
@@ -1062,6 +1080,9 @@ export class MemoryNodeService {
 
       if (substantive) {
         frontMatter.edited = timestamp;
+        if (input.origin !== undefined) {
+          frontMatter.sources = [...frontMatter.sources, { ...input.origin }];
+        }
       }
       frontMatter.last_used = timestamp;
       const updated: ParsedMemoryNode = {
@@ -1640,6 +1661,7 @@ function cloneNode(node: ParsedMemoryNode): ParsedMemoryNode {
       agents: [...node.frontMatter.agents],
       tags: [...node.frontMatter.tags],
       links: [...node.frontMatter.links],
+      sources: node.frontMatter.sources.map((source) => ({ ...source })),
     },
     body: node.body,
   };
