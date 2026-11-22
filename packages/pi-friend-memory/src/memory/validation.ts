@@ -62,6 +62,71 @@ export async function validateMemoryFiles(
   return { scanned, failures };
 }
 
+/**
+ * Reports links that name no canonical memory, or that name their own node.
+ *
+ * Kept separate from {@link validateMemoryFiles} on purpose. A dangling link is
+ * well-formed — it parses, it round-trips, and the schema has nothing to say
+ * about it — while the migration that retires a backup decides "clean" by
+ * whether every file parses. Folding links into that check would let a broken
+ * pointer block a completed migration from tidying up after itself.
+ *
+ * Only the live areas are checked: a history entry is a snapshot of a node as
+ * it was, and the memories it pointed at then may legitimately be gone.
+ */
+export async function validateLinks(
+  store: MemoryStore,
+): Promise<MemoryValidationFailure[]> {
+  const canonical = new Set<string>();
+  for (const relativePath of await listStoredMemoryFiles(store, "nodes")) {
+    canonical.add(slugForStoredPath(relativePath));
+  }
+
+  const failures: MemoryValidationFailure[] = [];
+  for (const directory of ["nodes", "staging"] as const) {
+    for (const relativePath of await listStoredMemoryFiles(store, directory)) {
+      let node: ParsedMemoryNode;
+      try {
+        node = parseStoredMemoryFile(
+          await store.readTextFile(relativePath),
+          relativePath,
+          directory,
+        );
+      } catch {
+        // A file the schema already refuses is reported by the parser check;
+        // listing it twice would make one defect look like two.
+        continue;
+      }
+      for (const link of node.frontMatter.links) {
+        if (link === node.slug) {
+          failures.push({
+            path: relativePath,
+            error: `Links to itself: "${link}".`,
+          });
+        } else if (!canonical.has(link)) {
+          failures.push({
+            path: relativePath,
+            error: `Dangling link "${link}": no canonical memory has that slug.`,
+          });
+        }
+      }
+    }
+  }
+  return failures;
+}
+
+/**
+ * Everything `/memory-validate` checks: the schema, and the links those nodes
+ * claim.
+ */
+export async function validateMemory(
+  store: MemoryStore,
+): Promise<MemoryValidationReport> {
+  const report = await validateMemoryFiles(store);
+  const links = await validateLinks(store);
+  return { scanned: report.scanned, failures: [...report.failures, ...links] };
+}
+
 /** Lists every Markdown file under one stored-memory area, recursively. */
 export async function listStoredMemoryFiles(
   store: MemoryStore,

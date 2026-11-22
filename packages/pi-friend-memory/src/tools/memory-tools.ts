@@ -45,10 +45,7 @@ import {
   formatRetrievalExplanation,
 } from "../memory/search.ts";
 import { resolveDateWindow } from "../memory/date-filter.ts";
-import {
-  formatValidationReport,
-  validateMemoryFiles,
-} from "../memory/validation.ts";
+import { formatValidationReport, validateMemory } from "../memory/validation.ts";
 import { DEFAULT_MEMORY_TOOL_PREFIX } from "../memory/config.ts";
 
 const MEMORY_AREAS = [
@@ -271,7 +268,7 @@ export function registerMemoryCommands(
   // runs, and a model reciting a report it already holds is slower and billable.
   pi.registerCommand(`${toolPrefix}memory-validate`, {
     description:
-      "Check every stored memory and history version for schema errors, and name each one that fails",
+      "Check every stored memory and history version for schema errors, and the live memories for links that name nothing, naming each one that fails",
     handler: async (_args, ctx) => {
       const service = getService();
       if (!service) {
@@ -282,7 +279,7 @@ export function registerMemoryCommands(
         return;
       }
 
-      const report = await validateMemoryFiles(service.store);
+      const report = await validateMemory(service.store);
       ctx.ui.notify(
         formatValidationReport(report),
         report.failures.length === 0 ? "info" : "warning",
@@ -405,7 +402,7 @@ export function registerMemoryTools(
       links: Type.Optional(
         Type.Array(Type.String(), {
           description:
-            "JSON array of other memories' slugs, indicating memories related to this one.",
+            "JSON array of other memories' slugs, indicating memories related to this one. Each must name an existing memory.",
         }),
       ),
     }),
@@ -762,7 +759,7 @@ export function registerMemoryTools(
       links: Type.Optional(
         Type.Array(Type.String(), {
           description:
-            "JSON array of other memories' slugs, indicating memories related to this one.",
+            "JSON array of other memories' slugs, indicating memories related to this one. Each must name an existing memory.",
         }),
       ),
       reason: Type.Optional(

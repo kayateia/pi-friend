@@ -90,6 +90,17 @@ test("promotion merges semantic near-duplicates and preserves links", async () =
       },
     );
     try {
+      // Link targets have to exist now that the service checks them; these are
+      // ordinary memories whose only job is to be pointed at.
+      for (const slug of ["existing-link", "candidate-link"]) {
+        await service.add({
+          slug,
+          title: slug,
+          type: "fact",
+          body: `A memory named ${slug}.`,
+          speaker: [],
+        });
+      }
       const canonical = await service.add({
         title: "Warm Kitchen",
         type: "fact",
