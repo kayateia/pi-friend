@@ -38,7 +38,6 @@ async function makeMemory(service: MemoryNodeService): Promise<string> {
     speaker: [{ name: "Iri", confident: true }],
     tags: ["kitchen"],
     links: [],
-    source: "session:start",
   });
   return node.slug;
 }
@@ -108,7 +107,6 @@ test("metadata edits move last_used and leave edited alone", async () => {
     { links: [] },
     { emotionalFlavour: "playful" },
     { agents: ["Airi"] },
-    { source: "session:somewhere-else" },
   ];
 
   for (const input of metadata) {
@@ -162,6 +160,71 @@ test("a later metadata edit does not erase an earlier edited date", async () => 
       afterRetag.frontMatter.last_used,
       "2026-11-17T09:00:00.000Z",
     );
+  });
+});
+
+test("the origin of a change is recorded when the change is", async () => {
+  await withTempDir(async (agentDir) => {
+    const clock = { now: START };
+    const service = await makeService(agentDir, clock);
+    const node = await service.add({
+      title: "Kettle",
+      type: "fact",
+      body: "The kettle is blue.",
+      speaker: [],
+      origin: { action: "add", sessionId: "s1", entryId: "e1" },
+    });
+    assert.deepEqual(node.frontMatter.sources, [
+      { action: "add", sessionId: "s1", entryId: "e1" },
+    ]);
+
+    clock.now = LATER;
+    // A metadata edit writes no record: nothing about where the memory came
+    // from has changed.
+    const retagged = await service.edit(node.slug, {
+      tags: ["kitchen"],
+      origin: { action: "edit", sessionId: "s1", entryId: "e2" },
+    });
+    assert.deepEqual(retagged.frontMatter.sources, [
+      { action: "add", sessionId: "s1", entryId: "e1" },
+    ]);
+
+    const edited = await service.edit(node.slug, {
+      body: "The kettle is green.",
+      origin: { action: "edit", sessionId: "s1", entryId: "e3" },
+    });
+    assert.deepEqual(edited.frontMatter.sources, [
+      { action: "add", sessionId: "s1", entryId: "e1" },
+      { action: "edit", sessionId: "s1", entryId: "e3" },
+    ]);
+  });
+});
+
+test("a merge records its run on the destination", async () => {
+  await withTempDir(async (agentDir) => {
+    const clock = { now: START };
+    const service = await makeService(agentDir, clock);
+    const target = await service.add({
+      title: "Kettle",
+      type: "fact",
+      body: "The kettle is blue.",
+      speaker: [],
+    });
+    const other = await service.add({
+      title: "Kettle handle",
+      type: "fact",
+      body: "The handle is chipped.",
+      speaker: [],
+    });
+
+    clock.now = LATER;
+    const merged = await service.mergeCandidates(target.slug, [other.slug], {
+      origin: { action: "merge", sweepRunId: "run-7" },
+    });
+
+    assert.deepEqual(merged.node.frontMatter.sources, [
+      { action: "merge", sweepRunId: "run-7" },
+    ]);
   });
 });
 

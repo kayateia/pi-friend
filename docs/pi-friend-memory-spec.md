@@ -145,10 +145,25 @@ emotional_flavour: warm              # free tag, not an enum: warm | matter-of-f
                                     #   curious | vulnerable | prickly | sore | funny | ..., or your own
 tags: []                            # searchable keywords
 links: []                           # slugs of related nodes (the wiki mesh)
-source: ""                          # optional pointer to a journal / conversation / document
+sources: []                         # where each change to this memory came from; see below
 edited: 2026-10-18T09:00:00Z        # optional timestamp for when the memory was edited
 ---
 ```
+
+`sources` is an append-only record of where the memory came from, one entry per operation that changed it:
+
+```yaml
+sources:
+  - action: add       # add | edit | merge
+    sessionId: 01a1…  # the session the change happened in
+    entryId: a1b2c3d4 # the user message that began the run
+  - action: merge
+    sweepRunId: 2026-10-18T09-00-00-000Z   # the alternative to a session, for sweep work
+  - action: add
+    other: conversation 2026-10-02          # only ever written by the migration
+```
+
+A record is written by `memory_add`, by a merge on its destination, and by `memory_edit` only when the edit changes `title`, `speaker` or `body` — the same rule that decides whether `edited` moves. Promotion and restore carry the records they already have. Nothing prints them yet; `memory_read` shows the node whole.
 
 Body: concise, single-topic prose. May include short verbatim quotes (with speaker attributed). Ends with a `see also:` section listing links plus their one-line keywords, for the "very bottom of RAG" tier.
 

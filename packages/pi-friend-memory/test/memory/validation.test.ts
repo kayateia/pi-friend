@@ -30,7 +30,7 @@ status: active
 emotional_flavour: ${flavour}
 tags: []
 links: []
-source: ""
+sources: []
 ---
 
 Body of ${slug}.
@@ -56,7 +56,7 @@ test("every stored file is checked, and every failure is named", async () => {
     // History keeps a node as it was, so a history field is allowed there.
     await store.writeTextFile(
       "history/edited/good/2026-10-02T00:00:00.000Z.md",
-      node("good").replace('source: ""', 'source: ""\nhistory_reason: "tidy"'),
+      node("good").replace("sources: []", 'sources: []\nhistory_reason: "tidy"'),
     );
     await store.writeTextFile(
       "history/deleted/old.md",

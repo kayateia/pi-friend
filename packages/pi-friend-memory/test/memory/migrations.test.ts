@@ -35,7 +35,7 @@ status: active
 emotional_flavor: ${flavour}
 tags: []
 links: []
-source: ""
+sources: []
 ---
 
 Body of ${slug}.
@@ -57,8 +57,8 @@ test("the flavour rename rewrites live memories, candidates and history", async 
     await store.writeTextFile(
       "history/edited/kitchen/2026-10-02T00:00:00.000Z.md",
       `${legacyNode("kitchen").replace(
-        "source: \"\"",
-        "source: \"\"\nhistory_reason: \"tidy up\"",
+        "sources: []",
+        "sources: []\nhistory_reason: \"tidy up\"",
       )}`,
     );
 

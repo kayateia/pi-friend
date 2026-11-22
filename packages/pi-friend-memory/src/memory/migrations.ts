@@ -29,6 +29,9 @@ export const MIGRATIONS_BACKUP_DIRNAME = "backups";
 /** Identifier of the `emotional_flavor` → `emotional_flavour` rename. */
 export const FLAVOUR_MIGRATION_ID = "emotional-flavour-rename";
 
+/** Identifier of the pass that turns the single `source` into `sources`. */
+export const SOURCE_FIELD_MIGRATION_ID = "source-field-to-sources";
+
 /** Identifier of the pass that removes the superseded concept. */
 export const SUPERSEDED_MIGRATION_ID = "superseded-fields-removed";
 
@@ -625,6 +628,156 @@ export function migrateSupersededFrontMatter(
   }
 
   return changed ? [...kept, ...lines.slice(closing)].join("\n") : undefined;
+}
+
+/**
+ * Converts the retired free-text `source` into the `sources` array.
+ *
+ * The old field held one string and the new one holds records, so the mapping
+ * is lossy by construction: a `session:<id>` becomes the session, a
+ * `sweep:<id>` a sweep run, and anything else is kept verbatim under `other`
+ * rather than dropped. A migration that exists to preserve provenance must not
+ * be the operation that throws it away, even when all it can preserve is a
+ * sentence.
+ */
+export async function convertSourceField(
+  store: MemoryStore,
+  agentDir: string = getAgentDir(),
+  options: { dryRun?: boolean; force?: boolean } = {},
+): Promise<MigrationOutcome | null> {
+  const statePath = migrationsPath(agentDir);
+  const state = await readMigrationState(statePath);
+  if (
+    state.applied.includes(SOURCE_FIELD_MIGRATION_ID) &&
+    options.force !== true
+  ) {
+    return null;
+  }
+
+  const scan = await scanSourceField(store);
+  if (options.dryRun === true) {
+    return {
+      status: "dry-run",
+      scanned: scan.scanned,
+      changed: scan.pending.map((file) => file.path),
+      skipped: scan.skipped,
+    };
+  }
+
+  for (const file of scan.pending) {
+    await store.writeTextFile(file.path, file.rewritten);
+  }
+
+  const fresh = await readMigrationState(statePath);
+  fresh.applied = [...new Set([...fresh.applied, SOURCE_FIELD_MIGRATION_ID])];
+  await writeMigrationState(statePath, fresh);
+
+  return {
+    status: "applied",
+    scanned: scan.scanned,
+    changed: scan.pending.map((file) => file.path),
+    skipped: scan.skipped,
+  };
+}
+
+/** Walks every stored area for files that still carry `source`. */
+async function scanSourceField(store: MemoryStore): Promise<StoreScan> {
+  let scanned = 0;
+  const pending: PendingRewrite[] = [];
+  const skipped: Array<{ path: string; error: string }> = [];
+
+  for (const directory of STORED_MEMORY_DIRECTORIES) {
+    for (const relativePath of await listStoredMemoryFiles(store, directory)) {
+      scanned += 1;
+      let text: string;
+      try {
+        text = await store.readTextFile(relativePath);
+      } catch (error) {
+        skipped.push({ path: relativePath, error: formatError(error) });
+        continue;
+      }
+
+      const rewritten = convertSourceFrontMatter(text);
+      if (rewritten === undefined) {
+        continue;
+      }
+      try {
+        parseStoredMemoryFile(rewritten, relativePath, directory);
+      } catch (error) {
+        skipped.push({ path: relativePath, error: formatError(error) });
+        continue;
+      }
+      pending.push({ path: relativePath, rewritten });
+    }
+  }
+
+  return { scanned, pending, skipped };
+}
+
+/**
+ * Replaces the `source:` line in one file's opening front matter.
+ *
+ * Only an unindented key is touched, so a body line is never rewritten. The
+ * emitted block is plain YAML with JSON-quoted scalars, which keeps a value
+ * containing a colon, a quote or a leading dash from changing the structure.
+ */
+export function convertSourceFrontMatter(text: string): string | undefined {
+  const lines = text.split("\n");
+  if (lines[0]?.trim() !== "---") {
+    return undefined;
+  }
+  const closing = lines.findIndex(
+    (line, position) => position > 0 && line.trim() === "---",
+  );
+  if (closing < 0) {
+    return undefined;
+  }
+
+  const head = lines.slice(0, closing);
+  const index = head.findIndex((line) => line.startsWith("source:"));
+  const line = index < 0 ? undefined : head[index];
+  if (index < 0 || line === undefined) {
+    return undefined;
+  }
+
+  const value = unquoteYamlScalar(line.slice("source:".length).trim());
+  const next = [...head.slice(0, index), ...sourceLines(value), ...head.slice(index + 1)];
+  return [...next, ...lines.slice(closing)].join("\n");
+}
+
+/** The YAML block for one legacy value, or an empty array. */
+function sourceLines(value: string): string[] {
+  if (value === "") {
+    return ["sources: []"];
+  }
+  const session = /^session:(.+)$/u.exec(value);
+  const sweep = /^sweep:(.+)$/u.exec(value);
+  const record =
+    session !== null
+      ? { action: "add", sessionId: session[1]!.trim() }
+      : sweep !== null
+        ? { action: "add", sweepRunId: sweep[1]!.trim() }
+        : { action: "add", other: value };
+
+  return [
+    "sources:",
+    `  - action: ${JSON.stringify(record.action)}`,
+    ...Object.entries(record)
+      .filter(([key]) => key !== "action")
+      .map(([key, entry]) => `    ${key}: ${JSON.stringify(entry)}`),
+  ];
+}
+
+/** Strips matching single or double quotes from a YAML scalar. */
+function unquoteYamlScalar(value: string): string {
+  if (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return value.slice(1, -1);
+    }
+  }
+  return value;
 }
 
 async function readMigrationState(statePath: string): Promise<MigrationState> {

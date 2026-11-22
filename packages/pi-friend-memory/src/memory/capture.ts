@@ -44,7 +44,6 @@ export interface CaptureCandidateDraft {
   emotionalFlavour?: string;
   tags?: string[];
   links?: string[];
-  source?: string;
 }
 
 /**
@@ -632,9 +631,6 @@ function parseCandidate(
         }),
     ...(tags === undefined ? {} : { tags }),
     ...(links === undefined ? {} : { links }),
-    ...(value.source === undefined
-      ? {}
-      : { source: requireString(value.source, "source") }),
   };
 }
 

@@ -68,7 +68,7 @@ test("dream creation stores quarantined provenance and links", async () => {
       narrative: "I sat between two memories and let them speak.",
       nodeSlugs: [first.slug, second.slug],
       agents: ["test-model"],
-      source: "sweep:test",
+      origin: { action: "add", sweepRunId: "test" },
     });
 
     assert.equal(dream.frontMatter.type, "dream");
@@ -77,7 +77,9 @@ test("dream creation stores quarantined provenance and links", async () => {
       second.slug,
     ]);
     assert.equal(dream.frontMatter.status, "active");
-    assert.match(dream.frontMatter.source, /sweep:test/);
+    assert.deepEqual(dream.frontMatter.sources, [
+      { action: "add", sweepRunId: "test" },
+    ]);
     assert.match(dream.body, /Dream synthesized from:/);
     assert.match(dream.body, /see also:/);
   });
@@ -101,7 +103,7 @@ function makeNode(slug: string, links: string[]) {
       emotional_flavour: "neutral",
       tags: [],
       links,
-      source: "",
+      sources: [],
     },
   };
 }

@@ -299,7 +299,7 @@ async function runDailySweepLocked(
           options.signal?.throwIfAborted();
           const dream = await service.createDream({
             ...draft,
-            source: `sweep:${runId}`,
+            origin: { action: "add", sweepRunId: runId },
           });
           dreamSlug = dream.slug;
         }
