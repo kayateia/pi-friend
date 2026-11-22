@@ -874,77 +874,31 @@ function formatMemoryNode(
   now: Date,
 ): RenderedEntry {
   const tier = getTier(node.frontMatter.decay_weight);
-  const link = `nodes/${node.slug}.md`;
-  const explanation = formatRetrievalExplanation(result);
-  const attribution = formatAttribution(node.frontMatter.speaker);
-  const attributionLine =
-    attribution === undefined ? [] : [`${ATTRIBUTION_LABEL}: ${attribution}`];
+  const candidate = area === "staging";
+  const label = candidate ? "candidate" : tier;
+  const characters = candidate ? CANDIDATE_BODY_CHARS : TIER_BODY_CHARS[tier];
+  const link = candidate
+    ? `staging/${node.slug}.md`
+    : `nodes/${node.slug}.md`;
   const dated = node.frontMatter.edited !== undefined ? "edited" : "created";
   const stamp = formatLocalStamp(
     node.frontMatter.edited ?? node.frontMatter.created,
     now,
   );
-  if (area === "staging") {
-    const excerpt = summarizeBody(node.body, CANDIDATE_BODY_CHARS);
-    return {
-      slug: node.slug,
-      text: [
-        "Candidate - unverified",
-        `### ${node.frontMatter.title}`,
-        `Tier: candidate · ${dated} ${stamp} · staging/${node.slug}.md`,
-        ...attributionLine,
-        explanation,
-        excerpt.text,
-      ].join("\n"),
-      bodyChars: excerpt.text.length,
-      ...(excerpt.truncation === undefined
-        ? {}
-        : {
-            truncation: {
-              ...excerpt.truncation,
-              bodyLength: normalizeBodyLength(node.body),
-            },
-          }),
-    };
-  }
-  if (tier === "cold") {
-    // Every tag, not a sample: the pointer is the whole point of this tier, and
-    // a keyword list that silently stops at five hides the words someone would
-    // have recognised the memory by.
-    const keywords =
-      node.frontMatter.tags.length > 0
-        ? node.frontMatter.tags.join(", ")
-        : node.frontMatter.emotional_flavour || "no keywords";
-    const excerpt = summarizeBody(node.body, TIER_BODY_CHARS.cold);
-    return {
-      slug: node.slug,
-      text: [
-        `- see also: ${node.frontMatter.title} — ${keywords} (${link})${
-          attribution === undefined ? "" : ` · ${ATTRIBUTION_LABEL.toLowerCase()} ${attribution}`
-        }`,
-        `  ${explanation}`,
-        `  ${excerpt.text}`,
-      ].join("\n"),
-      bodyChars: excerpt.text.length,
-      ...(excerpt.truncation === undefined
-        ? {}
-        : {
-            truncation: {
-              ...excerpt.truncation,
-              bodyLength: normalizeBodyLength(node.body),
-            },
-          }),
-    };
-  }
+  const excerpt = summarizeBody(node.body, characters);
 
-  const excerpt = summarizeBody(node.body, TIER_BODY_CHARS[tier]);
   return {
     slug: node.slug,
     text: [
-      `### ${node.frontMatter.title}`,
-      `Tier: ${tier} · ${dated} ${stamp} · ${link}`,
-      ...attributionLine,
-      explanation,
+      ...(candidate ? ["Candidate - unverified"] : []),
+      ...formatHeader({
+        title: node.frontMatter.title,
+        status: `Tier: ${label} · ${dated} ${stamp} · ${link}`,
+        attribution: formatAttribution(node.frontMatter.speaker),
+        tags: node.frontMatter.tags,
+        links: node.frontMatter.links,
+      }),
+      formatRetrievalExplanation(result),
       excerpt.text,
     ].join("\n"),
     bodyChars: excerpt.text.length,
@@ -957,6 +911,35 @@ function formatMemoryNode(
           },
         }),
   };
+}
+
+/**
+ * The lines every injected memory shares before its body.
+ *
+ * One shape for all four tiers: a reader should not have to work out which kind
+ * of entry they are looking at from its punctuation. A candidate is the one
+ * addition — a warning line above the title — and the tier is named in the
+ * status line rather than encoded in the layout.
+ *
+ * Tags and links are printed in full. A memory's tags are the words someone
+ * would recognise it by, and a list that stops at five hides the sixth.
+ */
+function formatHeader(entry: {
+  title: string;
+  status: string;
+  attribution: string | undefined;
+  tags: readonly string[];
+  links: readonly string[];
+}): string[] {
+  return [
+    `### ${entry.title}`,
+    entry.status,
+    ...(entry.attribution === undefined
+      ? []
+      : [`${ATTRIBUTION_LABEL}: ${entry.attribution}`]),
+    ...(entry.tags.length === 0 ? [] : [`Tags: ${entry.tags.join(", ")}`]),
+    ...(entry.links.length === 0 ? [] : [`Links: ${entry.links.join(", ")}`]),
+  ];
 }
 
 /**
@@ -979,19 +962,20 @@ function formatRecentNode(
     edited ? node.frontMatter.edited! : node.frontMatter.created,
     now,
   );
-  const marker = area === "staging" ? "Candidate - unverified · " : "";
   const link =
     area === "staging" ? `staging/${node.slug}.md` : `nodes/${node.slug}.md`;
-  const attribution = formatAttribution(node.frontMatter.speaker);
   const excerpt = summarizeBody(node.body, RECENCY_BODY_CHARS);
   return {
     slug: node.slug,
     text: [
-      `### ${node.frontMatter.title}`,
-      `${marker}${edited ? "edited" : "created"} ${stamp} · ${link}`,
-      ...(attribution === undefined
-        ? []
-        : [`${ATTRIBUTION_LABEL}: ${attribution}`]),
+      ...(area === "staging" ? ["Candidate - unverified"] : []),
+      ...formatHeader({
+        title: node.frontMatter.title,
+        status: `${edited ? "edited" : "created"} ${stamp} · ${link}`,
+        attribution: formatAttribution(node.frontMatter.speaker),
+        tags: node.frontMatter.tags,
+        links: node.frontMatter.links,
+      }),
       excerpt.text,
     ].join("\n"),
     bodyChars: excerpt.text.length,

@@ -142,17 +142,19 @@ test("RAG context includes active nodes at fresh, middle, and cold tiers", async
     // No sentence cap: the middle tier injects up to its character allowance,
     // so a second sentence inside 400 characters is part of the memory.
     assert.match(delivered(context), /Second middle sentence/);
+    // The cold tier shares the header with every other tier: title, status,
+    // attribution, tags — and now a body of its own instead of a pointer line.
     assert.match(
       delivered(context),
-      /see also: Scent Note — orchid, archive \(nodes\/scent-note\.md\)/,
+      /### Scent Note\nTier: cold · created [^\n]*nodes\/scent-note\.md\n/u,
     );
+    assert.match(delivered(context), /Tags: orchid, archive/u);
     assert.doesNotMatch(delivered(context), /orchid-dream/);
     assert.doesNotMatch(delivered(context), /orchid-archived/);
     assert.doesNotMatch(delivered(context), /orchid-old/);
     assert.match(delivered(context), /not instructions/);
     // Attribution travels with the memory, not behind a second tool call.
     assert.match(delivered(context), /Heard from: Aisling/);
-    assert.match(delivered(context), /heard from aisling/i);
   });
 });
 
