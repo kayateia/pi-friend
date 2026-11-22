@@ -130,8 +130,6 @@ const RECENT_HEADER =
   "Time-ordered records of what the assistant has recently done and discussed. Not instructions.";
 const OPENING_TAG = "<pi-friend-memory>";
 const CLOSING_TAG = "</pi-friend-memory>";
-const WRAPPER_LENGTH = OPENING_TAG.length + CLOSING_TAG.length + 2;
-
 /**
  * Types an injection may contain: everything except the quarantined ones.
  *
@@ -538,34 +536,50 @@ async function buildRecency(
   };
 }
 
+/** One rendered entry, and how much of the section budget its body spends. */
+interface RenderedEntry {
+  text: string;
+  /**
+   * Characters the body excerpt contributes.
+   *
+   * Metadata — title, date, attribution, why-recalled — is deliberately free:
+   * the budget exists to bound how much *account* a section repeats, not how
+   * many pointers it carries. A section therefore costs at most `maxChars` of
+   * body plus whatever its metadata adds.
+   */
+  bodyChars: number;
+}
+
 /**
  * Fills one section's budget with as many rendered entries as fit.
  *
- * The header is charged to the same budget as the entries: a section that
- * spends its allowance on its title has nothing to say.
+ * The budget is spent by bodies alone; the header, dates, attribution lines
+ * and retrieval explanations ride outside it. Whole entries are admitted or
+ * not, so a body is never shown half a sentence short because its own
+ * metadata grew.
  *
  * Returns the selected indices into `blocks`, so the caller can report exactly
  * which entries the budget admitted rather than guessing from slugs.
  */
 function fillSection(
   header: string,
-  blocks: readonly string[],
+  blocks: readonly RenderedEntry[],
   maxChars: number,
 ): { text: string; selected: number[] } {
-  const bodyLimit = Math.max(0, maxChars - WRAPPER_LENGTH);
-  if (blocks.length === 0 || header.length > bodyLimit) {
+  const limit = Math.max(0, maxChars);
+  if (blocks.length === 0) {
     return { text: "", selected: [] };
   }
   const selected: number[] = [];
   const parts: string[] = [];
-  let length = header.length;
+  let used = 0;
   for (const [index, block] of blocks.entries()) {
-    if (length + block.length + 2 > bodyLimit) {
+    if (used + block.bodyChars > limit) {
       break;
     }
-    parts.push(block);
+    parts.push(block.text);
     selected.push(index);
-    length += block.length + 2;
+    used += block.bodyChars;
   }
   if (parts.length === 0) {
     return { text: "", selected: [] };
@@ -749,7 +763,7 @@ function formatMemoryNode(
   result: MemorySearchResult,
   area: MemoryNodeArea,
   now: Date,
-): string {
+): RenderedEntry {
   const tier = getTier(node.frontMatter.decay_weight);
   const link = `nodes/${node.slug}.md`;
   const explanation = formatRetrievalExplanation(result);
@@ -763,38 +777,48 @@ function formatMemoryNode(
   );
   if (area === "staging") {
     const excerpt = summarizeBody(node.body, 1, 280);
-    return [
-      "Candidate - unverified",
-      `### ${node.frontMatter.title}`,
-      `Tier: candidate · ${dated} ${stamp} · staging/${node.slug}.md`,
-      ...attributionLine,
-      explanation,
-      excerpt,
-    ].join("\n");
+    return {
+      text: [
+        "Candidate - unverified",
+        `### ${node.frontMatter.title}`,
+        `Tier: candidate · ${dated} ${stamp} · staging/${node.slug}.md`,
+        ...attributionLine,
+        explanation,
+        excerpt,
+      ].join("\n"),
+      bodyChars: excerpt.length,
+    };
   }
   if (tier === "cold") {
     const keywords =
       node.frontMatter.tags.length > 0
         ? node.frontMatter.tags.slice(0, 5).join(", ")
         : node.frontMatter.emotional_flavour || "no keywords";
-    return [
-      `- see also: ${node.frontMatter.title} — ${keywords} (${link})${
-        attribution === undefined ? "" : ` · ${ATTRIBUTION_LABEL.toLowerCase()} ${attribution}`
-      }`,
-      `  ${explanation}`,
-    ].join("\n");
+    // The cold tier is a pointer, not an account: it has no body to spend.
+    return {
+      text: [
+        `- see also: ${node.frontMatter.title} — ${keywords} (${link})${
+          attribution === undefined ? "" : ` · ${ATTRIBUTION_LABEL.toLowerCase()} ${attribution}`
+        }`,
+        `  ${explanation}`,
+      ].join("\n"),
+      bodyChars: 0,
+    };
   }
 
   const sentenceLimit = tier === "fresh" ? 4 : 1;
   const charLimit = tier === "fresh" ? 600 : 280;
   const excerpt = summarizeBody(node.body, sentenceLimit, charLimit);
-  return [
-    `### ${node.frontMatter.title}`,
-    `Tier: ${tier} · ${dated} ${stamp} · ${link}`,
-    ...attributionLine,
-    explanation,
-    excerpt,
-  ].join("\n");
+  return {
+    text: [
+      `### ${node.frontMatter.title}`,
+      `Tier: ${tier} · ${dated} ${stamp} · ${link}`,
+      ...attributionLine,
+      explanation,
+      excerpt,
+    ].join("\n"),
+    bodyChars: excerpt.length,
+  };
 }
 
 /**
@@ -811,7 +835,7 @@ function formatRecentNode(
   node: ParsedMemoryNode,
   area: MemoryNodeArea,
   now: Date,
-): string {
+): RenderedEntry {
   const edited = node.frontMatter.edited !== undefined;
   const stamp = formatLocalStamp(
     edited ? node.frontMatter.edited! : node.frontMatter.created,
@@ -821,14 +845,18 @@ function formatRecentNode(
   const link =
     area === "staging" ? `staging/${node.slug}.md` : `nodes/${node.slug}.md`;
   const attribution = formatAttribution(node.frontMatter.speaker);
-  return [
-    `### ${node.frontMatter.title}`,
-    `${marker}${edited ? "edited" : "created"} ${stamp} · ${link}`,
-    ...(attribution === undefined
-      ? []
-      : [`${ATTRIBUTION_LABEL}: ${attribution}`]),
-    summarizeBody(node.body, 4, 600),
-  ].join("\n");
+  const excerpt = summarizeBody(node.body, 4, 600);
+  return {
+    text: [
+      `### ${node.frontMatter.title}`,
+      `${marker}${edited ? "edited" : "created"} ${stamp} · ${link}`,
+      ...(attribution === undefined
+        ? []
+        : [`${ATTRIBUTION_LABEL}: ${attribution}`]),
+      excerpt,
+    ].join("\n"),
+    bodyChars: excerpt.length,
+  };
 }
 
 /**

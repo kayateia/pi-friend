@@ -175,7 +175,10 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
       ...defaultRagInjectionConfig(),
       mode: "hybrid" as const,
       limit: 4,
-      maxChars: 900,
+      // The budget counts body text alone. Each excerpt here is about sixty
+      // characters, so 100 admits one entry and refuses the second — while the
+      // dated, attributed, explained block it renders is longer than 100.
+      maxChars: 100,
     };
     const service = new MemoryNodeService(repository);
     const reported: Array<{ label: string; error: unknown }> = [];
@@ -183,10 +186,14 @@ test("RAG context obeys maxChars and hybrid retrieval falls back to keyword", as
       reportError: (label, error) => reported.push({ label, error }),
     });
 
-    assert.ok(context.recall.count >= 1);
-    assert.ok(delivered(context).length <= config.maxChars);
-    assert.match(delivered(context), /Orchid 0/);
-    assert.match(delivered(context), /Why recalled: keyword rank #\d+/);
+    assert.equal(context.recall.count, 1);
+    const text = delivered(context);
+    assert.match(text, /Orchid 0/);
+    assert.doesNotMatch(text, /Orchid 1/);
+    assert.match(text, /Why recalled: keyword rank #\d+/);
+    // Metadata rides outside the budget by design: the section bounds how much
+    // account it repeats, not how many pointers it carries.
+    assert.ok(text.length > config.maxChars);
     assert.equal(reported[0]?.label, "RAG primary search");
     assert.match(String(reported[0]?.error), /no embedding provider/u);
   });
