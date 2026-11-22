@@ -761,12 +761,20 @@ export function registerMemoryTools(
       const node = await service.edit(params.slug, input);
       const relativePath = `nodes/${node.slug}.md`;
       const edited = node.frontMatter.edited ?? "";
+      // `edited` is absent until something substantive changes, so a bare
+      // timestamp here would print "at ." on the common metadata-only edit.
+      // Say what the date is rather than that this call set it: the handler
+      // cannot tell without a second read, and the date is the useful half.
+      const editedNote =
+        edited === ""
+          ? "No substantive change (title, speaker and body are unchanged), so `edited` is unset."
+          : `Content last changed: ${edited}.`;
 
       return {
         content: [
           {
             type: "text",
-            text: `Updated memory "${node.slug}" at ${edited}.\nPath: ${relativePath}`,
+            text: `Updated memory "${node.slug}".\n${editedNote}\nPath: ${relativePath}`,
           },
         ],
         details: {
