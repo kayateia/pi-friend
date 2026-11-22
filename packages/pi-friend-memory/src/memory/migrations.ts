@@ -18,6 +18,7 @@ import {
   validateMemoryFiles,
 } from "./validation.ts";
 import { LEGACY_TOMBSTONE_PREFIX } from "./paths.ts";
+import { serializeMemoryNode } from "./schema.ts";
 import type { MemoryStore } from "./store.ts";
 
 /** Bookkeeping file recording which migrations this store has had. */
@@ -28,6 +29,9 @@ export const MIGRATIONS_BACKUP_DIRNAME = "backups";
 
 /** Identifier of the `emotional_flavor` → `emotional_flavour` rename. */
 export const FLAVOUR_MIGRATION_ID = "emotional-flavour-rename";
+
+/** Identifier of the pass that removes links naming no memory. */
+export const DANGLING_LINKS_MIGRATION_ID = "dangling-links-removed";
 
 /** Identifier of the pass that turns the single `source` into `sources`. */
 export const SOURCE_FIELD_MIGRATION_ID = "source-field-to-sources";
@@ -628,6 +632,115 @@ export function migrateSupersededFrontMatter(
   }
 
   return changed ? [...kept, ...lines.slice(closing)].join("\n") : undefined;
+}
+
+/**
+ * Removes links that name no canonical memory.
+ *
+ * Links had no check until one existed, so a store that predates it carries
+ * pointers at memories that were merged away or deleted years ago. Nothing can
+ * retarget them — a merged node's history entry does not record where its
+ * content went — and nothing can follow them, so the only honest repair is to
+ * take them out.
+ *
+ * Live areas only. A history entry is a snapshot of a node as it was, and the
+ * memories it pointed at then may legitimately be gone; editing one would make
+ * it a record of something that did not happen.
+ *
+ * This is the one migration that re-serialises rather than rewriting lines:
+ * removing an item from a YAML list is a structural edit, and every file here
+ * was written by the same serialiser, so the result differs only in its links.
+ */
+export async function pruneDanglingLinks(
+  store: MemoryStore,
+  agentDir: string = getAgentDir(),
+  options: { dryRun?: boolean; force?: boolean } = {},
+): Promise<MigrationOutcome | null> {
+  const statePath = migrationsPath(agentDir);
+  const state = await readMigrationState(statePath);
+  if (
+    state.applied.includes(DANGLING_LINKS_MIGRATION_ID) &&
+    options.force !== true
+  ) {
+    return null;
+  }
+
+  const scan = await scanDanglingLinks(store);
+  if (options.dryRun === true) {
+    return {
+      status: "dry-run",
+      scanned: scan.scanned,
+      changed: scan.pending.map((file) => file.path),
+      skipped: scan.skipped,
+    };
+  }
+
+  for (const file of scan.pending) {
+    await store.writeTextFile(file.path, file.rewritten);
+  }
+
+  const fresh = await readMigrationState(statePath);
+  fresh.applied = [...new Set([...fresh.applied, DANGLING_LINKS_MIGRATION_ID])];
+  await writeMigrationState(statePath, fresh);
+
+  return {
+    status: "applied",
+    scanned: scan.scanned,
+    changed: scan.pending.map((file) => file.path),
+    skipped: scan.skipped,
+  };
+}
+
+/** Walks the live areas for links that resolve to nothing. */
+async function scanDanglingLinks(store: MemoryStore): Promise<StoreScan> {
+  let scanned = 0;
+  const pending: PendingRewrite[] = [];
+  const skipped: Array<{ path: string; error: string }> = [];
+
+  const canonical = new Set<string>();
+  for (const relativePath of await listStoredMemoryFiles(store, "nodes")) {
+    canonical.add(slugForStoredPath(relativePath));
+  }
+
+  for (const directory of ["nodes", "staging"] as const) {
+    for (const relativePath of await listStoredMemoryFiles(store, directory)) {
+      scanned += 1;
+      let text: string;
+      try {
+        text = await store.readTextFile(relativePath);
+      } catch (error) {
+        skipped.push({ path: relativePath, error: formatError(error) });
+        continue;
+      }
+
+      let node;
+      try {
+        node = parseStoredMemoryFile(text, relativePath, directory);
+      } catch (error) {
+        skipped.push({ path: relativePath, error: formatError(error) });
+        continue;
+      }
+
+      const links = node.frontMatter.links.filter(
+        (link) => link !== node.slug && canonical.has(link),
+      );
+      if (links.length === node.frontMatter.links.length) {
+        continue;
+      }
+
+      node.frontMatter.links = links;
+      const rewritten = serializeMemoryNode(node);
+      try {
+        parseStoredMemoryFile(rewritten, relativePath, directory);
+      } catch (error) {
+        skipped.push({ path: relativePath, error: formatError(error) });
+        continue;
+      }
+      pending.push({ path: relativePath, rewritten });
+    }
+  }
+
+  return { scanned, pending, skipped };
 }
 
 /**

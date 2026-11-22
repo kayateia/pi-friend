@@ -144,11 +144,13 @@ emotional_flavour: warm              # free tag, not an enum: warm | matter-of-f
                                     #   eager | introspective | nostalgic | anxious | triumphant | venting |
                                     #   curious | vulnerable | prickly | sore | funny | ..., or your own
 tags: []                            # searchable keywords
-links: []                           # slugs of related nodes (the wiki mesh)
+links: []                           # slugs of related nodes; each must name an existing memory
 sources: []                         # where each change to this memory came from; see below
 edited: 2026-10-18T09:00:00Z        # optional timestamp for when the memory was edited
 ---
 ```
+
+**Links are checked, not decorated.** A link must name an existing canonical memory, a memory must not link to itself, and a link to a staging candidate is refused because a candidate is a proposal rather than a memory. A merge rewrites links that pointed at the absorbed nodes so they point at the survivor, and a deletion removes the links that pointed at the deleted node, so the store's links stay resolvable without anyone having to remember. `/memory-validate` reports any link that names nothing; the schema check alone does not, because a dangling link parses perfectly well.
 
 `sources` is an append-only record of where the memory came from, one entry per operation that changed it:
 

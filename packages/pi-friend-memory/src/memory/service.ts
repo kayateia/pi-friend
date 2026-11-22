@@ -23,6 +23,7 @@ import {
   isQuarantinedMemoryType,
   parseMemoryNode,
   serializeMemoryNode,
+  validateMemoryNodeFrontMatter,
 } from "./schema.ts";
 import { validateSlug } from "./paths.ts";
 import type { HistoryKind } from "./history.ts";
@@ -660,6 +661,14 @@ export class MemoryNodeService {
         },
       };
 
+      // Format first, so a malformed slug is reported by the schema; then the
+      // claim the links make about other memories.
+      validateMemoryNodeFrontMatter(
+        node.frontMatter as unknown as Record<string, unknown>,
+        slug,
+      );
+      await this.checkLinks(node.frontMatter.links, slug);
+
       await this.repository.write(node);
       return node;
     });
@@ -685,6 +694,10 @@ export class MemoryNodeService {
         throw new MemoryServiceError("Memory body must not be empty.");
       }
 
+      // A captured link is a guess, and a guess that names no memory is worth
+      // less than the draft it would otherwise cost.
+      const links = await this.existingLinks(input.links ?? [], slug);
+
       const timestamp = this.now().toISOString();
       const node: ParsedMemoryNode = {
         slug,
@@ -701,7 +714,7 @@ export class MemoryNodeService {
           status: "candidate",
           emotional_flavour: input.emotionalFlavour ?? "neutral",
           tags: input.tags ?? [],
-          links: input.links ?? [],
+          links,
           sources: input.origin === undefined ? [] : [{ ...input.origin }],
         },
       };
@@ -944,6 +957,10 @@ export class MemoryNodeService {
       for (const source of sources) {
         await this.repository.remove(source.node.slug, source.area);
       }
+      await this.retargetIncomingLinks(
+        new Set(sources.map((source) => source.node.slug)),
+        target.slug,
+      );
 
       if (rewriteError !== undefined) {
         logError("memory merge writer", new Error(rewriteError));
@@ -1091,6 +1108,17 @@ export class MemoryNodeService {
         body,
       };
 
+      // Checked before anything is archived: a refused edit must leave no
+      // history entry behind, or the store would carry a version of an edit
+      // that never happened.
+      validateMemoryNodeFrontMatter(
+        updated.frontMatter as unknown as Record<string, unknown>,
+        node.slug,
+      );
+      if (input.links !== undefined) {
+        await this.checkLinks(updated.frontMatter.links, node.slug);
+      }
+
       // The version being replaced is the only copy that exists until this
       // write lands, so it is stored first. The reason describes the edit that
       // ends it, which is why it belongs to the history file rather than to the
@@ -1210,6 +1238,11 @@ export class MemoryNodeService {
         await this.repository.store.removeTextFile(historyPath).catch(() => {});
         throw error;
       }
+
+      // A link to a memory that no longer exists is a claim nothing can check;
+      // removing it here keeps the store's links resolvable without asking
+      // anyone to remember.
+      await this.dropIncomingLinks(target.node.slug);
 
       return {
         slug: target.node.slug,
@@ -1517,6 +1550,122 @@ export class MemoryNodeService {
    * repaired attribution would be a second place to be right and would hide the
    * violation instead of preventing it.
    */
+  /**
+   * Refuses a link that names nothing, or names the node itself.
+   *
+   * A link is a claim that another memory exists and is related; a typo turns
+   * that claim into a dead end that nothing ever notices, because the one
+   * consumer of links ignores entries it cannot resolve. The check runs after
+   * the schema has validated the format, so a malformed slug is still reported
+   * with the schema's message rather than as a missing memory.
+   */
+  private async checkLinks(
+    links: readonly string[],
+    slug: string,
+  ): Promise<void> {
+    for (const link of links) {
+      if (link === slug) {
+        throw new MemoryServiceError(
+          `A memory must not link to itself ("${slug}").`,
+        );
+      }
+      if ((await this.repository.read(link, "canonical")) === null) {
+        throw new MemoryServiceError(
+          `Link "${link}" in ${slug} does not name an existing memory. Check the slug with memory_search, or create the memory first.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Keeps the links that resolve, dropping the rest without complaint.
+   *
+   * The capture path cannot stop for one bad guess: a draft is a proposal read
+   * from a conversation, and a link it invented should cost that link rather
+   * than the batch. Malformed slugs are left in place for the schema to refuse,
+   * because a test with a duplicated link is testing exactly that.
+   */
+  private async existingLinks(
+    links: readonly string[],
+    slug: string,
+  ): Promise<string[]> {
+    const kept: string[] = [];
+    for (const link of links) {
+      try {
+        validateSlug(link);
+      } catch {
+        kept.push(link);
+        continue;
+      }
+      if (link === slug) {
+        continue;
+      }
+      if ((await this.repository.read(link, "canonical")) !== null) {
+        kept.push(link);
+      }
+    }
+    return kept;
+  }
+
+  /**
+   * Removes every link to a slug that has just left the canonical area.
+   *
+   * Called after the node is gone, not before: a failed removal leaves the
+   * memory in place, and its links should stay as they were.
+   */
+  private async dropIncomingLinks(slug: string): Promise<void> {
+    for (const node of await this.repository.list("canonical")) {
+      if (!node.frontMatter.links.includes(slug)) {
+        continue;
+      }
+      node.frontMatter.links = node.frontMatter.links.filter(
+        (link) => link !== slug,
+      );
+      await this.repository.write(node);
+    }
+  }
+
+  /**
+   * Points links at a slug that has just left the canonical area to its
+   * replacement.
+   *
+   * A merge is a replacement, not a deletion: a memory that linked to one of
+   * the absorbed nodes should still be able to follow the thread, and the
+   * surviving node is where the content now lives. Links that land on the
+   * target twice are collapsed, and a node is never left linking to itself.
+   */
+  private async retargetIncomingLinks(
+    removed: ReadonlySet<string>,
+    target: string,
+  ): Promise<void> {
+    if (removed.size === 0) {
+      return;
+    }
+    for (const node of await this.repository.list("canonical")) {
+      if (node.slug === target) {
+        continue;
+      }
+      let changed = false;
+      const links: string[] = [];
+      for (const link of node.frontMatter.links) {
+        const next = removed.has(link) ? target : link;
+        if (next !== link) {
+          changed = true;
+        }
+        if (next !== node.slug && !links.includes(next)) {
+          links.push(next);
+        } else if (next === node.slug) {
+          changed = true;
+        }
+      }
+      if (!changed) {
+        continue;
+      }
+      node.frontMatter.links = links;
+      await this.repository.write(node);
+    }
+  }
+
   private speakersFor(
     speakers: readonly MemorySpeaker[],
     slug: string,
