@@ -65,6 +65,7 @@ import {
 import { ExternalIndexManager } from "./src/memory/external-index-manager.ts";
 import {
   convertSourceField,
+  pruneDanglingLinks,
   runPendingMigrations,
   stripCandidateEditedFields,
   stripSupersededFields,
@@ -828,6 +829,26 @@ async function reportMigrations(
     );
     return;
   }
+
+  // After the schema passes, because it parses every file: links written before
+  // they were checked cannot be retargeted, only removed.
+  try {
+    const linkOutcome = await pruneDanglingLinks(store);
+    if (linkOutcome !== null && linkOutcome.changed.length > 0) {
+      notify(
+        `pi-friend memory: removed dead links from ${linkOutcome.changed.length} of ${linkOutcome.scanned} live memories; each named nothing that still exists.`,
+        linkOutcome.skipped.length === 0 ? "info" : "warning",
+      );
+    }
+  } catch (error) {
+    logError("memory migration", error);
+    notify(
+      `pi-friend memory migration failed: ${formatErrorChain(error)}`,
+      "error",
+    );
+    return;
+  }
+
   if (outcome === null) {
     return;
   }
