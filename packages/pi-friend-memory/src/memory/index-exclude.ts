@@ -38,7 +38,7 @@ import { MEMORY_LAYOUT } from "./paths.ts";
  * is excluded from external indexing the moment its path is declared, and one
  * that removes storage stops being excluded without anyone remembering to edit a
  * second list. Entries are reduced to their top-level segment, so `nodes/`
- * covers `nodes/superseded/` while a sibling directory called `nodes-archive/`
+ * covers everything beneath it while a sibling directory called `nodes-archive/`
  * stays indexable.
  */
 export const RESERVED_MEMORY_PATHS: readonly string[] = [

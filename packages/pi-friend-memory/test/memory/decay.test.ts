@@ -35,8 +35,6 @@ function makeNode(
       status: "active",
       emotional_flavour: "neutral",
       tags: [],
-      supersedes: [],
-      superseded_by: "",
       links: [],
       source: "",
     },
@@ -95,9 +93,9 @@ test("only nodes whose weight changes are returned", () => {
   ]);
 });
 
-test("superseded and archived nodes weigh nothing", () => {
+test("archived nodes weigh nothing", () => {
   const gone = makeNode("gone", "2026-01-01T00:00:00Z");
-  gone.frontMatter.status = "superseded";
+  gone.frontMatter.status = "archived";
 
   assert.deepEqual(computeDecayUpdates([gone]), [
     { slug: "gone", decayWeight: 0 },

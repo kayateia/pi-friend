@@ -14,18 +14,11 @@ import {
   validateMemoryNodeLocation,
 } from "./schema.ts";
 import type { MemoryFileKind } from "./paths.ts";
-import { validateSlug } from "./paths.ts";
+import { LEGACY_TOMBSTONE_PREFIX, validateSlug } from "./paths.ts";
 import { MemoryStore } from "./store.ts";
 
 /** Node areas that have different lifecycle and location rules. */
 export type MemoryNodeArea = "canonical" | "staging";
-
-/**
- * Tombstoned nodes from before the history tree still live here. They are not
- * an area any more — nothing reads or writes them — but they must stay out of
- * the canonical listing until the migration deletes them.
- */
-const LEGACY_TOMBSTONE_PREFIX = "nodes/superseded/";
 
 /** One resolved node location. */
 interface NodeLocation {

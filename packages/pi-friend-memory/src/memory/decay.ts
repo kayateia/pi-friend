@@ -43,7 +43,6 @@ export function computeDecayUpdates(nodes: ParsedMemoryNode[]): DecayUpdate[] {
 
   for (const node of nodes) {
     const decayWeight =
-      node.frontMatter.status === "superseded" ||
       node.frontMatter.status === "archived"
         ? 0
         : volumeDecayWeight(nodes, node.frontMatter.last_used);

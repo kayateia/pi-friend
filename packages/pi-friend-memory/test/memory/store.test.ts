@@ -76,12 +76,12 @@ test("file inventory classifies memory and skips bookkeeping", async () => {
     const store = await MemoryStore.open({ agentDir, homeDir: agentDir });
     for (const relativePath of [
       "nodes/topic.md",
-      "nodes/superseded/old.md",
       "staging/candidate.md",
       "docs/reference.md",
       "MEMORY.md",
-      // Bookkeeping, none of which is memory: a sweep log, a preimage copy of a
-      // real node, a dropped candidate, and the vector index.
+      // Bookkeeping, none of which is memory: a legacy tombstone, a sweep log, a
+      // preimage copy of a real node, a dropped candidate, and the vector index.
+      "nodes/superseded/old.md",
       "sweeps/2026-10-19.md",
       "sweeps/preimages/2026-10-19T00-00-00-000Z/nodes/topic.md",
       "sweeps/dropped/2026-10-19/discarded.md",
@@ -96,7 +96,6 @@ test("file inventory classifies memory and skips bookkeeping", async () => {
       [
         ["MEMORY.md", "document"],
         ["docs/reference.md", "document"],
-        ["nodes/superseded/old.md", "node"],
         ["nodes/topic.md", "node"],
         ["staging/candidate.md", "staging-candidate"],
       ],
@@ -125,8 +124,6 @@ test("a preimage of a node never appears in the search index", async () => {
         "status: active",
         "emotional_flavour: neutral",
         "tags: []",
-        "supersedes: []",
-        "superseded_by: \"\"",
         "links: []",
         "source: \"\"",
         "---",

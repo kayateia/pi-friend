@@ -127,8 +127,12 @@ def convert_tombstone(text: str) -> str:
     front = re.sub(
         r"(?m)^decay_weight:[ \t]*0(?:\.0+)?[ \t]*$", "decay_weight: 1", front
     )
+    # The superseded concept is gone from the schema; a converted tombstone
+    # must not carry either key, or the strict parser refuses it.
+    front = re.sub(r"(?m)^superseded_by:[ \t]*.*\n", "", front)
+    front = re.sub(r"(?m)^supersedes:[ \t]*\[\][ \t]*\n", "", front)
     front = re.sub(
-        r"(?m)^superseded_by:[ \t]*.*$", 'superseded_by: ""', front
+        r"(?m)^supersedes:[ \t]*\n(?:[ \t]+-[ \t]?.*\n)*", "", front
     )
     body = strip_audit_section(body)
     return front + body

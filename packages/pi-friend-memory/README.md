@@ -49,8 +49,10 @@ it were current.
 
 Older stores kept the same material in five places — tombstones under
 `nodes/superseded/`, recovery records, sweep preimages, archived tombstones, and
-dropped candidates — and node bodies carried a `## audit` section. Run the
-migration once, after upgrading:
+dropped candidates — and node bodies carried a `## audit` section. The startup
+migration removes the retired `supersedes` / `superseded_by` keys and moves any
+tombstone that is left into `history/deleted/`; this script handles the rest. Run
+it once, after upgrading:
 
 ```sh
 python3 scripts/migrate-history.py            # prompts, then reports each step
@@ -523,7 +525,7 @@ entry's front matter rather than surfaced: it is for whoever goes looking at how
 a memory came to say what it says, and a banner would make a rare, quiet fact
 into an alarm.
 
-The code then unions tags, links, speakers and supersedes, writes the merged
+The code then unions tags, links and speakers, writes the merged
 node, and stores every input under `history/merged/` first. The writer
 never sees the front matter it cannot mangle, and never decides what merges —
 that belongs to the sweep, which is also where "a memory covers one key fact"

@@ -49,8 +49,6 @@ function makeNode(options: {
       status: options.status ?? "active",
       emotional_flavour: "matter-of-fact",
       tags: [],
-      supersedes: [],
-      superseded_by: "",
       links: [],
       source: "",
       ...(options.edited === undefined ? {} : { edited: options.edited }),

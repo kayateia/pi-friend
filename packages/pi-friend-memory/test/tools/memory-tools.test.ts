@@ -499,8 +499,6 @@ decay_weight: 1
 status: active
 emotional_flavour: warm
 tags: []
-supersedes: []
-superseded_by: ""
 links: []
 source: ""
 ---
@@ -574,8 +572,6 @@ function listNode(options: {
       decay_weight: 1,
       tags: [],
       links: [],
-      supersedes: [],
-      superseded_by: "",
       emotional_flavour: "neutral",
     },
   };
