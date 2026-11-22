@@ -95,6 +95,23 @@ const AGENTS_DESCRIPTION =
 const EMOTIONAL_FLAVOR_DESCRIPTION =
   "Free-form emotional tone of the memory, not a closed list. Examples: warm, matter-of-fact, playful, frustrated, eager, introspective, nostalgic, anxious, triumphant, venting, curious, vulnerable, prickly, sore, funny. Prefer the specific word when the memory has a tone — 'neutral' is what gets written when nothing is specified.";
 
+/**
+ * Types `memory_add` offers.
+ *
+ * `dream` is written by the dream pass from memories that already exist; a dream
+ * typed by hand is a fabricated dream, and capture, merge and staging all refuse
+ * one. `memory_edit` still accepts it — unadvertised — so a node that was
+ * mis-typed can be corrected, which is the one case where it is an honest value.
+ */
+const ADDABLE_MEMORY_TYPES = MEMORY_TYPES.filter(
+  (type) => !isQuarantinedMemoryType(type),
+);
+
+/** Narrows a caller-supplied string to an approved memory type. */
+function isMemoryType(value: string): value is MemoryType {
+  return (MEMORY_TYPES as readonly string[]).includes(value);
+}
+
 /** Structured details returned by a successful memory addition. */
 interface MemoryAddDetails {
   slug: string;
@@ -287,17 +304,18 @@ export function registerMemoryTools(
     description: [
       "Create one canonical memory node about a single topic.",
       "Use this when someone asks you to remember something or when a durable preference, fact, event, or relational detail should persist.",
-      "Provide speaker attribution for the humans and other non-AI participants who supplied the information. AI agents belong in agents, not speaker.",
-      "The slug is derived from the title unless an explicit slug is supplied.",
+      "Provide speaker attribution for the humans and other non-AI participants who supplied the information — attribution is part of what the memory claims, not decoration. AI agents belong in agents, not speaker.",
+      "The slug is derived from the title unless an explicit slug is supplied. It is permanent: no tool renames a memory, and an explicit slug that is already taken is an error rather than a new memory.",
     ].join("\n"),
     parameters: Type.Object({
       title: Type.String({
         description: "Short human-readable title for this single memory.",
       }),
       body: Type.String({
-        description: "Concise Markdown body containing the memory.",
+        description:
+          "The memory itself: one coherent fact, a few hundred characters (aim for ≤ 600). A body that has to say two unrelated things is two memories.",
       }),
-      type: StringEnum(MEMORY_TYPES, {
+      type: StringEnum(ADDABLE_MEMORY_TYPES, {
         description: "Semantic category for the memory.",
       }),
       speaker: Type.Array(
@@ -335,17 +353,19 @@ export function registerMemoryTools(
       ),
       tags: Type.Optional(
         Type.Array(Type.String(), {
-          description: "Searchable keywords.",
+          description:
+            "Short keywords someone would search for; a handful beats a paragraph.",
         }),
       ),
       links: Type.Optional(
         Type.Array(Type.String(), {
-          description: "Slugs of related memory nodes.",
+          description:
+            "JSON array of other memories' slugs, indicating memories related to this one.",
         }),
       ),
       source: Type.Optional(
         Type.String({
-          description: "Optional source pointer to a log or conversation.",
+          description: "Optional source pointer, conventionally `session:<id>`.",
         }),
       ),
     }),
@@ -634,8 +654,8 @@ export function registerMemoryTools(
     label: "Memory Edit",
     description: [
       "Edit one canonical memory node by slug.",
-      "Preserves creation, usage, and decay metadata, sets an edited timestamp, and appends an audit entry.",
-      "Supply only the fields that should change; body replaces the existing body before the audit line is appended.",
+      "Bumps `last_used`; bumps `edited` only when the memory's `title`, `speaker`, or `body` changes.",
+      "Supply only the fields that should change, replacing the previous value of each supplied field.",
     ].join("\n"),
     parameters: Type.Object({
       slug: Type.String({
@@ -643,17 +663,23 @@ export function registerMemoryTools(
       }),
       title: Type.Optional(
         Type.String({
-          description: "Replacement short title.",
+          description: "Replacement short title. The slug does not change.",
         }),
       ),
+      // Deliberately a free string with the four ordinary values in its
+      // description rather than a five-value enum: `dream` is accepted, for
+      // correcting a node that was mis-typed, but it must not be advertised.
+      // The handler validates, because one schema serves both jobs here.
       type: Type.Optional(
-        StringEnum(MEMORY_TYPES, {
-          description: "Replacement semantic category.",
+        Type.String({
+          description:
+            "Replacement semantic category: `fact`, `preference`, `event`, or `person-note`.",
         }),
       ),
       body: Type.Optional(
         Type.String({
-          description: "Replacement Markdown body, excluding the audit line.",
+          description:
+            "The complete replacement body; it replaces the whole body rather than appending to it.",
         }),
       ),
       speaker: Type.Optional(
@@ -678,12 +704,27 @@ export function registerMemoryTools(
       emotional_flavour: Type.Optional(
         Type.String({ description: EMOTIONAL_FLAVOR_DESCRIPTION }),
       ),
-      tags: Type.Optional(Type.Array(Type.String())),
-      links: Type.Optional(Type.Array(Type.String())),
-      source: Type.Optional(Type.String()),
+      tags: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "Short keywords someone would search for; a handful beats a paragraph.",
+        }),
+      ),
+      links: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "JSON array of other memories' slugs, indicating memories related to this one.",
+        }),
+      ),
+      source: Type.Optional(
+        Type.String({
+          description: "Optional source pointer, conventionally `session:<id>`.",
+        }),
+      ),
       reason: Type.Optional(
         Type.String({
-          description: "Short reason recorded in the audit trail.",
+          description:
+            "Short reason, recorded in the history entry for the version being replaced.",
         }),
       ),
     }),
@@ -698,6 +739,13 @@ export function registerMemoryTools(
       params,
     ): Promise<AgentToolResult<MemoryEditDetails>> {
       const service = requireService(getService);
+      // The parameter is a free string so `dream` can stay accepted without
+      // being advertised; this is where the value is actually checked.
+      if (params.type !== undefined && !isMemoryType(params.type)) {
+        throw new Error(
+          `Unknown memory type "${params.type}"; expected one of fact, preference, event, person-note.`,
+        );
+      }
       const input: MemoryEditInput = {
         title: params.title,
         type: params.type,
