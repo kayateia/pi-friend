@@ -976,9 +976,18 @@ export class MemoryNodeService {
   /**
    * Updates editable node fields, preserving creation state.
    *
-   * An edit is a use as well as a change: the node was opened and reasoned
-   * about, so `last_used` moves with `edited`. `use_count` does not — it counts
-   * reads, not authorship.
+   * An edit is always a use: the node was opened and reasoned about, so
+   * `last_used` moves on every edit and `use_count` does not — it counts reads,
+   * not authorship.
+   *
+   * `edited` is the content timestamp, and it moves only when the memory's
+   * claim changes: its `title`, its `speaker`, or its `body`. `type`, `tags`,
+   * `links`, `emotional_flavour`, `source` and `agents` are filing, graph edges,
+   * tone and provenance — true statements about the memory, but not the memory
+   * saying something different — and a value supplied unchanged is not a change
+   * at all. The recency section, the listings, the search date filters and the
+   * sync conflict rule all read this date, so a retag that moved it would make
+   * an old memory look like something that had just happened.
    */
   async edit(slug: string, input: MemoryEditInput): Promise<ParsedMemoryNode> {
     return this.runSerialized(async () => {
@@ -1013,11 +1022,7 @@ export class MemoryNodeService {
         links: [...node.frontMatter.links],
       };
 
-      if (input.title !== undefined) frontMatter.title = input.title;
       if (input.type !== undefined) frontMatter.type = input.type;
-      if (input.speaker !== undefined) {
-        frontMatter.speaker = this.speakersFor(input.speaker, node.slug);
-      }
       if (input.agents !== undefined) frontMatter.agents = input.agents;
       if (input.emotionalFlavour !== undefined) {
         frontMatter.emotional_flavour = input.emotionalFlavour;
@@ -1025,8 +1030,23 @@ export class MemoryNodeService {
       if (input.tags !== undefined) frontMatter.tags = input.tags;
       if (input.links !== undefined) frontMatter.links = input.links;
       if (input.source !== undefined) frontMatter.source = input.source;
-      frontMatter.edited = timestamp;
-      frontMatter.last_used = timestamp;
+
+      // The three fields that change what the memory claims. Each is compared
+      // rather than merely supplied: sending back the value the node already
+      // has is a write, not a change, and it must not look like one.
+      let substantive = false;
+
+      if (input.title !== undefined && input.title !== node.frontMatter.title) {
+        frontMatter.title = input.title;
+        substantive = true;
+      }
+      if (input.speaker !== undefined) {
+        const speaker = this.speakersFor(input.speaker, node.slug);
+        frontMatter.speaker = speaker;
+        if (!sameSpeakers(speaker, node.frontMatter.speaker)) {
+          substantive = true;
+        }
+      }
 
       let body = node.body;
       if (input.body !== undefined) {
@@ -1035,7 +1055,15 @@ export class MemoryNodeService {
           throw new MemoryServiceError("Memory body must not be empty.");
         }
         body = `\n${updatedBody}\n`;
+        if (updatedBody !== node.body.trim()) {
+          substantive = true;
+        }
       }
+
+      if (substantive) {
+        frontMatter.edited = timestamp;
+      }
+      frontMatter.last_used = timestamp;
       const updated: ParsedMemoryNode = {
         slug: node.slug,
         frontMatter,
@@ -1574,6 +1602,32 @@ export class MemoryNodeService {
     );
   }
 
+}
+
+/**
+ * Compares two attribution lists by their normalised content.
+ *
+ * Both sides arrive collapsed — the stored node from the parser, the supplied
+ * list from `speakersFor` — so this is an equality check, not a merge. A note
+ * that is absent and a note that is empty are the same attribution; the schema
+ * writes one and reads the other back.
+ */
+function sameSpeakers(
+  left: readonly MemorySpeaker[],
+  right: readonly MemorySpeaker[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((speaker, index) => {
+    const other = right[index];
+    return (
+      other !== undefined &&
+      speaker.name === other.name &&
+      speaker.confident === other.confident &&
+      (speaker.note ?? "") === (other.note ?? "")
+    );
+  });
 }
 
 /** Deeply clones mutable node fields before a lifecycle mutation. */

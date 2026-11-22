@@ -740,10 +740,20 @@ async function reportMigrations(
   try {
     const supersededOutcome = await stripSupersededFields(store);
     if (supersededOutcome !== null && supersededOutcome.changed.length > 0) {
+      // Say only what happened: on most stores there are no tombstones left to
+      // move, and a notice that claims a move invites a search for files that
+      // were never there.
+      const moved = supersededOutcome.changed.filter((path) =>
+        path.startsWith("history/deleted/"),
+      ).length;
+      const movedNote =
+        moved === 0
+          ? ""
+          : ` Moved ${moved} tombstoned node${moved === 1 ? "" : "s"} into history/deleted.`;
       notify(
         `pi-friend memory: removed the retired supersedes fields from ${
           supersededOutcome.changed.length
-        } of ${supersededOutcome.scanned} files, and moved the last tombstoned nodes into history/deleted.`,
+        } of ${supersededOutcome.scanned} files.${movedNote}`,
         supersededOutcome.skipped.length === 0 ? "info" : "warning",
       );
     }
