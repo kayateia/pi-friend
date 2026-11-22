@@ -66,6 +66,7 @@ import { ExternalIndexManager } from "./src/memory/external-index-manager.ts";
 import {
   runPendingMigrations,
   stripCandidateEditedFields,
+  stripSupersededFields,
 } from "./src/memory/migrations.ts";
 import type { MemoryStore } from "./src/memory/store.ts";
 import { MemoryNodeRepository } from "./src/memory/repository.ts";
@@ -731,6 +732,29 @@ async function reportMigrations(
       console.error(message);
     }
   };
+
+  // First of all: `supersedes` and `superseded_by` are no longer schema keys,
+  // so every stored file that still carries them fails the strict parser. Both
+  // later passes parse files, so they would report the whole store as damaged
+  // rather than migrating it.
+  try {
+    const supersededOutcome = await stripSupersededFields(store);
+    if (supersededOutcome !== null && supersededOutcome.changed.length > 0) {
+      notify(
+        `pi-friend memory: removed the retired supersedes fields from ${
+          supersededOutcome.changed.length
+        } of ${supersededOutcome.scanned} files, and moved the last tombstoned nodes into history/deleted.`,
+        supersededOutcome.skipped.length === 0 ? "info" : "warning",
+      );
+    }
+  } catch (error) {
+    logError("memory migration", error);
+    notify(
+      `pi-friend memory migration failed: ${formatErrorChain(error)}`,
+      "error",
+    );
+    return;
+  }
 
   // Before the rename: the strict parser refuses a staging file carrying
   // `edited`, and the rename migration would report such a file as unparseable

@@ -17,6 +17,7 @@ import {
   STORED_MEMORY_DIRECTORIES,
   validateMemoryFiles,
 } from "./validation.ts";
+import { LEGACY_TOMBSTONE_PREFIX } from "./paths.ts";
 import type { MemoryStore } from "./store.ts";
 
 /** Bookkeeping file recording which migrations this store has had. */
@@ -27,6 +28,9 @@ export const MIGRATIONS_BACKUP_DIRNAME = "backups";
 
 /** Identifier of the `emotional_flavor` → `emotional_flavour` rename. */
 export const FLAVOUR_MIGRATION_ID = "emotional-flavour-rename";
+
+/** Identifier of the pass that removes the superseded concept. */
+export const SUPERSEDED_MIGRATION_ID = "superseded-fields-removed";
 
 /**
  * Identifier of the pass that removes `edited` from staging candidates.
@@ -420,6 +424,207 @@ export function removeEditedKey(text: string): string | undefined {
   return rewriteFrontMatterLines(text, (line) =>
     line.startsWith("edited:") ? null : undefined,
   );
+}
+
+/**
+ * Removes `supersedes` and `superseded_by` from stored node files.
+ *
+ * Both keys described a relationship the schema no longer has: the history tree
+ * records what replaced what, and nothing ever wrote a non-empty value. Every
+ * stored file still carries the two lines, because they were part of the
+ * required front matter — so removing them from the schema makes the strict
+ * parser refuse the entire store until this pass has run.
+ *
+ * A line-level rewrite, not a parse and re-serialise: a history entry's value is
+ * that it is a faithful copy of what existed, and only these two keys change.
+ * The result is parsed before it is written, and a file that was already damaged
+ * is reported and left alone rather than rewritten into something that looks
+ * damaged differently.
+ *
+ * Files under the legacy tombstone directory are moved into `history/deleted/`
+ * with the two fields they carried reset, which is what the old tombstone meant:
+ * a deleted node, restored to the state it had before deletion.
+ */
+export async function stripSupersededFields(
+  store: MemoryStore,
+  agentDir: string = getAgentDir(),
+  options: { dryRun?: boolean; force?: boolean } = {},
+): Promise<MigrationOutcome | null> {
+  const statePath = migrationsPath(agentDir);
+  const state = await readMigrationState(statePath);
+  if (
+    state.applied.includes(SUPERSEDED_MIGRATION_ID) &&
+    options.force !== true
+  ) {
+    return null;
+  }
+
+  const scan = await scanSupersededFields(store);
+  if (options.dryRun === true) {
+    return {
+      status: "dry-run",
+      scanned: scan.scanned,
+      changed: scan.pending.map((file) => file.path),
+      skipped: scan.skipped,
+    };
+  }
+
+  for (const file of scan.pending) {
+    if (file.destination !== undefined) {
+      await store.writeTextFile(file.destination, file.rewritten);
+      await store.removeTextFile(file.path);
+      continue;
+    }
+    await store.writeTextFile(file.path, file.rewritten);
+  }
+  await store.removeDirectoryIfEmpty("nodes/superseded");
+
+  const fresh = await readMigrationState(statePath);
+  fresh.applied = [...new Set([...fresh.applied, SUPERSEDED_MIGRATION_ID])];
+  await writeMigrationState(statePath, fresh);
+
+  return {
+    status: "applied",
+    scanned: scan.scanned,
+    changed: scan.pending.map(
+      (file) => file.destination ?? file.path,
+    ),
+    skipped: scan.skipped,
+  };
+}
+
+/** One file the superseded migration will rewrite, and where it lands. */
+interface SupersededRewrite {
+  path: string;
+  rewritten: string;
+  /** Set for a legacy tombstone, which leaves its directory for `history/`. */
+  destination?: string;
+}
+
+/** Walks every stored area for files carrying the retired keys. */
+async function scanSupersededFields(
+  store: MemoryStore,
+): Promise<{
+  scanned: number;
+  pending: SupersededRewrite[];
+  skipped: Array<{ path: string; error: string }>;
+}> {
+  let scanned = 0;
+  const pending: SupersededRewrite[] = [];
+  const skipped: Array<{ path: string; error: string }> = [];
+
+  for (const directory of STORED_MEMORY_DIRECTORIES) {
+    for (const relativePath of await listStoredMemoryFiles(store, directory)) {
+      scanned += 1;
+      const normalized = relativePath.split(path.sep).join("/");
+      const tombstone = normalized.startsWith(LEGACY_TOMBSTONE_PREFIX);
+      let text: string;
+      try {
+        text = await store.readTextFile(relativePath);
+      } catch (error) {
+        skipped.push({ path: relativePath, error: formatError(error) });
+        continue;
+      }
+
+      const rewritten = migrateSupersededFrontMatter(text, tombstone);
+      if (rewritten === undefined) {
+        continue;
+      }
+
+      const destination = tombstone
+        ? `history/deleted/${path.posix.basename(normalized)}`
+        : undefined;
+      // A tombstone archived before must not overwrite the copy already kept:
+      // the first conversion is the one a person restored from.
+      if (
+        destination !== undefined &&
+        (await store.readTextFileIfExists(destination)) !== null
+      ) {
+        skipped.push({
+          path: relativePath,
+          error: `${destination} already exists; the tombstone was left in place.`,
+        });
+        continue;
+      }
+      try {
+        parseStoredMemoryFile(
+          rewritten,
+          destination ?? relativePath,
+          destination === undefined ? directory : "history",
+        );
+      } catch (error) {
+        skipped.push({ path: relativePath, error: formatError(error) });
+        continue;
+      }
+      pending.push({
+        path: relativePath,
+        rewritten,
+        ...(destination === undefined ? {} : { destination }),
+      });
+    }
+  }
+
+  return { scanned, pending, skipped };
+}
+
+/**
+ * Removes the retired keys from one file's opening front-matter block.
+ *
+ * A block-style `supersedes:` list is removed with its items; an indented line
+ * that is not a list item is left alone, because it belongs to whatever key
+ * precedes it and not to this one. `status: superseded` and a zero decay weight
+ * are rewritten only when converting a legacy tombstone, where they described a
+ * deleted node rather than a live one.
+ */
+export function migrateSupersededFrontMatter(
+  text: string,
+  tombstone = false,
+): string | undefined {
+  const lines = text.split("\n");
+  if (lines[0]?.trim() !== "---") {
+    return undefined;
+  }
+  const closing = lines.findIndex(
+    (line, position) => position > 0 && line.trim() === "---",
+  );
+  if (closing < 0) {
+    return undefined;
+  }
+
+  const head = lines.slice(0, closing);
+  const kept: string[] = [];
+  let changed = false;
+  for (let index = 0; index < head.length; index += 1) {
+    const line = head[index]!;
+    if (line.startsWith("superseded_by:")) {
+      changed = true;
+      continue;
+    }
+    if (line.startsWith("supersedes:")) {
+      changed = true;
+      if (line.slice("supersedes:".length).trim() === "") {
+        let next = index + 1;
+        while (next < head.length && /^\s+-\s?/.test(head[next]!)) {
+          next += 1;
+        }
+        index = next - 1;
+      }
+      continue;
+    }
+    if (tombstone && /^status:\s*superseded\s*$/.test(line)) {
+      changed = true;
+      kept.push("status: active");
+      continue;
+    }
+    if (tombstone && /^decay_weight:\s*0(?:\.0+)?\s*$/.test(line)) {
+      changed = true;
+      kept.push("decay_weight: 1");
+      continue;
+    }
+    kept.push(line);
+  }
+
+  return changed ? [...kept, ...lines.slice(closing)].join("\n") : undefined;
 }
 
 async function readMigrationState(statePath: string): Promise<MigrationState> {

@@ -31,16 +31,6 @@ import * as path from "node:path";
  */
 export const MEMORY_LAYOUT = {
   nodes: { relativePath: "nodes", kind: "directory", searchable: true },
-  /**
-   * Obsolete: tombstoned nodes were stored here before the history tree. Kept
-   * unsearchable so an unmigrated store does not index the copies as memories;
-   * remove this entry once the migration deletes the directory.
-   */
-  supersededNodes: {
-    relativePath: "nodes/superseded",
-    kind: "directory",
-    searchable: false,
-  },
   staging: { relativePath: "staging", kind: "directory", searchable: true },
   history: { relativePath: "history", kind: "directory", searchable: false },
   sweeps: { relativePath: "sweeps", kind: "directory", searchable: false },
@@ -53,6 +43,18 @@ export const MEMORY_LAYOUT = {
 
 /** One entry name in {@link MEMORY_LAYOUT}. */
 export type MemoryLayoutEntry = keyof typeof MEMORY_LAYOUT;
+
+/**
+ * Legacy tombstone directory, from before the `history/` tree.
+ *
+ * Nothing creates it, writes it or reads it as an area. The guard exists for one
+ * hazard only: a file arriving from an old backup or a stale host would
+ * otherwise be classified as a node and either fail validation or be indexed as
+ * an ordinary document. The startup migration moves any such file into
+ * `history/deleted/`; this keeps the window before that run — and any later
+ * reappearance — invisible to search.
+ */
+export const LEGACY_TOMBSTONE_PREFIX = "nodes/superseded/";
 
 /** Canonical locations inside one configured memory tree. */
 export type MemoryPaths = {
@@ -99,6 +101,10 @@ export function createMemoryPaths(root: string, configPath: string): MemoryPaths
  * unsearchable even though it looks like a node path.
  */
 export function isSearchablePath(relativePath: string): boolean {
+  const normalized = relativePath.split(path.sep).join("/");
+  if (normalized.startsWith(LEGACY_TOMBSTONE_PREFIX)) {
+    return false;
+  }
   const topLevel = relativePath.split(/[\\/]+/u)[0] ?? relativePath;
   for (const entry of Object.values(MEMORY_LAYOUT)) {
     if (entry.relativePath === topLevel) {

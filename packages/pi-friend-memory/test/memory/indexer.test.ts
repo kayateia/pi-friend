@@ -44,8 +44,6 @@ decay_weight: 1
 status: candidate
 emotional_flavour: neutral
 tags: []
-supersedes: []
-superseded_by: ""
 links: []
 source: ""
 ---
@@ -148,8 +146,6 @@ decay_weight: 1
 status: active
 emotional_flavour: neutral
 tags: []
-supersedes: []
-superseded_by: ""
 links: []
 source: ""
 ---
@@ -171,8 +167,6 @@ decay_weight: 1
 status: active
 emotional_flavour: neutral
 tags: []
-supersedes: []
-superseded_by: ""
 links: []
 source: ""
 ---

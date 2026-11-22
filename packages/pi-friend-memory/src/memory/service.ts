@@ -347,8 +347,6 @@ export class MemoryNodeService {
           status: "active",
           emotional_flavour: "dreamlike",
           tags: ["dream"],
-          supersedes: [],
-          superseded_by: "",
           links: slugs,
           source: input.source ?? `dream; sources: ${slugs.join(", ")}`,
         },
@@ -643,8 +641,6 @@ export class MemoryNodeService {
           status: "active",
           emotional_flavour: input.emotionalFlavour ?? "neutral",
           tags: input.tags ?? [],
-          supersedes: [],
-          superseded_by: "",
           links: input.links ?? [],
           source: input.source ?? "",
         },
@@ -691,8 +687,6 @@ export class MemoryNodeService {
           status: "candidate",
           emotional_flavour: input.emotionalFlavour ?? "neutral",
           tags: input.tags ?? [],
-          supersedes: [],
-          superseded_by: "",
           links: input.links ?? [],
           source: input.source ?? "",
         },
@@ -757,7 +751,6 @@ export class MemoryNodeService {
       promoted.frontMatter.decay_weight = 1;
       promoted.frontMatter.last_used = now;
       promoted.frontMatter.edited = now;
-      promoted.frontMatter.superseded_by = "";
 
       await this.repository.write(promoted, "canonical");
       await this.repository.remove(candidate.slug, "staging");
@@ -925,10 +918,6 @@ export class MemoryNodeService {
           ...merged.frontMatter.links,
           ...candidate.frontMatter.links,
         ]).filter((link) => link !== target.slug);
-        merged.frontMatter.supersedes = unique([
-          ...merged.frontMatter.supersedes,
-          ...candidate.frontMatter.supersedes,
-        ]);
       }
 
       await this.repository.write(merged, "canonical");
@@ -1021,7 +1010,6 @@ export class MemoryNodeService {
         speaker: node.frontMatter.speaker.map((speaker) => ({ ...speaker })),
         agents: [...node.frontMatter.agents],
         tags: [...node.frontMatter.tags],
-        supersedes: [...node.frontMatter.supersedes],
         links: [...node.frontMatter.links],
       };
 
@@ -1597,7 +1585,6 @@ function cloneNode(node: ParsedMemoryNode): ParsedMemoryNode {
       speaker: node.frontMatter.speaker.map((speaker) => ({ ...speaker })),
       agents: [...node.frontMatter.agents],
       tags: [...node.frontMatter.tags],
-      supersedes: [...node.frontMatter.supersedes],
       links: [...node.frontMatter.links],
     },
     body: node.body,

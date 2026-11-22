@@ -11,6 +11,7 @@ import * as path from "node:path";
 import test from "node:test";
 import {
   classifyMemoryMarkdown,
+  isSearchablePath,
   MemoryPathError,
   resolveWithin,
   validateSlug,
@@ -38,6 +39,12 @@ test("resolveWithin rejects absolute paths and traversal", () => {
     () => resolveWithin(root, "nodes/../MEMORY.md"),
     MemoryPathError,
   );
+});
+
+test("a legacy tombstone path is classified as a node but never searched", () => {
+  assert.equal(classifyMemoryMarkdown("nodes/superseded/old.md"), "node");
+  assert.equal(isSearchablePath("nodes/superseded/old.md"), false);
+  assert.equal(isSearchablePath("nodes/warm-memory.md"), true);
 });
 
 test("memory Markdown files are classified by location", () => {

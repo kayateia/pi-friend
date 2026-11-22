@@ -39,7 +39,6 @@ export function isQuarantinedMemoryType(type: MemoryType): boolean {
 export const MEMORY_STATUSES = [
   "active",
   "candidate",
-  "superseded",
   "archived",
 ] as const;
 
@@ -66,8 +65,6 @@ export interface MemoryNodeFrontMatter {
   status: MemoryStatus;
   emotional_flavour: string;
   tags: string[];
-  supersedes: string[];
-  superseded_by: string;
   links: string[];
   source: string;
   edited?: string;
@@ -134,8 +131,6 @@ const FRONT_MATTER_KEYS = new Set([
   "status",
   "emotional_flavour",
   "tags",
-  "supersedes",
-  "superseded_by",
   "links",
   "source",
   "edited",
@@ -167,8 +162,6 @@ const REQUIRED_FRONT_MATTER_KEYS = [
   "status",
   "emotional_flavour",
   "tags",
-  "supersedes",
-  "superseded_by",
   "links",
 ] as const;
 
@@ -290,12 +283,6 @@ export function validateMemoryNodeFrontMatter(
     slug,
   ).trim();
   const tags = parseStringList(value.tags, "tags", slug);
-  const supersedes = parseSlugList(value.supersedes, "supersedes", slug);
-  const supersededBy = requireSlugOrEmpty(
-    value.superseded_by,
-    "superseded_by",
-    slug,
-  );
   const links = parseSlugList(value.links, "links", slug);
   const source =
     value.source === undefined
@@ -331,33 +318,6 @@ export function validateMemoryNodeFrontMatter(
     );
   }
 
-  if (supersedes.includes(slug)) {
-    throw new MemorySchemaError(
-      `${slug} must not supersede itself.`,
-      { field: "supersedes" },
-    );
-  }
-  if (supersededBy === slug) {
-    throw new MemorySchemaError(
-      `${slug} must not be superseded by itself.`,
-      { field: "superseded_by" },
-    );
-  }
-
-  const hasSupersededStatus = status === "superseded";
-  if (supersededBy !== "" && !hasSupersededStatus) {
-    throw new MemorySchemaError(
-      `A node with superseded_by must have status "superseded" in ${slug}.`,
-      { field: "superseded_by" },
-    );
-  }
-  if (hasSupersededStatus && decayWeight !== 0) {
-    throw new MemorySchemaError(
-      `Superseded node ${slug} must have decay_weight 0.`,
-      { field: "decay_weight" },
-    );
-  }
-
   return {
     title,
     type,
@@ -370,8 +330,6 @@ export function validateMemoryNodeFrontMatter(
     status,
     emotional_flavour: emotionalFlavour,
     tags,
-    supersedes,
-    superseded_by: supersededBy,
     links,
     source,
     ...(edited === undefined ? {} : { edited }),
@@ -442,16 +400,6 @@ export function validateMemoryNodeLocation(
       { field: "status" },
     );
   }
-  if (
-    location.kind === "node" &&
-    !normalizedPath.startsWith("nodes/superseded/") &&
-    node.frontMatter.status === "superseded"
-  ) {
-    throw new MemorySchemaError(
-      `Superseded node ${node.slug} must live under nodes/superseded/.`,
-      { field: "status" },
-    );
-  }
 
   if (
     location.kind === "staging-candidate" &&
@@ -472,16 +420,6 @@ export function validateMemoryNodeLocation(
   if (carriesHistoryFields.length > 0 && !normalizedPath.startsWith("history/")) {
     throw new MemorySchemaError(
       `${node.slug} carries history-only front matter outside history/: ${carriesHistoryFields.join(", ")}.`,
-    );
-  }
-
-  if (
-    normalizedPath.startsWith("nodes/superseded/") &&
-    node.frontMatter.status !== "superseded"
-  ) {
-    throw new MemorySchemaError(
-      `Node ${node.slug} in nodes/superseded must have status "superseded".`,
-      { field: "status" },
     );
   }
 }
@@ -510,8 +448,6 @@ export function serializeMemoryNode(node: ParsedMemoryNode): string {
     status: frontMatter.status,
     emotional_flavour: frontMatter.emotional_flavour,
     tags: frontMatter.tags,
-    supersedes: frontMatter.supersedes,
-    superseded_by: frontMatter.superseded_by,
     links: frontMatter.links,
     source: frontMatter.source,
     ...(frontMatter.edited === undefined ? {} : { edited: frontMatter.edited }),
@@ -694,22 +630,6 @@ function validateSlugForSchema(
     }
     throw error;
   }
-}
-
-/** Validates an empty string or a canonical memory slug. */
-function requireSlugOrEmpty(
-  value: unknown,
-  field: string,
-  slug: string,
-): string {
-  if (typeof value !== "string") {
-    throw fieldTypeError(field, "a string", slug);
-  }
-
-  const normalized = value.trim();
-  return normalized === ""
-    ? ""
-    : validateSlugForSchema(normalized, field, slug);
 }
 
 /** Requires a non-empty trimmed string. */

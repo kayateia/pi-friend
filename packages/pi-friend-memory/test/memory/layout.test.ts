@@ -33,7 +33,6 @@ test("layout creation is idempotent and preserves existing content", async () =>
 
     for (const directoryPath of [
       paths.nodes,
-      paths.supersededNodes,
       paths.staging,
       paths.sweeps,
       paths.index,

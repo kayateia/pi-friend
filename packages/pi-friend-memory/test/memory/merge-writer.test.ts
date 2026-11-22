@@ -205,8 +205,6 @@ test("a source's date is edited when present, created otherwise", () => {
       status: "active" as const,
       emotional_flavour: "neutral",
       tags: [],
-      supersedes: [],
-      superseded_by: "",
       links: [],
       source: "",
     },
