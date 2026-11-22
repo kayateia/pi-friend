@@ -42,7 +42,7 @@ function makeNode(options: {
       emotional_flavour: "warm",
       tags: ["repository"],
       links: [],
-      source: "",
+      sources: [],
     },
   };
 }
@@ -104,7 +104,7 @@ test("repository lists only files belonging to the requested area", async () => 
         "emotional_flavour: neutral",
         "tags: []",
         "links: []",
-        'source: ""',
+        "sources: []",
         "---",
         "",
         "A deleted memory.",

@@ -78,7 +78,7 @@ test("a written version reads back with its history field, outside search", asyn
         emotional_flavour: "neutral",
         tags: ["kitchen"],
         links: [],
-        source: "",
+        sources: [],
         history_reason: "Corrected the shelf",
       },
     };
@@ -135,7 +135,7 @@ test("history-only front matter is refused on a live node", async () => {
             emotional_flavour: "neutral",
             tags: [],
             links: [],
-            source: "",
+            sources: [],
             history_reason: "leaked",
           },
         }),
@@ -163,7 +163,7 @@ function makeNode(slug: string): ParsedMemoryNode {
       emotional_flavour: "neutral",
       tags: [],
       links: [],
-      source: "",
+      sources: [],
     },
   };
 }

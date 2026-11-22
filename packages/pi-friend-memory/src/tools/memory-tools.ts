@@ -10,6 +10,8 @@ import { StringEnum, Type } from "@earendil-works/pi-ai";
 import type {
   AgentToolResult,
   ExtensionAPI,
+  ExtensionToolContext,
+  SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import {
   MEMORY_TYPES,
@@ -22,6 +24,7 @@ import {
   type RagRetrievalDiagnostics,
 } from "../memory/rag.ts";
 import type {
+  MemorySource,
   MemoryStatus,
   MemoryType,
   ParsedMemoryNode,
@@ -110,6 +113,48 @@ const ADDABLE_MEMORY_TYPES = MEMORY_TYPES.filter(
 /** Narrows a caller-supplied string to an approved memory type. */
 function isMemoryType(value: string): value is MemoryType {
   return (MEMORY_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Builds the origin record a tool writes for a change it makes.
+ *
+ * The entry id is the user message that began the run: the branch is walked
+ * back from the leaf to the first message entry whose role is `user`. A tool
+ * called from a session with no such entry — a script, a resumed session whose
+ * branch starts mid-run — still records the session, which is a place a reader
+ * can open; the entry is the narrowing, not the identity.
+ *
+ * `ctx` is absent when a tool is invoked outside a session (the tests call
+ * `execute` directly), and then no record is written rather than a false one.
+ */
+function operationSource(
+  ctx: ExtensionToolContext | undefined,
+  action: MemorySource["action"],
+): MemorySource | undefined {
+  const sessionId = ctx?.sessionManager?.getSessionId();
+  if (sessionId === undefined || sessionId === "") {
+    return undefined;
+  }
+  const entryId = lastUserEntryId(ctx?.sessionManager?.getBranch() ?? []);
+  return {
+    action,
+    sessionId,
+    ...(entryId === undefined ? {} : { entryId }),
+  };
+}
+
+/** The most recent user message on a branch, if there is one. */
+function lastUserEntryId(entries: readonly SessionEntry[]): string | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (
+      entry?.type === "message" &&
+      entry.message.role === "user"
+    ) {
+      return entry.id;
+    }
+  }
+  return undefined;
 }
 
 /** Structured details returned by a successful memory addition. */
@@ -363,11 +408,6 @@ export function registerMemoryTools(
             "JSON array of other memories' slugs, indicating memories related to this one.",
         }),
       ),
-      source: Type.Optional(
-        Type.String({
-          description: "Optional source pointer, conventionally `session:<id>`.",
-        }),
-      ),
     }),
     annotations: {
       readOnlyHint: false,
@@ -378,8 +418,12 @@ export function registerMemoryTools(
     async execute(
       _toolCallId,
       params,
+      _signal,
+      _onUpdate,
+      ctx,
     ): Promise<AgentToolResult<MemoryAddDetails>> {
       const service = requireService(getService);
+      const origin = operationSource(ctx, "add");
       const input: MemoryAddInput = {
         title: params.title,
         type: params.type,
@@ -390,7 +434,7 @@ export function registerMemoryTools(
         emotionalFlavour: params.emotional_flavour,
         tags: params.tags,
         links: params.links,
-        source: params.source,
+        ...(origin === undefined ? {} : { origin }),
       };
       const node = await service.add(input);
       const relativePath = `nodes/${node.slug}.md`;
@@ -566,10 +610,15 @@ export function registerMemoryTools(
     async execute(
       _toolCallId,
       params,
+      _signal,
+      _onUpdate,
+      ctx,
     ): Promise<AgentToolResult<MemoryMergeDetails>> {
       const service = requireService(getService);
+      const origin = operationSource(ctx, "merge");
       const result = await service.mergeCandidates(params.target, params.sources, {
         ...(params.body === undefined ? {} : { body: params.body }),
+        ...(origin === undefined ? {} : { origin }),
       });
 
       const removed = [
@@ -716,11 +765,6 @@ export function registerMemoryTools(
             "JSON array of other memories' slugs, indicating memories related to this one.",
         }),
       ),
-      source: Type.Optional(
-        Type.String({
-          description: "Optional source pointer, conventionally `session:<id>`.",
-        }),
-      ),
       reason: Type.Optional(
         Type.String({
           description:
@@ -737,6 +781,9 @@ export function registerMemoryTools(
     async execute(
       _toolCallId,
       params,
+      _signal,
+      _onUpdate,
+      ctx,
     ): Promise<AgentToolResult<MemoryEditDetails>> {
       const service = requireService(getService);
       // The parameter is a free string so `dream` can stay accepted without
@@ -746,6 +793,9 @@ export function registerMemoryTools(
           `Unknown memory type "${params.type}"; expected one of fact, preference, event, person-note.`,
         );
       }
+      // The origin is written only if this edit turns out to be substantive;
+      // the service decides, because that is where the comparison lives.
+      const origin = operationSource(ctx, "edit");
       const input: MemoryEditInput = {
         title: params.title,
         type: params.type,
@@ -755,8 +805,8 @@ export function registerMemoryTools(
         emotionalFlavour: params.emotional_flavour,
         tags: params.tags,
         links: params.links,
-        source: params.source,
         reason: params.reason,
+        ...(origin === undefined ? {} : { origin }),
       };
       const node = await service.edit(params.slug, input);
       const relativePath = `nodes/${node.slug}.md`;

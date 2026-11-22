@@ -38,7 +38,7 @@ status: candidate
 emotional_flavour: neutral
 tags: []
 links: []
-source: ""
+sources: []
 ${options.edited === undefined ? "" : `edited: ${options.edited}\n`}---
 
 ${options.body ?? `Body of ${slug}.`}

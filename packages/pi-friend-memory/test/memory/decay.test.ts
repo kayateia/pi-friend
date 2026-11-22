@@ -36,7 +36,7 @@ function makeNode(
       emotional_flavour: "neutral",
       tags: [],
       links: [],
-      source: "",
+      sources: [],
     },
   };
 }

@@ -52,6 +52,44 @@ export interface MemorySpeaker {
   note?: string;
 }
 
+/** Operations that record where a memory's content came from. */
+export const SOURCE_ACTIONS = ["add", "edit", "merge"] as const;
+
+/** One approved origin action. */
+export type SourceAction = (typeof SOURCE_ACTIONS)[number];
+
+/**
+ * One recorded origin of a change to a memory.
+ *
+ * Optional keys rather than a discriminated union: the record is written by
+ * different callers (a tool, a capture pass, a sweep) and each supplies what it
+ * knows. `sessionId` and `entryId` travel together — a session without the user
+ * message that began the run identifies nothing a reader can open. `sweepRunId`
+ * is the alternative for work that ran in a sweep, and the two are mutually
+ * exclusive. `other` is the last resort, used only by the migration that
+ * converted the single free-text `source` field this replaced.
+ */
+export interface MemorySource {
+  action: SourceAction;
+  /** Session the change happened in. */
+  sessionId?: string;
+  /** User-message entry that began the run which made the change. */
+  entryId?: string;
+  /** Sweep run that made the change. */
+  sweepRunId?: string;
+  /** Migrated free text that fits none of the identifying fields. */
+  other?: string;
+}
+
+/** The keys a source record may carry; anything else is a typo. */
+const SOURCE_KEYS = new Set([
+  "action",
+  "sessionId",
+  "entryId",
+  "sweepRunId",
+  "other",
+]);
+
 /** Strict front matter stored at the top of every memory node. */
 export interface MemoryNodeFrontMatter {
   title: string;
@@ -66,7 +104,7 @@ export interface MemoryNodeFrontMatter {
   emotional_flavour: string;
   tags: string[];
   links: string[];
-  source: string;
+  sources: MemorySource[];
   edited?: string;
   /**
    * History-only fields, present in files under `history/` and never expected
@@ -132,7 +170,7 @@ const FRONT_MATTER_KEYS = new Set([
   "emotional_flavour",
   "tags",
   "links",
-  "source",
+  "sources",
   "edited",
 ]);
 
@@ -284,10 +322,8 @@ export function validateMemoryNodeFrontMatter(
   ).trim();
   const tags = parseStringList(value.tags, "tags", slug);
   const links = parseSlugList(value.links, "links", slug);
-  const source =
-    value.source === undefined
-      ? ""
-      : requireString(value.source, "source", slug).trim();
+  const sources =
+    value.sources === undefined ? [] : parseSources(value.sources, slug);
   const edited =
     value.edited === undefined
       ? undefined
@@ -331,7 +367,7 @@ export function validateMemoryNodeFrontMatter(
     emotional_flavour: emotionalFlavour,
     tags,
     links,
-    source,
+    sources,
     ...(edited === undefined ? {} : { edited }),
     ...(historyReason === undefined ? {} : { history_reason: historyReason }),
     ...(historyConflict === undefined
@@ -449,7 +485,7 @@ export function serializeMemoryNode(node: ParsedMemoryNode): string {
     emotional_flavour: frontMatter.emotional_flavour,
     tags: frontMatter.tags,
     links: frontMatter.links,
-    source: frontMatter.source,
+    sources: frontMatter.sources,
     ...(frontMatter.edited === undefined ? {} : { edited: frontMatter.edited }),
     ...(frontMatter.history_reason === undefined
       ? {}
@@ -575,6 +611,101 @@ function parseStringList(
 }
 
 /** Parses and validates a unique list of memory slugs. */
+/**
+ * Parses the recorded origins of a memory.
+ *
+ * Every property is checked rather than trusted: a record is a claim about
+ * where something came from, so a half-filled one is worse than none. The
+ * grouping rules — session with the entry that began the run, sweep run on its
+ * own, at least one identifying field — are what make a record usable by a
+ * reader later; without them it would be a timestamp with no way to follow it.
+ */
+function parseSources(value: unknown, slug: string): MemorySource[] {
+  if (!Array.isArray(value)) {
+    throw fieldTypeError("sources", "an array", slug);
+  }
+
+  return value.map((item, index) => {
+    const field = `sources[${index}]`;
+    if (!isRecord(item)) {
+      throw new MemorySchemaError(
+        `${field} in ${slug} must be an object.`,
+        { field },
+      );
+    }
+    for (const key of Object.keys(item)) {
+      if (!SOURCE_KEYS.has(key)) {
+        throw new MemorySchemaError(
+          `Unknown key "${key}" in ${field} for ${slug}.`,
+          { field },
+        );
+      }
+    }
+
+    const action = requireEnum(item.action, SOURCE_ACTIONS, `${field}.action`, slug);
+    const sessionId = optionalSourceString(item.sessionId, `${field}.sessionId`, slug);
+    const entryId = optionalSourceString(item.entryId, `${field}.entryId`, slug);
+    const sweepRunId = optionalSourceString(item.sweepRunId, `${field}.sweepRunId`, slug);
+    const other = optionalSourceString(item.other, `${field}.other`, slug);
+
+    // The entry narrows a session to the run that made the change, and is
+    // written whenever it can be resolved. A session on its own is still a
+    // place a reader can open, so it is allowed; an entry with no session names
+    // nothing at all.
+    if (entryId !== undefined && sessionId === undefined) {
+      throw new MemorySchemaError(
+        `${field} in ${slug} must carry sessionId with entryId.`,
+        { field },
+      );
+    }
+    if (sweepRunId !== undefined && sessionId !== undefined) {
+      throw new MemorySchemaError(
+        `${field} in ${slug} must not carry a sweepRunId beside a sessionId.`,
+        { field },
+      );
+    }
+    if (
+      sessionId === undefined &&
+      sweepRunId === undefined &&
+      other === undefined
+    ) {
+      throw new MemorySchemaError(
+        `${field} in ${slug} must identify a session, a sweep run, or an origin note.`,
+        { field },
+      );
+    }
+
+    return {
+      action,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(entryId === undefined ? {} : { entryId }),
+      ...(sweepRunId === undefined ? {} : { sweepRunId }),
+      ...(other === undefined ? {} : { other }),
+    };
+  });
+}
+
+/** Requires an optional non-empty trimmed string. */
+function optionalSourceString(
+  value: unknown,
+  field: string,
+  slug: string,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw fieldTypeError(field, "a string", slug);
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    throw new MemorySchemaError(`${field} in ${slug} must not be empty.`, {
+      field,
+    });
+  }
+  return trimmed;
+}
+
 function parseSlugList(
   value: unknown,
   field: string,

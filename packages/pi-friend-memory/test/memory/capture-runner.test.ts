@@ -157,6 +157,7 @@ test("a refused draft is reshaped, and the rest of the pass completes", async ()
         },
       ],
       "session-test",
+      "entry-start",
       async (rejected) => {
         assert.deepEqual(
           rejected.map((entry) => entry.draft.title),
@@ -204,6 +205,7 @@ test("a draft with no content is never sent to the model to invent", async () =>
     service,
     [{ title: "Empty", type: "fact", body: "   ", speaker: [] }],
     "session-test",
+    undefined,
     async () => {
       repairCalls += 1;
       return [];

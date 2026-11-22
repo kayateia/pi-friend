@@ -37,7 +37,9 @@ tags:
   - friendship
 links:
   - shared-ritual
-source: "journal/2026-10-18.md"
+sources:
+  - action: add
+    other: "journal/2026-10-18.md"
 edited: 2026-10-18T10:00:00Z
 ---
 `;
@@ -67,15 +69,18 @@ test("valid nodes parse into strict typed metadata with an exact body", () => {
   assert.equal(node.body, VALID_BODY);
 });
 
-test("optional source, speaker note, and edited timestamp may be omitted", () => {
+test("optional sources, speaker note, and edited timestamp may be omitted", () => {
   const text = VALID_FRONT_MATTER
     .replace('    note: "fronting at the time"\n', "")
-    .replace('source: "journal/2026-10-18.md"\n', "")
+    .replace(
+      'sources:\n  - action: add\n    other: "journal/2026-10-18.md"\n',
+      "",
+    )
     .replace("edited: 2026-10-18T10:00:00Z\n", "")
     .concat("\nbody\n");
   const node = parseMemoryNode(text, "warm-memory");
 
-  assert.equal(node.frontMatter.source, "");
+  assert.deepEqual(node.frontMatter.sources, []);
   assert.equal(node.frontMatter.edited, undefined);
   assert.equal("note" in node.frontMatter.speaker[0]!, false);
 });
@@ -231,6 +236,75 @@ test("slug lists reject invalid values, duplicates, and self-reference", () => {
         "warm-memory",
       ),
     /Duplicate value/,
+  );
+});
+
+test("source records are grouped and complete", () => {
+  const withSources = (yaml: string): string =>
+    `${VALID_FRONT_MATTER.replace(
+      'sources:\n  - action: add\n    other: "journal/2026-10-18.md"',
+      yaml,
+    )}\nbody\n`;
+
+  // A session and the entry that began the run.
+  assert.doesNotThrow(() =>
+    parseMemoryNode(
+      withSources("sources:\n  - action: add\n    sessionId: s1\n    entryId: e1"),
+      "warm-memory",
+    ),
+  );
+  // A sweep run is the alternative, and pairs with nothing.
+  assert.doesNotThrow(() =>
+    parseMemoryNode(
+      withSources("sources:\n  - action: merge\n    sweepRunId: run-1"),
+      "warm-memory",
+    ),
+  );
+  // An entry with no session names nothing.
+  assert.throws(
+    () =>
+      parseMemoryNode(
+        withSources("sources:\n  - action: add\n    entryId: e1"),
+        "warm-memory",
+      ),
+    /must carry sessionId with entryId/u,
+  );
+  // A sweep run beside a session is two origins in one record.
+  assert.throws(
+    () =>
+      parseMemoryNode(
+        withSources(
+          "sources:\n  - action: add\n    sessionId: s1\n    sweepRunId: run-1",
+        ),
+        "warm-memory",
+      ),
+    /must not carry a sweepRunId beside a sessionId/u,
+  );
+  // A record that identifies nothing is a timestamp with no way to follow it.
+  assert.throws(
+    () =>
+      parseMemoryNode(
+        withSources("sources:\n  - action: add"),
+        "warm-memory",
+      ),
+    /must identify a session, a sweep run, or an origin note/u,
+  );
+  // An action outside the vocabulary, and a key that is a typo.
+  assert.throws(
+    () =>
+      parseMemoryNode(
+        withSources("sources:\n  - action: delete\n    sessionId: s1"),
+        "warm-memory",
+      ),
+    /sources\[0\]\.action in warm-memory must be one of/u,
+  );
+  assert.throws(
+    () =>
+      parseMemoryNode(
+        withSources("sources:\n  - action: add\n    session: s1"),
+        "warm-memory",
+      ),
+    /Unknown key "session"/u,
   );
 });
 

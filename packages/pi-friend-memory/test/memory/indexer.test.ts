@@ -45,7 +45,7 @@ status: candidate
 emotional_flavour: neutral
 tags: []
 links: []
-source: ""
+sources: []
 ---
 
 Candidate body.
@@ -147,7 +147,7 @@ status: active
 emotional_flavour: neutral
 tags: []
 links: []
-source: ""
+sources: []
 ---
 
 Body.
@@ -168,7 +168,7 @@ status: active
 emotional_flavour: neutral
 tags: []
 links: []
-source: ""
+sources: []
 ---
 
 Body.

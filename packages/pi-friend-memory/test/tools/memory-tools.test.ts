@@ -500,7 +500,7 @@ status: active
 emotional_flavour: warm
 tags: []
 links: []
-source: ""
+sources: []
 ---
 
 Body.

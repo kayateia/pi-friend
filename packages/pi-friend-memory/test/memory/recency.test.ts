@@ -50,7 +50,7 @@ function makeNode(options: {
       emotional_flavour: "matter-of-fact",
       tags: [],
       links: [],
-      source: "",
+      sources: [],
       ...(options.edited === undefined ? {} : { edited: options.edited }),
     },
   };

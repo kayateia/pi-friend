@@ -206,7 +206,7 @@ test("a source's date is edited when present, created otherwise", () => {
       emotional_flavour: "neutral",
       tags: [],
       links: [],
-      source: "",
+      sources: [],
     },
   };
   assert.equal(toMergeSource(base).date, "2026-10-19T20:00:00.000Z");
