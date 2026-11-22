@@ -102,6 +102,10 @@ export interface MemorySearchResult {
   decayWeight?: number;
   /** Attribution recorded on the node; absent for documents. */
   speaker?: readonly MemorySpeaker[];
+  /** Keywords recorded on the node; empty for documents. */
+  tags: string[];
+  /** Outgoing links recorded on the node; empty for documents. */
+  links: string[];
   modifiedAt?: string;
   provenance?: string;
   snippet: string;
@@ -283,6 +287,8 @@ function baseResult(
       ? {}
       : { decayWeight: file.decayWeight }),
     ...(file.speaker === undefined ? {} : { speaker: file.speaker }),
+    tags: [...file.tags],
+    links: [...(file.links ?? [])],
     ...(file.modifiedAt === undefined ? {} : { modifiedAt: file.modifiedAt }),
     ...(file.provenance === undefined ? {} : { provenance: file.provenance }),
     snippet,
